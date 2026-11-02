@@ -193,7 +193,7 @@ const tick = (s: AppState, now: number): AppState => {
       reminders: next.reminders.map((r) => (willFire(r) ? { ...r, firedAt: now } : r)),
       reminderFlash: { text: firing.map((r) => r.title).join("、"), at: now },
     };
-    for (const r of firing) deviceSend?.({ type: "reminder", text: r.showOnDevice ? r.title : undefined, count: firing.length, ts: now });
+    for (const r of firing) deviceSend?.({ type: "reminder", text: r.showOnDevice ? r.deviceText?.trim() || r.title : undefined, count: firing.length, ts: now });
   }
 
   if (next.timer && !next.timer.expired && now >= next.timer.endsAt) next = { ...next, timer: { ...next.timer, expired: true } };

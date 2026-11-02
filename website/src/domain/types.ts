@@ -38,7 +38,8 @@ export interface Reminder {
   at?: string; // HH:mm when trigger === "time"
   day: string; // YYYY-MM-DD 归属日；早于今天 = 昨天遗留
   firedAt?: number; // 已触发提醒的时刻；延后时清除以便重新触发
-  showOnDevice: boolean;
+  showOnDevice: boolean; // 允许正文上屏
+  deviceText?: string; // 设备屏上实际显示的文字；留空时默认显示标题
   createdBy: "manual" | "voice";
   done: boolean;
 }

@@ -13,6 +13,7 @@ export function RemindersPage() {
   const [trigger, setTrigger] = useState<ReminderTrigger>("time");
   const [at, setAt] = useState("17:30");
   const [showOnDevice, setShowOnDevice] = useState(false);
+  const [deviceText, setDeviceText] = useState("");
   const today = dateKey(Date.now());
   const yesterday = dateKey(startOfDay(Date.now()) - 1);
   const open = s.reminders.filter((r) => !r.done);
@@ -22,14 +23,14 @@ export function RemindersPage() {
 
   const add = () => {
     if (!title.trim()) { toast({ message: "先填写提醒内容" }); return; }
-    actions.addReminder({ title: title.trim(), trigger, at: trigger === "time" ? at : undefined, showOnDevice, createdBy: "manual" });
+    actions.addReminder({ title: title.trim(), trigger, at: trigger === "time" ? at : undefined, showOnDevice, deviceText: deviceText.trim() || undefined, createdBy: "manual" });
     setTitle("");
     toast({ message: "提醒已创建" });
   };
 
   const dayLabel = (r: Reminder) => (r.day === today ? "今天" : r.day === yesterday ? "昨天" : r.day);
   const desc = (r: Reminder) =>
-    `${r.trigger === "afterOffwork" ? "收工后提醒" : `${dayLabel(r)} ${r.at}`} · ${r.showOnDevice ? "在设备上显示" : "仅网页和手机可见"}${r.createdBy === "voice" ? " · 语音创建" : ""}${r.firedAt ? " · 已提醒" : ""}`;
+    `${r.trigger === "afterOffwork" ? "收工后提醒" : `${dayLabel(r)} ${r.at}`} · ${r.showOnDevice ? (r.deviceText ? `设备显示“${r.deviceText}”` : "在设备上显示") : "仅网页和手机可见"}${r.createdBy === "voice" ? " · 语音创建" : ""}${r.firedAt ? " · 已提醒" : ""}`;
 
   const row = (r: Reminder) => (
     <RowItem
@@ -80,14 +81,15 @@ export function RemindersPage() {
         </div>
         <div className="stack">
           <Card>
-            <CardHeader title="新建提醒" />
+            <CardHeader title="新建待办" />
             <div className="card-b form">
               <label>内容<input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：提交本周周报" onKeyDown={(e) => e.key === "Enter" && add()} /></label>
               <div className="form-label">什么时候提醒
                 <Segmented value={trigger} options={[{ value: "time", label: "指定时间" }, { value: "afterOffwork", label: "收工后" }]} onChange={setTrigger} />
               </div>
               {trigger === "time" && <label>时间<input className="input" type="time" value={at} onChange={(e) => setAt(e.target.value)} /></label>}
-              <SettingRow title="在设备上显示正文" desc="关闭时设备只显示“有 1 条提醒”"><Toggle checked={showOnDevice} onChange={setShowOnDevice} /></SettingRow>
+              <SettingRow title="在设备上显示" desc="关闭时设备只提示“有 1 条提醒”，正文不上屏"><Toggle checked={showOnDevice} onChange={setShowOnDevice} /></SettingRow>
+              {showOnDevice && <label>设备上显示的文字<input className="input" value={deviceText} onChange={(e) => setDeviceText(e.target.value)} placeholder="留空时显示待办内容" /></label>}
               <button className="btn btn-primary" onClick={add}><Plus />创建</button>
             </div>
           </Card>
