@@ -57,6 +57,8 @@ export interface AppState {
   reminders: Reminder[];
   /** 最近一次触发的提醒（UI 据此弹 toast） */
   reminderFlash?: { text: string; at: number };
+  /** "昨天遗留"演示数据是否已注入；持久化标记，删除后不再注入 */
+  seededLeftover?: boolean;
   members: Member[];
   settings: Settings;
   timer?: TimerState;
@@ -89,7 +91,7 @@ const createInitial = (now: number): AppState => {
     pausedToday: false,
     offworkToday: status === "off",
     lastAppliedNode: node ? `${dateKey(now)}:${node.id}` : undefined,
-    reminders: seedReminders(dateKey(now)),
+    reminders: seedReminders(now),
     members: seedMembers(now),
     settings: defaultSettings,
     breakAccumMs: 13 * 60_000,
@@ -113,8 +115,17 @@ const load = (now: number): AppState => {
       const past = saved.historySegments ? undefined : seedPast(now);
       return {
         ...createInitial(now), ...saved, breakSyncedAt: 0, settings: { ...defaultSettings, ...saved.settings, keys },
-        // 旧版本提醒没有归属日字段：按今天迁移
-        reminders: (saved.reminders ?? []).map((r) => ({ ...r, day: r.day ?? dateKey(now) })),
+        // 旧版本提醒没有归属日字段：按今天迁移；并一次性注入两条"昨天遗留"演示数据（标记持久化在状态里，幂等、删除后不再注入）
+        reminders: [
+          ...(saved.seededLeftover
+            ? []
+            : [
+                { id: "seed-leftover-1", title: "回复客户邮件", trigger: "time" as const, at: "16:30", day: dateKey(startOfDay(now) - 1), showOnDevice: false, createdBy: "manual" as const, done: false },
+                { id: "seed-leftover-2", title: "确认打印机驱动", trigger: "time" as const, at: "10:00", day: dateKey(startOfDay(now) - 1), showOnDevice: false, createdBy: "manual" as const, done: false },
+              ]),
+          ...(saved.reminders ?? []).map((r) => ({ ...r, day: r.day ?? dateKey(now) })),
+        ],
+        seededLeftover: true,
         ...(past ? { history: past.history, historySegments: past.segments } : {}),
       };
     }
