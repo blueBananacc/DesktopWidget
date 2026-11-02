@@ -33,7 +33,7 @@ function ReminderFields({ d, set, now, offAt, offworkToday, connected, titleRef,
     ...(offAt ? [{ label: "收工前 15 分钟", at: hhmm(atToday(offAt, now) - 15 * 60_000) }] : []),
   ].filter((q) => atToday(q.at, now) > now && atToday(q.at, now) < startOfDay(now) + 86_400_000);
   const passed = d.trigger === "time" && atToday(d.at, now) <= now;
-  const screenText = d.showOnDevice ? d.deviceText.trim() || d.title.trim() || "待办内容" : "有 1 条提醒";
+  const screenText = d.showOnDevice ? d.deviceText.trim() || d.title.trim() || "待办内容" : "有 1 条待办";
   return (
     <>
       <label>内容
@@ -57,7 +57,7 @@ function ReminderFields({ d, set, now, offAt, offworkToday, connected, titleRef,
       ) : (
         <span className="hint" style={{ fontWeight: 500 }}>{offworkToday ? "今天已收工，保存后会立即提醒。" : "进入“已下班”状态时提醒，适合下班路上要办的事。"}</span>
       )}
-      <SettingRow title="在设备上显示" desc="关闭时设备只提示“有 1 条提醒”，正文不上屏"><Toggle checked={d.showOnDevice} onChange={(showOnDevice) => set({ showOnDevice })} /></SettingRow>
+      <SettingRow title="在设备上显示" desc="关闭时设备只提示“有 1 条待办”，正文不上屏"><Toggle checked={d.showOnDevice} onChange={(showOnDevice) => set({ showOnDevice })} /></SettingRow>
       {d.showOnDevice && (
         <div className="form-label">
           <span style={{ display: "flex", justifyContent: "space-between" }}>设备上显示的文字<span className="hint num">{d.deviceText.length}/{DEVICE_TEXT_MAX}</span></span>
@@ -65,9 +65,9 @@ function ReminderFields({ d, set, now, offAt, offworkToday, connected, titleRef,
         </div>
       )}
       <div className="form-label">设备上的样子
-        <div className="oled" style={{ width: "100%", maxWidth: 260 }} aria-label={`设备预览：有新提醒，${screenText}`}>
+        <div className="oled" style={{ width: "100%", maxWidth: 260 }} aria-label={`设备预览：有新待办，${screenText}`}>
           <div>
-            <div className="big">有新提醒</div>
+            <div className="big">有新待办</div>
             <div className="sub">{screenText.slice(0, DEVICE_TEXT_MAX)}</div>
           </div>
           <div className="ico" />

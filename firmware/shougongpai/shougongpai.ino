@@ -250,10 +250,10 @@ void drawOled() {
   // 提醒画面最优先；其次休息提醒：覆盖状态显示，任意按键提前关闭
   const bool remind = millis() < remindUntil;
   const bool notice = !remind && millis() < breakNoticeUntil;
-  const char* main = remind ? "有新提醒" : notice ? "起来活动一下" : scrMain.c_str();
+  const char* main = remind ? "有新待办" : notice ? "起来活动一下" : scrMain.c_str();
   char subBuf[48];
   const char* sub = remind
-    ? (remindText[0] ? remindText : (snprintf(subBuf, sizeof subBuf, "有 %d 条提醒", remindCount), subBuf))
+    ? (remindText[0] ? remindText : (snprintf(subBuf, sizeof subBuf, "有 %d 条待办", remindCount), subBuf))
     : notice ? "下一轮计时已开始" : scrSub.c_str();
   oled.clearBuffer();
   // 左上角连接状态点

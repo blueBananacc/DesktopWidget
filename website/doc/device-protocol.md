@@ -12,7 +12,7 @@
 - BLE 下单条按 180 字节分包（`bleTransport.ts` 的 `CHUNK`）；固件按行重组
 - **UUID 已正式启用**（`protocol.ts` 底部三个 NUS 风格 UUID，固件同款）；设备广播名 `Shougong-A1`，前缀 `Shougong`
 - 上行（设备→网页）：hello（客户端订阅 TX 后发）/ touch(left|right) / shortcut(single|long) / offworkKey / knob（暂留）/ breakState（休息提醒计时镜像：minutes+accumMs+enabled+offToday+due，连接后、每 10s、到点各发一次）/ wantTime（设备未校时请求 time）/ segments{phase:begin|end} + seg{status,start,end?}（今日状态区间全量推送：连接后、状态变化 ~2s 内、每 10 分钟兜底）
-- 下行（网页→设备）：state（status+screen+sub+led+brightness 0–100）/ schedule（**设备自治执行，v0.4.0 起**：kind=repeat 按 weekdays / kind=date 按单日；nodes={time,status} 最多 32 个；override=当天单日计划覆盖主表；paused=网页今日暂停；mode=next|today 为手动干预恢复策略——next=手动切状态挂起到下个节点，today=手动切状态即今日暂停；**今天进入过 off 即视今日计划完成，后续所有节点作废**，手动切回工作/其他状态不受影响且正常记录；跨天全部重置）/ time（epoch ms + tzOffsetMin，驱动 OLED 时钟与计划表；设备需先校时一次，之后不断电即可断连自治）/ break（minutes+enabled+offToday，可选 accumMs；仅用户操作时发送，连接快照不携带）/ keys（k1–k4 动作映射：offwork/focus25/pauseToday/状态 id；设备离线时按键按此执行，连接时按键只上报事件由网页 runKey 统一处理）/ reminder（网页待办到点/收工后触发时下发：text 仅当用户允许上屏才携带正文，否则只给 count；设备 OLED 显示"有新提醒+正文/有 N 条提醒"15s + RGB 状态色 4Hz 闪烁 3s，任意按键提前关闭）
+- 下行（网页→设备）：state（status+screen+sub+led+brightness 0–100）/ schedule（**设备自治执行，v0.4.0 起**：kind=repeat 按 weekdays / kind=date 按单日；nodes={time,status} 最多 32 个；override=当天单日计划覆盖主表；paused=网页今日暂停；mode=next|today 为手动干预恢复策略——next=手动切状态挂起到下个节点，today=手动切状态即今日暂停；**今天进入过 off 即视今日计划完成，后续所有节点作废**，手动切回工作/其他状态不受影响且正常记录；跨天全部重置）/ time（epoch ms + tzOffsetMin，驱动 OLED 时钟与计划表；设备需先校时一次，之后不断电即可断连自治）/ break（minutes+enabled+offToday，可选 accumMs；仅用户操作时发送，连接快照不携带）/ keys（k1–k4 动作映射：offwork/focus25/pauseToday/状态 id；设备离线时按键按此执行，连接时按键只上报事件由网页 runKey 统一处理）/ reminder（网页待办到点/收工后触发时下发：text 仅当用户允许上屏才携带正文，否则只给 count；设备 OLED 显示"有新待办+正文/有 N 条待办"15s + RGB 状态色 4Hz 闪烁 3s，任意按键提前关闭）
 
 ## 设备端事件映射（固件 v0.1）
 
