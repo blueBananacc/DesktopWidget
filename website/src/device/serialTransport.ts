@@ -18,7 +18,13 @@ export class SerialTransport implements DeviceTransport {
   private discCb?: () => void;
   private helloRes?: (name: string) => void;
   private buffer = "";
+  private queue: InboundMessage[] = []; // onMessage 挂载前收到的消息排队（sync 握手后设备立刻回推 hello+区间）
   private closed = false;
+
+  private emit(m: InboundMessage) {
+    if (this.msgCb) this.msgCb(m);
+    else this.queue.push(m);
+  }
 
   async connect() {
     if (!serialSupported()) throw new Error("当前浏览器不支持网页串口，请使用电脑版 Chrome 或 Edge");
@@ -61,7 +67,7 @@ export class SerialTransport implements DeviceTransport {
               this.helloRes(m.name);
               this.helloRes = undefined;
             }
-            this.msgCb?.(m);
+            this.emit(m);
           } catch {
             /* 固件日志等非 JSON 行忽略 */
           }
@@ -88,6 +94,8 @@ export class SerialTransport implements DeviceTransport {
 
   onMessage(cb: (m: InboundMessage) => void) {
     this.msgCb = cb;
+    for (const m of this.queue) cb(m);
+    this.queue = [];
   }
   onDisconnect(cb: () => void) {
     this.discCb = cb;

@@ -435,6 +435,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const transportRef = useRef<DeviceTransport | undefined>(undefined);
   const stateRef = useRef(s);
   stateRef.current = s;
+  // 真机连接后等待设备推送区间（segments）采纳完毕前，不向设备下发 state —— 设备是当前状态的权威，网页跟着设备走
+  const awaitAdoptionRef = useRef(false);
 
   const set = useCallback((fn: (s: AppState) => AppState) => setS(fn), []);
 
@@ -464,7 +466,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     const main = st.schedules.find((x) => x.id === st.activeScheduleId && x.kind === "repeat");
     const eff = scheduleForDay(st.schedules, st.activeScheduleId, Date.now());
     const nodesOf = (sc: typeof eff) => (sc ? sortedNodes(sc).map(({ time, status }) => ({ time, status })) : []);
-    await t.send(toOutbound(st));
+    // 等待设备区间采纳期间不下发 state，避免网页旧状态覆盖设备当前状态
+    if (!awaitAdoptionRef.current) await t.send(toOutbound(st));
     await t.send({ type: "time", epoch: Date.now(), tzOffsetMin: -new Date().getTimezoneOffset() });
     // 生效计划表下发设备自治执行：主表=选中的重复计划；今天的单日计划作 override 优先执行、跨天自动失效
     await t.send({
@@ -537,19 +540,23 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           if (m.phase === "begin") {
             pendingSegs = [];
           } else {
+            awaitAdoptionRef.current = false; // 收到设备区间 → 后续快照可正常携带 state（已采纳设备为准）
             const list: StatusSegment[] = pendingSegs.map((x) => ({ status: x.status, source: "device", start: x.start, end: x.end }));
             pendingSegs = [];
-            // 设备是时长记录权威：整表替换今日区间与当前状态，网页断连期间的改动被设备值覆盖
-            set((s) => {
-              if (!list.length) return s;
+            // 设备是时长记录权威：整表替换今日区间与当前状态，网页断连期间的改动被设备值覆盖。
+            // 同步写 stateRef：紧随其后的 sendSnapshot 回显必须携带已采纳的设备状态，否则又把网页旧状态推回去
+            if (list.length) {
               const last = list[list.length - 1];
-              return {
+              const s = stateRef.current;
+              const next: AppState = {
                 ...s,
                 segments: list,
                 current: { id: last.status, source: "device", since: last.start }, // 丢弃旧 until/note，避免过期"预计结束"横幅
                 offworkToday: s.offworkToday || last.status === "off",
               };
-            });
+              stateRef.current = next;
+              set(() => next);
+            }
           }
           break;
         case "seg":
@@ -571,13 +578,16 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const t: DeviceTransport = kind === "mock" ? new MockTransport() : kind === "ble" ? new BleTransport() : new SerialTransport();
       setDevice((d) => ({ ...d, kind, state: "connecting" }));
       try {
+        // 真机：等设备推送区间并采纳后才恢复下发 state（模拟设备无此流程，立即下发）
+        awaitAdoptionRef.current = kind !== "mock";
         const name = await t.connect();
+        transportRef.current = t; // 先就位：onMessage 会冲刷握手期间排队的消息，其中的回调需要 deviceSend 可用
         t.onMessage(handleInbound);
         t.onDisconnect(() => setDevice((d) => ({ ...d, state: "disconnected" })));
-        transportRef.current = t;
         setDevice((d) => ({ ...d, name, kind, state: "connected" }));
         await sendSnapshot();
       } catch (e) {
+        awaitAdoptionRef.current = false;
         setDevice((d) => ({ ...d, kind: transportRef.current ? d.kind : "none", state: "disconnected" }));
         throw e;
       }
@@ -588,6 +598,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const disconnect = useCallback(async () => {
     await transportRef.current?.disconnect();
     transportRef.current = undefined;
+    awaitAdoptionRef.current = false;
     setDevice({ name: "", kind: "none", state: "disconnected", pending: 0 });
   }, []);
 
