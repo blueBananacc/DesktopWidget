@@ -548,14 +548,21 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
             if (list.length) {
               const last = list[list.length - 1];
               const s = stateRef.current;
-              const next: AppState = {
-                ...s,
-                segments: list,
-                current: { id: last.status, source: "device", since: last.start }, // 丢弃旧 until/note，避免过期"预计结束"横幅
-                offworkToday: s.offworkToday || last.status === "off",
-              };
-              stateRef.current = next;
-              set(() => next);
+              // 内容没变就不替换：time 重校 → 设备 segDirty → 推回相同区间 → 若新建 current 对象会触发快照效应再次下发 time，形成约 2s 一圈的回显环
+              const same =
+                list.length === s.segments.length &&
+                list.every((x, i) => x.status === s.segments[i].status && x.start === s.segments[i].start && x.end === s.segments[i].end) &&
+                s.current.id === last.status && s.current.since === last.start;
+              if (!same) {
+                const next: AppState = {
+                  ...s,
+                  segments: list,
+                  current: { id: last.status, source: "device", since: last.start }, // 丢弃旧 until/note，避免过期"预计结束"横幅
+                  offworkToday: s.offworkToday || last.status === "off",
+                };
+                stateRef.current = next;
+                set(() => next);
+              }
             }
           }
           break;
