@@ -36,6 +36,8 @@ export interface Reminder {
   detail?: string;
   trigger: ReminderTrigger;
   at?: string; // HH:mm when trigger === "time"
+  day: string; // YYYY-MM-DD 归属日；早于今天 = 昨天遗留
+  firedAt?: number; // 已触发提醒的时刻；延后时清除以便重新触发
   showOnDevice: boolean;
   createdBy: "manual" | "voice";
   done: boolean;

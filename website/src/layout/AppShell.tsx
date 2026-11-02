@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, CalendarDays, ListChecks, BarChart3, Users, Sparkles, Monitor, Fingerprint, Image, Palette, ShieldCheck,
@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useStore } from "../store/AppStore";
+import { useToast } from "../ui/Toast";
 import { VoiceDialog } from "./VoiceDialog";
 
 interface NavItem {
@@ -55,9 +56,18 @@ const ME_PATHS = ["/me", "/review", "/agent", "/device", "/controls", "/screen",
 
 export function AppShell() {
   const { s } = useStore();
+  const toast = useToast();
   const [voice, setVoice] = useState(false);
   const { pathname } = useLocation();
   const openCount = s.reminders.filter((r) => !r.done).length;
+  const flashedAt = useRef(0);
+  useEffect(() => {
+    // 提醒到点/收工触发：任何页面都弹 toast（设备端另有 OLED+灯光提示）
+    if (s.reminderFlash && s.reminderFlash.at !== flashedAt.current) {
+      flashedAt.current = s.reminderFlash.at;
+      toast({ message: `提醒：${s.reminderFlash.text}` });
+    }
+  }, [s.reminderFlash]);
 
   return (
     <div className="app app-full">

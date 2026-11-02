@@ -10,6 +10,7 @@ export type OutboundMessage =
   | { type: "time"; epoch: number; tzOffsetMin: number }
   | { type: "break"; minutes: number; enabled: boolean; offToday: boolean; accumMs?: number } // 休息提醒设置；accumMs 仅在明确要求重置时携带，设备保持计时权威
   | { type: "keys"; k1: KeyAction; k2: KeyAction; k3: KeyAction; k4: KeyAction; ts: number } // 按键映射下发；设备离线时按此执行（K1 仍需按住 1.5s）
+  | { type: "reminder"; text?: string; count?: number; ts: number } // 提醒触发：text 仅当用户允许上屏时携带；设备 OLED 显示 + RGB 闪烁，任意按键确认
   | { type: "sync" }; // 握手：固件回 hello
 
 export type InboundMessage =

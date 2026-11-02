@@ -120,6 +120,11 @@ int      ovrCount = 0;
 bool     ovrSet = false;
 int      ovrY = 0, ovrMo = 0, ovrD = 0;
 
+// 待办提醒（网页 reminder 消息）：OLED 覆盖 15s + RGB 闪烁 3s，任意按键提前关闭
+uint32_t remindUntil = 0;
+char     remindText[48] = "";
+int      remindCount = 0;
+
 // 按键映射（网页 keys 消息下发；设备离线时按此执行。cycleL/cycleR 为出厂默认，网页不下发这两个值）
 char keyAct[4][12] = { "offwork", "busy", "cycleL", "cycleR" };  // K1 K2 K3 K4
 
@@ -242,10 +247,14 @@ void sendBreakState(bool due) {
 // ===================== 显示 =====================
 
 void drawOled() {
-  // 休息提醒画面优先：到点后 15 秒内覆盖状态显示
-  const bool notice = millis() < breakNoticeUntil;
-  const char* main = notice ? "起来活动一下" : scrMain.c_str();
-  const char* sub  = notice ? "下一轮计时已开始" : scrSub.c_str();
+  // 提醒画面最优先；其次休息提醒：覆盖状态显示，任意按键提前关闭
+  const bool remind = millis() < remindUntil;
+  const bool notice = !remind && millis() < breakNoticeUntil;
+  const char* main = remind ? "有新提醒" : notice ? "起来活动一下" : scrMain.c_str();
+  char subBuf[48];
+  const char* sub = remind
+    ? (remindText[0] ? remindText : (snprintf(subBuf, sizeof subBuf, "有 %d 条提醒", remindCount), subBuf))
+    : notice ? "下一轮计时已开始" : scrSub.c_str();
   oled.clearBuffer();
   // 左上角连接状态点
   if (bleConnected) oled.drawDisc(6, 6, 3); else oled.drawCircle(6, 6, 3);
@@ -382,6 +391,16 @@ void handleLine(const String& line) {
     schedLastMin = -1;                      // 立即按新表重算一次
     Serial.printf("[SCHED] loaded %d nodes, weekdays=0x%02X date=%s ovr=%d paused=%d mode=%s\n",
       schedCount, schedWeekdays, schedDateSet ? "set" : "none", ovrCount, schedPaused, schedModeToday ? "today" : "next");
+  } else if (!strcmp(type, "reminder")) {
+    // 网页提醒到点：OLED 显示 15s + RGB 闪烁 3s；text 仅当用户允许上屏才携带
+    const char* t = doc["text"] | "";
+    strncpy(remindText, t, sizeof(remindText) - 1);
+    remindText[sizeof(remindText) - 1] = 0;
+    remindCount = doc["count"] | 1;
+    remindUntil = millis() + 15000;
+    breakFlashUntil = millis() + 3000;
+    oledDirty = true;
+    Serial.printf("[REMIND] %s x%d\n", remindText[0] ? remindText : "(private)", remindCount);
   } else if (!strcmp(type, "keys")) {
     // 按键映射下发：设备离线时按此执行（K1 仍须按住 1.5s）
     const char* ks[4] = { "k1", "k2", "k3", "k4" };
@@ -479,16 +498,16 @@ void pollKeys() {
     bool pressed = !k.last;
     if (k.pin == KEY_SHORTCUT) {
       if (pressed && !k.longSent && now - k.t0 > LONG_MS) {
-        sendLine(F("{\"type\":\"shortcut\",\"press\":\"long\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0;
+        sendLine(F("{\"type\":\"shortcut\",\"press\":\"long\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0;
         if (!bleConnected) { setLocalStatus("focus"); registerManualOverride("focus"); }   // 离线：长按固定 = 专注中
       } else if (!pressed && !k.longSent && k.sawPress && now - k.t0 > DEBOUNCE_MS) {
-        sendLine(F("{\"type\":\"shortcut\",\"press\":\"single\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0;
+        sendLine(F("{\"type\":\"shortcut\",\"press\":\"single\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0;
         if (!bleConnected) applyKeyAction(keyAct[1]);    // 离线：短按按网页下发的 K2 映射执行
       }
     } else if (k.pin == KEY_OFFWORK) {
       // K1：按住 1.5s 才触发收工动作（与网页按住收工一致，防误触）；松早了取消
       if (pressed && !k.longSent && now - k.t0 > OFFWORK_HOLD_MS) {
-        k.longSent = true; k.sawPress = false; breakNoticeUntil = 0;
+        k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0;
         sendLine(F("{\"type\":\"offworkKey\"}"));
         if (!bleConnected) applyKeyAction(keyAct[0]);
       } else if (!pressed) {
@@ -496,7 +515,7 @@ void pollKeys() {
       }
     } else if (pressed && now - k.t0 > DEBOUNCE_MS && !k.longSent) {
       k.longSent = true;
-      breakNoticeUntil = 0;                // 任意按键提前关闭提醒画面
+      breakNoticeUntil = 0; remindUntil = 0;  // 任意按键提前关闭提醒画面
       if (!strcmp(k.ev1, "touchL")) sendLine(F("{\"type\":\"touch\",\"zone\":\"left\"}"));
       else if (!strcmp(k.ev1, "touchR")) sendLine(F("{\"type\":\"touch\",\"zone\":\"right\"}"));
       // 离线：K3/K4 按网页下发的映射执行（出厂默认 = 上一个/下一个状态循环）

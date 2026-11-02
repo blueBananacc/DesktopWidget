@@ -55,6 +55,8 @@ export interface AppState {
   offworkToday: boolean;
   lastAppliedNode?: string;
   reminders: Reminder[];
+  /** 最近一次触发的提醒（UI 据此弹 toast） */
+  reminderFlash?: { text: string; at: number };
   members: Member[];
   settings: Settings;
   timer?: TimerState;
@@ -87,7 +89,7 @@ const createInitial = (now: number): AppState => {
     pausedToday: false,
     offworkToday: status === "off",
     lastAppliedNode: node ? `${dateKey(now)}:${node.id}` : undefined,
-    reminders: seedReminders(),
+    reminders: seedReminders(dateKey(now)),
     members: seedMembers(now),
     settings: defaultSettings,
     breakAccumMs: 13 * 60_000,
@@ -111,6 +113,8 @@ const load = (now: number): AppState => {
       const past = saved.historySegments ? undefined : seedPast(now);
       return {
         ...createInitial(now), ...saved, breakSyncedAt: 0, settings: { ...defaultSettings, ...saved.settings, keys },
+        // 旧版本提醒没有归属日字段：按今天迁移
+        reminders: (saved.reminders ?? []).map((r) => ({ ...r, day: r.day ?? dateKey(now) })),
         ...(past ? { history: past.history, historySegments: past.segments } : {}),
       };
     }
@@ -158,6 +162,8 @@ const tick = (s: AppState, now: number): AppState => {
       breakAccumMs: 0,
       breakSyncedAt: 0,
       breakDue: false,
+      // 已完成的提醒跨天即清；待处理的留下，界面归入“昨天遗留”
+      reminders: next.reminders.filter((r) => !r.done),
     };
   }
 
@@ -173,6 +179,21 @@ const tick = (s: AppState, now: number): AppState => {
     } else if (!next.pausedToday && !blockedByOffwork && next.current.source === "schedule") {
       next = { ...next, current: { ...next.current, until: scheduleUntil(next, now), note: node.note } };
     }
+  }
+
+  // 提醒触发：定时提醒到点触发（只归属今天的）；收工后提醒在收工后触发（含遗留未处理的）
+  const willFire = (r: Reminder) =>
+    !r.done && !r.firedAt &&
+    ((r.trigger === "time" && r.day === today && !!r.at && atToday(r.at, now) <= now) ||
+     (r.trigger === "afterOffwork" && r.day <= today && next.offworkToday));
+  const firing = next.reminders.filter(willFire);
+  if (firing.length) {
+    next = {
+      ...next,
+      reminders: next.reminders.map((r) => (willFire(r) ? { ...r, firedAt: now } : r)),
+      reminderFlash: { text: firing.map((r) => r.title).join("、"), at: now },
+    };
+    for (const r of firing) deviceSend?.({ type: "reminder", text: r.showOnDevice ? r.title : undefined, count: firing.length, ts: now });
   }
 
   if (next.timer && !next.timer.expired && now >= next.timer.endsAt) next = { ...next, timer: { ...next.timer, expired: true } };
@@ -307,8 +328,8 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
       return { ...s, schedules: [...s.schedules, { ...src, id: uid(), name: `${src.name}（副本）`, nodes: src.nodes.map((n) => ({ ...n, id: uid() })) }] };
     });
   },
-  addReminder(r: Omit<Reminder, "id" | "done">) {
-    set((s) => ({ ...s, reminders: [{ ...r, id: uid(), done: false }, ...s.reminders] }));
+  addReminder(r: Omit<Reminder, "id" | "done" | "day">) {
+    set((s) => ({ ...s, reminders: [{ ...r, id: uid(), day: dateKey(Date.now()), done: false }, ...s.reminders] }));
   },
   toggleReminder(id: string) {
     set((s) => ({ ...s, reminders: s.reminders.map((r) => (r.id === id ? { ...r, done: !r.done } : r)) }));
@@ -316,7 +337,7 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
   postponeReminder(id: string, minutes: number) {
     set((s) => ({
       ...s,
-      reminders: s.reminders.map((r) => (r.id === id && r.trigger === "time" && r.at ? { ...r, at: hhmm(Math.max(Date.now(), atToday(r.at, Date.now())) + minutes * 60_000) } : r)),
+      reminders: s.reminders.map((r) => (r.id === id && r.trigger === "time" && r.at ? { ...r, at: hhmm(Math.max(Date.now(), atToday(r.at, Date.now())) + minutes * 60_000), firedAt: undefined } : r)),
     }));
   },
   deleteReminder(id: string) {

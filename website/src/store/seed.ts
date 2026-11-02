@@ -65,10 +65,10 @@ export const seedSchedules = (): Schedule[] => [
   },
 ];
 
-export const seedReminders = (): Reminder[] => [
-  { id: "m1", title: "提交本周周报", detail: "到点时设备和手机同时提示", trigger: "time", at: "17:30", showOnDevice: false, createdBy: "manual", done: false },
-  { id: "m2", title: "带狗狗去看医生", detail: "收工后在设备上显示，仅自己可见", trigger: "afterOffwork", showOnDevice: true, createdBy: "voice", done: false },
-  { id: "m3", title: "给设计稿补充标注", trigger: "time", at: "16:00", showOnDevice: false, createdBy: "manual", done: true },
+export const seedReminders = (day: string): Reminder[] => [
+  { id: "m1", title: "提交本周周报", detail: "到点时设备和手机同时提示", trigger: "time", at: "17:30", day, showOnDevice: false, createdBy: "manual", done: false },
+  { id: "m2", title: "带狗狗去看医生", detail: "收工后在设备上显示，仅自己可见", trigger: "afterOffwork", day, showOnDevice: true, createdBy: "voice", done: false },
+  { id: "m3", title: "给设计稿补充标注", trigger: "time", at: "16:00", day, showOnDevice: false, createdBy: "manual", done: true },
 ];
 
 export const seedMembers = (now: number): Member[] => [
