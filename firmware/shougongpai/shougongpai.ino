@@ -318,7 +318,8 @@ void updateLed() {
 // ===================== 消息处理 =====================
 
 void handleLine(const String& line) {
-  Serial.printf("[BLE←] %s\n", line.c_str());
+  // 回显截断：完整打印 1.4KB 的 anim 帧会阻塞 Serial 数百毫秒，导致串口 RX 溢出丢字节
+  Serial.printf("[BLE←] %.100s%s\n", line.c_str(), line.length() > 100 ? "..." : "");
   JsonDocument doc;
   if (deserializeJson(doc, line)) return;
   const char* type = doc["type"] | "";
@@ -459,6 +460,7 @@ void handleLine(const String& line) {
       Serial.println("[ANIM] stop");
     } else if (!strcmp(op, "clear")) {
       const char* st = doc["status"] | "";
+      if (animFile && !strcmp(st, animUpStatus)) { animFile.close(); animUpGot = 0; } // 上传中清除：先关句柄否则 remove 失败
       LittleFS.remove("/anim_" + String(st) + ".bin");
       if (!strcmp(st, animFor)) { animPlaying = false; animFor[0] = 0; oledDirty = true; }
       Serial.printf("[ANIM] clear %s\n", st);
@@ -684,6 +686,7 @@ void pollTouch() {}
 // ===================== 入口 =====================
 
 void setup() {
+  Serial.setRxBufferSize(4096);     // anim 帧行 ~1.4KB，默认 256B 会在打印/处理间隙溢出丢字节
   Serial.begin(115200);
   delay(300);
   Serial.printf("\n[BOOT] 收工牌 %s\n", FIRMWARE_VER);
