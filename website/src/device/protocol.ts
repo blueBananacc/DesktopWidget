@@ -11,6 +11,10 @@ export type OutboundMessage =
   | { type: "break"; minutes: number; enabled: boolean; offToday: boolean; accumMs?: number } // 休息提醒设置；accumMs 仅在明确要求重置时携带，设备保持计时权威
   | { type: "keys"; k1: KeyAction; k2: KeyAction; k3: KeyAction; k4: KeyAction; ts: number } // 按键映射下发；设备离线时按此执行（K1 仍需按住 1.5s）
   | { type: "reminder"; text?: string; count?: number; ts: number } // 提醒触发：text 仅当用户允许上屏时携带；设备 OLED 显示 + RGB 闪烁，任意按键确认
+  | { type: "anim"; op: "begin"; frames: number; fps: number; loop: boolean } // 动效上传：分配 N 帧（128×64 1bpp，u8g2 页序）
+  | { type: "anim"; op: "frame"; i: number; data: string } // 单帧 base64（1024B）；收齐后 play 生效
+  | { type: "anim"; op: "play" } // 开始播放（任意按键或 stop 退出，回到状态显示）
+  | { type: "anim"; op: "stop" }
   | { type: "sync" }; // 握手：固件回 hello
 
 export type InboundMessage =

@@ -19,6 +19,9 @@ export const HISTORY_DAYS = 90;
 
 /** 由 Provider 注册：向已连接设备发送一条消息（未连接时为空操作） */
 let deviceSend: ((m: OutboundMessage) => void) | undefined;
+let activeTransport: DeviceTransport | undefined;
+/** 已连接传输的句柄：动效上传等需要按序 await 的场景使用（deviceSend 是 fire-and-forget） */
+export const getTransport = () => activeTransport;
 /** 已发出但设备尚未回执一致的休息提醒设置；发送可能撞上设备重启窗口而丢失，靠 breakState 回执重发收敛 */
 let breakPending: { minutes?: number; enabled?: boolean; offToday?: boolean } | undefined;
 /** 设备逐行推送的今日状态区间：begin 清空、seg 累积、end 一次性替换 */
@@ -589,6 +592,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         awaitAdoptionRef.current = kind !== "mock";
         const name = await t.connect();
         transportRef.current = t; // 先就位：onMessage 会冲刷握手期间排队的消息，其中的回调需要 deviceSend 可用
+        activeTransport = t;
         t.onMessage(handleInbound);
         t.onDisconnect(() => setDevice((d) => ({ ...d, state: "disconnected" })));
         setDevice((d) => ({ ...d, name, kind, state: "connected" }));
@@ -605,6 +609,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const disconnect = useCallback(async () => {
     await transportRef.current?.disconnect();
     transportRef.current = undefined;
+    activeTransport = undefined;
     awaitAdoptionRef.current = false;
     setDevice({ name: "", kind: "none", state: "disconnected", pending: 0 });
   }, []);

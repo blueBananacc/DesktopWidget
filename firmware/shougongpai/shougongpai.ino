@@ -24,6 +24,7 @@
 #include <NimBLEDevice.h>
 #include <Adafruit_NeoPixel.h>
 #include <ArduinoJson.h>
+#include <mbedtls/base64.h>
 
 // ===================== 配置 =====================
 
@@ -124,6 +125,16 @@ int      ovrY = 0, ovrMo = 0, ovrD = 0;
 uint32_t remindUntil = 0;
 char     remindText[48] = "";
 int      remindCount = 0;
+
+// 自定义动效播放器：网页 anim 消息下发 1bpp 帧序列（u8g2 页序 1024B/帧），设备自治播放。
+// RAM 存帧（断电丢失）；任意按键或 anim stop 退出；提醒/休息通知临时覆盖动画
+constexpr int ANIM_MAX_FRAMES = 16;
+uint8_t  animBuf[ANIM_MAX_FRAMES][1024];
+uint8_t  animN = 0, animGot = 0;
+uint32_t animMs = 200;                    // 帧间隔（由 fps 换算）
+bool     animLoop = true, animPlaying = false;
+uint8_t  animIdx = 0;
+uint32_t animNext = 0;
 
 // 按键映射（网页 keys 消息下发；设备离线时按此执行。cycleL/cycleR 为出厂默认，网页不下发这两个值）
 char keyAct[4][12] = { "offwork", "busy", "cycleL", "cycleR" };  // K1 K2 K3 K4
@@ -409,6 +420,33 @@ void handleLine(const String& line) {
       if (strlen(a) && strlen(a) < sizeof(keyAct[0])) { strncpy(keyAct[i], a, sizeof(keyAct[0]) - 1); keyAct[i][sizeof(keyAct[0]) - 1] = 0; }
     }
     Serial.printf("[KEYS] %s %s %s %s\n", keyAct[0], keyAct[1], keyAct[2], keyAct[3]);
+  } else if (!strcmp(type, "anim")) {
+    // 动效上传：begin 分配帧槽 → frame 逐帧 base64 1bpp → play 收齐才播 → stop 回状态显示
+    const char* op = doc["op"] | "";
+    if (!strcmp(op, "begin")) {
+      animN = min((int)(doc["frames"] | 1), ANIM_MAX_FRAMES);
+      animGot = 0;
+      int fps = doc["fps"] | 5;
+      int iv = 1000 / max(1, fps);
+      animMs = (uint32_t)max(40, iv);
+      animLoop = doc["loop"] | true;
+      animPlaying = false;
+      Serial.printf("[ANIM] begin N=%d fps=%d\n", animN, fps);
+    } else if (!strcmp(op, "frame")) {
+      int i = doc["i"] | -1;
+      const char* d = doc["data"] | "";
+      if (i >= 0 && i < animN) {
+        size_t olen = 0;
+        if (mbedtls_base64_decode(animBuf[i], sizeof(animBuf[i]), &olen, (const uint8_t*)d, strlen(d)) == 0 && olen == sizeof(animBuf[i])) animGot++;
+      }
+    } else if (!strcmp(op, "play")) {
+      if (animN > 0 && animGot >= animN) { animPlaying = true; animIdx = 0; animNext = millis(); Serial.println("[ANIM] play"); }
+      else Serial.printf("[ANIM] play ignored (%d/%d)\n", animGot, animN);
+    } else if (!strcmp(op, "stop")) {
+      animPlaying = false;
+      oledDirty = true;
+      Serial.println("[ANIM] stop");
+    }
   } else if (!strcmp(type, "sync")) {
     wantHello = true;                        // 网页握手 → 回 hello
   }
@@ -498,16 +536,16 @@ void pollKeys() {
     bool pressed = !k.last;
     if (k.pin == KEY_SHORTCUT) {
       if (pressed && !k.longSent && now - k.t0 > LONG_MS) {
-        sendLine(F("{\"type\":\"shortcut\",\"press\":\"long\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0;
+        sendLine(F("{\"type\":\"shortcut\",\"press\":\"long\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0; animPlaying = false;
         if (!bleConnected) { setLocalStatus("focus"); registerManualOverride("focus"); }   // 离线：长按固定 = 专注中
       } else if (!pressed && !k.longSent && k.sawPress && now - k.t0 > DEBOUNCE_MS) {
-        sendLine(F("{\"type\":\"shortcut\",\"press\":\"single\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0;
+        sendLine(F("{\"type\":\"shortcut\",\"press\":\"single\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0; animPlaying = false;
         if (!bleConnected) applyKeyAction(keyAct[1]);    // 离线：短按按网页下发的 K2 映射执行
       }
     } else if (k.pin == KEY_OFFWORK) {
       // K1：按住 1.5s 才触发收工动作（与网页按住收工一致，防误触）；松早了取消
       if (pressed && !k.longSent && now - k.t0 > OFFWORK_HOLD_MS) {
-        k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0;
+        k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0; animPlaying = false;
         sendLine(F("{\"type\":\"offworkKey\"}"));
         if (!bleConnected) applyKeyAction(keyAct[0]);
       } else if (!pressed) {
@@ -515,7 +553,7 @@ void pollKeys() {
       }
     } else if (pressed && now - k.t0 > DEBOUNCE_MS && !k.longSent) {
       k.longSent = true;
-      breakNoticeUntil = 0; remindUntil = 0;  // 任意按键提前关闭提醒画面
+      breakNoticeUntil = 0; remindUntil = 0; animPlaying = false;  // 任意按键提前关闭提醒画面
       if (!strcmp(k.ev1, "touchL")) sendLine(F("{\"type\":\"touch\",\"zone\":\"left\"}"));
       else if (!strcmp(k.ev1, "touchR")) sendLine(F("{\"type\":\"touch\",\"zone\":\"right\"}"));
       // 离线：K3/K4 按网页下发的映射执行（出厂默认 = 上一个/下一个状态循环）
@@ -671,8 +709,18 @@ void loop() {
     else if (c != '\r') serBuf += c;
   }
   updateLed();
-  // OLED：状态变化立即重绘；平时每秒刷一次时钟
+  // OLED：动画播放中由播放器接管（提醒/休息通知仍临时覆盖）；否则状态变化立即重绘 + 每秒刷时钟
   static uint32_t lastDraw = 0;
-  if (oledDirty || millis() - lastDraw > 1000) { drawOled(); oledDirty = false; lastDraw = millis(); }
+  const bool notice = millis() < remindUntil || millis() < breakNoticeUntil;
+  if (animPlaying && !notice) {
+    if ((int32_t)(millis() - animNext) >= 0) {
+      memcpy(oled.getBufferPtr(), animBuf[animIdx], 1024);
+      oled.sendBuffer();
+      animNext += animMs;
+      if (++animIdx >= animN) { animIdx = 0; if (!animLoop) { animPlaying = false; oledDirty = true; } }
+    }
+  } else if (oledDirty || millis() - lastDraw > 1000) {
+    drawOled(); oledDirty = false; lastDraw = millis();
+  }
   delay(5);
 }
