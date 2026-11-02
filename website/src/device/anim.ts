@@ -163,9 +163,9 @@ const b64 = (u8: Uint8Array) => {
   return btoa(s);
 };
 
-/** 按序上传动效并播放；设备收齐帧后才开始。onProgress 回调已传帧数。 */
-export async function sendAnim(t: DeviceTransport, r: AnimResult, onProgress?: (sent: number, total: number) => void) {
-  await t.send({ type: "anim", op: "begin", frames: r.frames.length, fps: r.fps, loop: r.loop });
+/** 按序把动效写入设备某状态的存储槽；设备收齐后落 flash，进入该状态自动播放。onProgress 回调已传帧数。 */
+export async function sendAnim(t: DeviceTransport, status: string, r: AnimResult, onProgress?: (sent: number, total: number) => void) {
+  await t.send({ type: "anim", op: "begin", status, frames: r.frames.length, fps: r.fps, loop: r.loop });
   for (let i = 0; i < r.frames.length; i++) {
     await t.send({ type: "anim", op: "frame", i, data: b64(r.frames[i]) });
     onProgress?.(i + 1, r.frames.length);
@@ -174,6 +174,7 @@ export async function sendAnim(t: DeviceTransport, r: AnimResult, onProgress?: (
 }
 
 export const stopAnim = (t: DeviceTransport) => t.send({ type: "anim", op: "stop" });
+export const clearAnim = (t: DeviceTransport, status: string) => t.send({ type: "anim", op: "clear", status });
 
 // ---------- 预览 ----------
 

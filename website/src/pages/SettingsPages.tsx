@@ -8,6 +8,7 @@ import type { AgentState, KeyAction, LedMode, Settings, StatusId } from "../doma
 import { ago } from "../domain/time";
 import { Banner, Card, CardHeader, PageHeader, RowItem, Segmented, SettingRow, StatusChip, Tile, Toggle } from "../ui/Primitives";
 import { Oled } from "../ui/DeviceMirror";
+import { StatusScreens } from "./StatusScreens";
 import { useToast } from "../ui/Toast";
 
 const KEY_ACTIONS: { value: KeyAction; label: string }[] = [
@@ -69,7 +70,7 @@ export function ScreenPage() {
   const sub = (id: StatusId) => (s.settings.screenLayout === "large" ? "" : s.settings.screenLayout === "withTime" ? "11:30 后有空" : STATUSES[id].hint);
   return (
     <>
-      <PageHeader title="屏幕内容" desc="选择屏幕的布局。状态名称始终是屏幕上最大的内容，会议标题和待办正文默认不显示。" />
+      <PageHeader title="屏幕内容" desc="选择屏幕的布局，或为某个状态写一段自定义动效。状态名称始终是默认屏幕上最大的内容。" />
       <Card style={{ marginBottom: 20 }}>
         <CardHeader icon={<Tile color="violet" size={30}><Image /></Tile>} title="布局" extra={<Segmented value={s.settings.screenLayout} options={LAYOUTS} onChange={(v) => actions.updateSettings({ screenLayout: v })} />} />
         <div className="card-b grid g-oled">
@@ -78,7 +79,8 @@ export function ScreenPage() {
           ))}
         </div>
       </Card>
-      <Banner tone="info" icon={<Info className="i" />}>自定义图片和动画计划在后续版本提供。OLED 长时间播放动画会加速烧屏并增加功耗，持续的动态效果优先用 RGB 灯。</Banner>
+      <StatusScreens />
+      <Banner tone="info" icon={<Info className="i" />}>自定义动效存在设备 flash 里，进入该状态自动播放、断电不丢。OLED 长时间播放动画会加速烧屏，建议动画只用于短时间醒目的状态（如收工、会议）。</Banner>
     </>
   );
 }

@@ -25,6 +25,7 @@
 #include <Adafruit_NeoPixel.h>
 #include <ArduinoJson.h>
 #include <mbedtls/base64.h>
+#include <LittleFS.h>
 
 // ===================== 配置 =====================
 
@@ -126,15 +127,21 @@ uint32_t remindUntil = 0;
 char     remindText[48] = "";
 int      remindCount = 0;
 
-// 自定义动效播放器：网页 anim 消息下发 1bpp 帧序列（u8g2 页序 1024B/帧），设备自治播放。
-// RAM 存帧（断电丢失）；任意按键或 anim stop 退出；提醒/休息通知临时覆盖动画
+// 按状态自定义屏幕：anim 消息把 1bpp 帧序列写入 LittleFS /anim_<status>.bin（断电不丢）。
+// 每次状态切换自动加载该状态的动画；没有则显示默认状态屏。任意按键或 anim stop 退出播放。
 constexpr int ANIM_MAX_FRAMES = 16;
-uint8_t  animBuf[ANIM_MAX_FRAMES][1024];
-uint8_t  animN = 0, animGot = 0;
-uint32_t animMs = 200;                    // 帧间隔（由 fps 换算）
+uint8_t  animBuf[ANIM_MAX_FRAMES][1024];  // u8g2 页序 1bpp，当前加载中的动画
+uint8_t  animN = 0;
+uint32_t animMs = 200;
 bool     animLoop = true, animPlaying = false;
 uint8_t  animIdx = 0;
 uint32_t animNext = 0;
+char     animFor[12] = "";                // animBuf 当前装着哪个状态（用于检测状态切换）
+// 上传中（写文件阶段；与播放缓冲互不干扰——上传不中断当前播放）
+File     animFile;
+char     animUpStatus[12] = "";
+uint8_t  animUpN = 0, animUpGot = 0;
+uint8_t  rxFrame[1024];
 
 // 按键映射（网页 keys 消息下发；设备离线时按此执行。cycleL/cycleR 为出厂默认，网页不下发这两个值）
 char keyAct[4][12] = { "offwork", "busy", "cycleL", "cycleR" };  // K1 K2 K3 K4
@@ -421,31 +428,40 @@ void handleLine(const String& line) {
     }
     Serial.printf("[KEYS] %s %s %s %s\n", keyAct[0], keyAct[1], keyAct[2], keyAct[3]);
   } else if (!strcmp(type, "anim")) {
-    // 动效上传：begin 分配帧槽 → frame 逐帧 base64 1bpp → play 收齐才播 → stop 回状态显示
+    // 按状态自定义屏幕：begin{status,frames,fps,loop} 开文件 → frame 追加 1bpp → play 收尾
+    // （当前状态则触发重载立即播放）→ stop 退出播放 / clear{status} 删除恢复默认
     const char* op = doc["op"] | "";
     if (!strcmp(op, "begin")) {
-      animN = min((int)(doc["frames"] | 1), ANIM_MAX_FRAMES);
-      animGot = 0;
-      int fps = doc["fps"] | 5;
-      int iv = 1000 / max(1, fps);
-      animMs = (uint32_t)max(40, iv);
-      animLoop = doc["loop"] | true;
-      animPlaying = false;
-      Serial.printf("[ANIM] begin N=%d fps=%d\n", animN, fps);
+      const char* st = doc["status"] | "";
+      strncpy(animUpStatus, st, sizeof(animUpStatus) - 1); animUpStatus[sizeof(animUpStatus) - 1] = 0;
+      animUpN = min((int)(doc["frames"] | 1), ANIM_MAX_FRAMES);
+      animUpGot = 0;
+      if (animFile) animFile.close();
+      animFile = LittleFS.open("/anim_" + String(animUpStatus) + ".bin", "w");
+      uint8_t hdr[4] = { animUpN, (uint8_t)(doc["fps"] | 5), (uint8_t)((doc["loop"] | true) ? 1 : 0), 0 };
+      if (animFile) animFile.write(hdr, 4);
+      Serial.printf("[ANIM] begin %s N=%d\n", animUpStatus, animUpN);
     } else if (!strcmp(op, "frame")) {
-      int i = doc["i"] | -1;
       const char* d = doc["data"] | "";
-      if (i >= 0 && i < animN) {
-        size_t olen = 0;
-        if (mbedtls_base64_decode(animBuf[i], sizeof(animBuf[i]), &olen, (const uint8_t*)d, strlen(d)) == 0 && olen == sizeof(animBuf[i])) animGot++;
+      size_t olen = 0;
+      if (animFile && mbedtls_base64_decode(rxFrame, sizeof rxFrame, &olen, (const uint8_t*)d, strlen(d)) == 0 && olen == sizeof rxFrame) {
+        animFile.write(rxFrame, sizeof rxFrame); animUpGot++;
       }
     } else if (!strcmp(op, "play")) {
-      if (animN > 0 && animGot >= animN) { animPlaying = true; animIdx = 0; animNext = millis(); Serial.println("[ANIM] play"); }
-      else Serial.printf("[ANIM] play ignored (%d/%d)\n", animGot, animN);
+      if (animFile) animFile.close();
+      if (animUpGot >= animUpN && animUpN > 0) {
+        if (!strcmp(animUpStatus, curStatusId.c_str())) animFor[0] = 0; // 上传的是当前状态 → 强制重载立即播放
+        Serial.printf("[ANIM] saved %s (%d)\n", animUpStatus, animUpGot);
+      } else Serial.printf("[ANIM] incomplete %d/%d\n", animUpGot, animUpN);
     } else if (!strcmp(op, "stop")) {
       animPlaying = false;
       oledDirty = true;
       Serial.println("[ANIM] stop");
+    } else if (!strcmp(op, "clear")) {
+      const char* st = doc["status"] | "";
+      LittleFS.remove("/anim_" + String(st) + ".bin");
+      if (!strcmp(st, animFor)) { animPlaying = false; animFor[0] = 0; oledDirty = true; }
+      Serial.printf("[ANIM] clear %s\n", st);
     }
   } else if (!strcmp(type, "sync")) {
     wantHello = true;                        // 网页握手 → 回 hello
@@ -677,6 +693,7 @@ void setup() {
   oled.begin();
   oled.enableUTF8Print();
   rgb.begin(); rgb.clear(); rgb.show();
+  LittleFS.begin(true);               // 自定义屏幕动画存储（失败则格式化）
 
 #if ENABLE_CAPSENSE
   long sl = 0, sr = 0;
@@ -709,6 +726,26 @@ void loop() {
     else if (c != '\r') serBuf += c;
   }
   updateLed();
+  // 状态切换 → 加载该状态的自定义动画（LittleFS 持久）；没有则回到默认状态屏
+  if (strcmp(animFor, curStatusId.c_str())) {
+    strncpy(animFor, curStatusId.c_str(), sizeof(animFor) - 1);
+    animPlaying = false;
+    File f = LittleFS.open("/anim_" + curStatusId + ".bin", "r");
+    if (f && f.size() >= 4) {
+      uint8_t hdr[4];
+      f.read(hdr, 4);
+      int n = min((int)hdr[0], ANIM_MAX_FRAMES);
+      if (f.size() >= (size_t)(4 + n * 1024)) {
+        for (int i = 0; i < n; i++) f.read(animBuf[i], 1024);
+        animN = n;
+        animMs = (uint32_t)max(40, 1000 / max(1, (int)hdr[1]));
+        animLoop = hdr[2] != 0;
+        animPlaying = true; animIdx = 0; animNext = millis();
+        Serial.printf("[ANIM] loaded %s N=%d\n", animFor, animN);
+      }
+      f.close();
+    }
+  }
   // OLED：动画播放中由播放器接管（提醒/休息通知仍临时覆盖）；否则状态变化立即重绘 + 每秒刷时钟
   static uint32_t lastDraw = 0;
   const bool notice = millis() < remindUntil || millis() < breakNoticeUntil;

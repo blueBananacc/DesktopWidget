@@ -101,6 +101,8 @@ export interface Settings {
   phoneDnd: Partial<Record<StatusId, boolean>>;
   staleMinutes: number;
   screenLayout: "large" | "withTime" | "minimal";
+  /** 按状态自定义屏幕：statusId -> 动效 JS 源码（display-app-spec.md）；上传后设备按状态存 flash，进入状态自动播放 */
+  customScreens: Record<string, string>;
 }
 
 export type AgentState = "idle" | "running" | "needsInput" | "done" | "error";

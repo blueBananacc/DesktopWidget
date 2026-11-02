@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, CalendarDays, ListChecks, BarChart3, Users, Sparkles, Monitor, Fingerprint, Image, Palette, ShieldCheck,
-  Mic, MoreHorizontal, User, Film,
+  Mic, MoreHorizontal, User,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useStore } from "../store/AppStore";
@@ -37,7 +37,6 @@ const GROUPS: { label?: string; items: NavItem[] }[] = [
     label: "设备",
     items: [
       { to: "/device", label: "我的设备", icon: Monitor },
-      { to: "/effects", label: "动效", icon: Film },
       { to: "/controls", label: "触摸与快捷键", icon: Fingerprint },
       { to: "/screen", label: "屏幕内容", icon: Image },
       { to: "/lighting", label: "灯效", icon: Palette },
@@ -53,7 +52,7 @@ const TABS: NavItem[] = [
   { to: "/me", label: "我的", icon: User },
 ];
 
-const ME_PATHS = ["/me", "/review", "/agent", "/device", "/effects", "/controls", "/screen", "/lighting", "/settings"];
+const ME_PATHS = ["/me", "/review", "/agent", "/device", "/controls", "/screen", "/lighting", "/settings"];
 
 export function AppShell() {
   const { s, actions } = useStore();

@@ -21,6 +21,7 @@ export const defaultSettings: Settings = {
   phoneDnd: { busy: true, focus: true, meet: true },
   staleMinutes: 15,
   screenLayout: "withTime",
+  customScreens: {},
 };
 
 export const seedSchedules = (): Schedule[] => [
