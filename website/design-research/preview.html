@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>收工牌 · 网站设计规范预览 v1.0</title>
+<link rel="stylesheet" href="../styles/tokens.css">
+<link rel="stylesheet" href="../styles/components.css">
+<style>
+  /* Preview-page-only layout */
+  .page { max-width: 1360px; margin: 0 auto; padding: 40px 24px 120px; }
+  .eyebrow { display: inline-flex; gap: 8px; align-items: center; font-size: 12px; color: var(--primary); background: var(--primary-soft); padding: 4px 10px; border-radius: var(--r-pill); font-weight: 600; }
+  .hero-title { font: 700 36px/1.25 var(--font); margin: 14px 0 8px; letter-spacing: -.01em; }
+  .hero-sub { color: var(--ink-2); margin: 0 0 28px; max-width: 760px; font-size: 15px; }
+
+  /* ===== Spec sections ===== */
+  .sec { margin-top: 72px; }
+  .sec-h { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+  .sec-h .n { font: 700 13px var(--font-num); color: var(--primary); background: var(--primary-soft); padding: 2px 8px; border-radius: 6px; }
+  .sec-h h2 { margin: 0; font-size: 22px; }
+  .sec-d { color: var(--ink-2); margin: 0 0 20px; font-size: 13.5px; }
+  .grid { display: grid; gap: 16px; }
+  .g2 { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  .g3 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .g4 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+  .g6 { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .pad { padding: 20px 22px; }
+  .lbl-s { font-size: 11.5px; color: var(--ink-3); letter-spacing: .06em; font-weight: 600; margin-bottom: 10px; }
+  code { font: 12px var(--font-num); color: var(--ink-2); }
+  .sw { border-radius: var(--r-md); overflow: hidden; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-1); }
+  .sw .c { height: 76px; }
+  .sw .t { padding: 10px 14px; font-size: 13px; font-weight: 600; } .sw .t code { display: block; font-weight: 400; }
+  .status-card { padding: 18px; }
+  .status-card .oled { margin-top: 14px; }
+  .status-card p { margin: 10px 0 0; font-size: 12px; color: var(--ink-2); }
+  .do, .dont { padding: 12px 14px; border-radius: var(--r-sm); font-size: 13px; display: flex; gap: 10px; align-items: flex-start; }
+  .do { background: var(--st-work-soft); } .dont { background: var(--st-busy-soft); }
+  .do svg { color: var(--st-work); } .dont svg { color: var(--st-busy); }
+  .ref-img { width: 100%; border-radius: var(--r-md); border: 1px solid var(--line); display: block; }
+
+  /* Phone */
+  .phone { width: 340px; border-radius: 44px; background: var(--canvas); border: 10px solid #15171C; overflow: hidden; margin: 0 auto; box-shadow: var(--shadow-3); }
+  .phone .in { padding: 16px 14px 0; display: grid; gap: 12px; }
+  .phone .card-b { padding: 16px; }
+
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-dash" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.6"/><rect x="14" y="3" width="7" height="5" rx="1.6"/><rect x="14" y="12" width="7" height="9" rx="1.6"/><rect x="3" y="16" width="7" height="5" rx="1.6"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="16" rx="2.6"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M10 6h10M10 12h10M10 18h10"/><path d="M3.5 6l1.2 1.2L7 5M3.5 12l1.2 1.2L7 11M3.5 18l1.2 1.2L7 17"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7.5 15v2M11.5 10v7M15.5 12v5M19.5 7v10"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.8c1.5.8 2.6 2.6 3 5.2"/></symbol>
+    <symbol id="i-device" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2.6"/><path d="M8 20h8M12 16v4"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6"/><path d="M12 17h.01"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-coffee" viewBox="0 0 24 24"><path d="M4 9h13v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M17 11h1.5a2.5 2.5 0 0 1 0 5H17M8 3v3M12 3v3"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+    <symbol id="i-bt" viewBox="0 0 24 24"><path d="M7 7l10 10-5 4V3l5 4L7 17"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2 8.5a15 15 0 0 1 20 0M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0"/><path d="M12 19h.01"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.8 4.7 4.7 1.8-4.7 1.8L12 16l-1.8-4.7-4.7-1.8 4.7-1.8z"/><path d="M19 15l.8 2.2 2.2.8-2.2.8L19 21l-.8-2.2-2.2-.8 2.2-.8z"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2 0-1.2-1-1.6-1-2.6 0-.9.7-1.4 1.6-1.4H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.1"/><circle cx="10.5" cy="7" r="1.1"/><circle cx="15" cy="7.5" r="1.1"/></symbol>
+    <symbol id="i-dial" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><path d="M12 12l3.2-4.5"/><path d="M12 2.5v1.5M21.5 12H20M12 21.5V20M2.5 12H4"/></symbol>
+    <symbol id="i-touch" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7.5" stroke-dasharray="2.5 3"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-sunset" viewBox="0 0 24 24"><path d="M3 18h18M6 21.5h12"/><path d="M7 18a5 5 0 0 1 10 0"/><path d="M12 3v6M9.5 6.5L12 9l2.5-2.5"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.6"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></symbol>
+    <symbol id="i-radio" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  </defs>
+</svg>
+
+<div class="page">
+  <span class="eyebrow"><svg class="i" style="width:14px;height:14px"><use href="#i-spark"/></svg>收工牌 Design System · v1.0 已确认</span>
+  <div class="hero-title">清爽的控制台，温暖的收工</div>
+  <p class="hero-sub">v0.2 参考 Remote 仪表盘：浅灰画布 + 白色大圆角卡片、分组侧栏、彩色图标小方块、“标题 + 说明 + 时间”的列表行、右上角工具按钮和右下角悬浮按钮。收工牌在此基础上保留三处自己的东西：设备实时镜像、状态色系统、落日渐变的收工卡片。</p>
+
+  <!-- ===================== DASHBOARD ===================== -->
+  <div class="app">
+    <aside class="side">
+      <div class="logo"><span class="logo-mark"></span>收工牌</div>
+      <div class="nav on"><svg class="i"><use href="#i-dash"/></svg>总览</div>
+
+      <div class="nav-group">工作日</div>
+      <div class="nav"><svg class="i"><use href="#i-cal"/></svg>计划表</div>
+      <div class="nav"><svg class="i"><use href="#i-list"/></svg>待办与提醒<span class="badge b-new">3</span></div>
+      <div class="nav"><svg class="i"><use href="#i-chart"/></svg>状态回顾</div>
+
+      <div class="nav-group">协作</div>
+      <div class="nav"><svg class="i"><use href="#i-users"/></svg>共享看板</div>
+      <div class="nav"><svg class="i"><use href="#i-spark"/></svg>Agent 联动<span class="badge b-beta">测试版</span></div>
+
+      <div class="nav-group">设备</div>
+      <div class="nav"><svg class="i"><use href="#i-device"/></svg>我的设备</div>
+      <div class="nav"><svg class="i"><use href="#i-touch"/></svg>触摸与快捷键</div>
+      <div class="nav"><svg class="i"><use href="#i-image"/></svg>屏幕内容</div>
+      <div class="nav"><svg class="i"><use href="#i-palette"/></svg>灯效</div>
+      <div class="nav"><svg class="i"><use href="#i-coffee"/></svg>休息提醒</div>
+
+      <div class="grow"></div>
+      <div class="nav"><svg class="i"><use href="#i-shield"/></svg>隐私与设置</div>
+      <div class="me"><span class="avatar av1">杰</span><div><b>阿杰</b><span>3 楼设计组</span></div><svg class="i more"><use href="#i-more"/></svg></div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <h1>下午好，阿杰 <span class="chip s-meet"><span class="d"></span>会议中</span></h1>
+          <p>10 月 30 日 周五 · 今天的计划 18:00 收工</p>
+        </div>
+        <div class="row" style="gap:4px">
+          <span class="icon-btn"><svg class="i"><use href="#i-search"/></svg></span>
+          <span class="icon-btn"><svg class="i"><use href="#i-help"/></svg></span>
+          <span class="icon-btn"><svg class="i"><use href="#i-bell"/></svg><span class="dot-alert"></span></span>
+        </div>
+      </div>
+
+      <div class="cols">
+        <div class="stack">
+          <!-- Device -->
+          <section class="card">
+            <div class="card-h">
+              <h3><span class="tile t-violet" style="width:30px;height:30px;border-radius:8px"><svg class="i" style="width:16px;height:16px"><use href="#i-device"/></svg></span>收工牌-A12</h3>
+              <div class="row" style="gap:8px">
+                <span class="conn"><i style="background:var(--st-work)"></i><svg class="i"><use href="#i-bt"/></svg>蓝牙已连接</span>
+                <a class="view-all" href="#">设备设置<svg class="i"><use href="#i-chev"/></svg></a>
+              </div>
+            </div>
+            <div class="card-b device">
+              <div class="mirror-wrap">
+                <div class="oled"><div><div class="big">会议中</div><div class="sub">10:30 – 11:30</div></div><div class="ico pat-hatch"></div><div class="led glow" style="background:var(--st-meet);color:var(--st-meet)"></div></div>
+                <div class="mirror-cap"><span>实时镜像</span><span>已同步 · 刚刚</span></div>
+              </div>
+              <div>
+                <div class="now-label">当前状态</div>
+                <div class="now-status"><b>会议中</b><span class="chip s-meet" style="font-size:12px">还剩 42 分钟</span></div>
+                <div class="now-src"><svg class="i" style="width:14px;height:14px"><use href="#i-cal"/></svg>来自计划表“工作日模板”· 11:30 自动切回工作中</div>
+                <div class="presets">
+                  <div class="preset"><span class="d" style="background:var(--st-work)"></span>工作中</div>
+                  <div class="preset"><span class="d" style="background:var(--st-busy)"></span>勿扰</div>
+                  <div class="preset on" style="--c:var(--st-meet)"><span class="d" style="background:var(--st-meet)"></span>会议中</div>
+                  <div class="preset"><span class="d" style="background:var(--st-focus)"></span>专注 25′</div>
+                  <div class="preset"><span class="d" style="background:var(--st-rest)"></span>休息中</div>
+                  <div class="preset add"><svg class="i" style="width:14px;height:14px"><use href="#i-plus"/></svg>自定义</div>
+                </div>
+              </div>
+            </div>
+            <div class="dev-meta">
+              <div><span class="swatch-led"></span><span><b>RGB 灯</b>紫色常亮</span></div>
+              <div><span class="tile t-blue" style="width:30px;height:30px"><svg class="i" style="width:15px;height:15px"><use href="#i-touch"/></svg></span><span><b>触摸区</b>2 个已映射</span></div>
+              <div><span class="tile t-orange" style="width:30px;height:30px"><svg class="i" style="width:15px;height:15px"><use href="#i-dial"/></svg></span><span><b>旋钮</b>每格 +5 分钟</span></div>
+            </div>
+          </section>
+
+          <!-- Todo -->
+          <section class="card">
+            <div class="card-h"><h3>今天要做的 <span class="count">(4)</span></h3><a class="view-all" href="#">查看全部<svg class="i"><use href="#i-chev"/></svg></a></div>
+            <div class="row-item"><span class="tile t-blue"><svg class="i"><use href="#i-spark"/></svg></span><div class="txt"><b>Agent 需要你的输入 <span class="badge b-warn">待处理</span></b><span>Claude Code 在“重构登录模块”任务中等待你确认</span></div><span class="meta">3 分钟前</span></div>
+            <div class="row-item"><span class="tile t-orange"><svg class="i"><use href="#i-bell"/></svg></span><div class="txt"><b>提交本周周报</b><span>下班前提醒 · 到点时设备和手机同时提示</span></div><span class="meta">今天 17:30</span></div>
+            <div class="row-item"><span class="tile t-pink"><svg class="i"><use href="#i-mic"/></svg></span><div class="txt"><b>带狗狗去看医生</b><span>语音创建 · 收工后在设备上显示，仅自己可见</span></div><span class="meta">收工后</span></div>
+            <div class="row-item"><span class="tile t-green"><svg class="i"><use href="#i-coffee"/></svg></span><div class="txt"><b>起来活动一下</b><span>已连续“工作中”45 分钟时提醒</span></div><span class="meta">约 32 分钟后</span></div>
+          </section>
+
+          <!-- Upcoming schedule -->
+          <section class="card">
+            <div class="card-h"><h3>接下来的计划 <span class="badge b-new">工作日模板</span></h3><a class="view-all" href="#">切换计划表<svg class="i"><use href="#i-chev"/></svg></a></div>
+            <div class="row-item"><div class="time-tile"><i style="background:var(--st-work)"></i><b>11:30</b><span>周五</span></div><div class="txt"><b>工作中</b><span>会议结束后自动切换</span></div><span class="chip s-work">2.5 小时</span></div>
+            <div class="row-item"><div class="time-tile"><i style="background:var(--st-meet)"></i><b>14:00</b><span>周五</span></div><div class="txt"><b>会议中 · 需求评审</b><span>设备显示“会议中 14:00–15:00”，手机进入勿扰（已授权）</span></div><span class="chip s-meet">1 小时</span></div>
+            <div class="row-item"><div class="time-tile"><i style="background:var(--st-off)"></i><b>18:00</b><span>周五</span></div><div class="txt"><b>已下班</b><span>自动收工并生成今日状态回顾</span></div><span class="chip s-off">收工</span></div>
+          </section>
+        </div>
+
+        <div class="stack">
+          <!-- Off work -->
+          <section class="card offwork">
+            <div class="card-b">
+              <div class="lbl"><svg class="i" style="width:15px;height:15px"><use href="#i-sunset"/></svg>距离计划收工</div>
+              <div class="big">02:48:10</div>
+              <p>18:00 会自动切换为“已下班”，也可以现在就收工。</p>
+              <button class="btn hold" data-hold><span class="fill"></span><svg class="i"><use href="#i-sunset"/></svg><span>按住 1.5 秒收工</span></button>
+              <div class="foot">收工后 10 秒内可撤销</div>
+            </div>
+          </section>
+
+          <!-- Share board -->
+          <section class="card">
+            <div class="card-h"><h3>共享看板 <span class="count">(4)</span></h3><a class="view-all" href="#">查看全部<svg class="i"><use href="#i-chev"/></svg></a></div>
+            <div class="row-item"><span class="avatar av2">林<span class="pres" style="background:var(--st-work)"></span></span><div class="txt"><b>小林</b><span>ESP-NOW · 1 分钟前</span></div><span class="chip s-work"><span class="d"></span>工作中</span></div>
+            <div class="row-item"><span class="avatar av3">周<span class="pres" style="background:var(--st-busy)"></span></span><div class="txt"><b>老周</b><span>网关转发 · 3 分钟前</span></div><span class="chip s-busy"><span class="d"></span>勿扰</span></div>
+            <div class="row-item stale"><span class="avatar av4">陈</span><div class="txt"><b>陈姐</b><span>最后更新 09:42 · 可能已过期</span></div><span class="chip unknown">状态未知</span></div>
+            <div class="row-item" style="cursor:default"><span class="tile t-teal"><svg class="i"><use href="#i-lock"/></svg></span><div class="txt"><b>你正在分享当前状态</b><span>只分享状态，不分享计划和待办</span></div><a class="view-all" href="#">管理</a></div>
+          </section>
+
+          <!-- Break ring -->
+          <section class="card">
+            <div class="card-h"><h3>休息提醒</h3><span class="meta" style="font-size:12px;color:var(--ink-3)">每 45 分钟</span></div>
+            <div class="card-b ring-row">
+              <div class="ring">
+                <svg viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" fill="none" stroke="#EEF0F4" stroke-width="9"/><circle cx="48" cy="48" r="40" fill="none" stroke="url(#gr)" stroke-width="9" stroke-linecap="round" stroke-dasharray="251.3" stroke-dashoffset="80"/><defs><linearGradient id="gr" x1="0" x2="1"><stop offset="0" stop-color="#0EA5B7"/><stop offset="1" stop-color="#22A06B"/></linearGradient></defs></svg>
+                <div class="v"><div><b>32:10</b><span>后提醒</span></div></div>
+              </div>
+              <div style="display:grid;gap:8px">
+                <div style="font-size:13px;color:var(--ink-2)">会议中自动暂停计时，结束后继续。</div>
+                <div class="row" style="gap:6px"><button class="btn btn-secondary"><svg class="i"><use href="#i-plus"/></svg>5 分钟</button><button class="btn btn-ghost">跳过</button></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Week review -->
+          <section class="card">
+            <div class="card-h"><h3>本周状态回顾</h3><a class="view-all" href="#">详情<svg class="i"><use href="#i-chev"/></svg></a></div>
+            <div class="card-b">
+              <div class="bars">
+                <div class="bar" style="height:92%"><i style="flex:5;background:var(--st-work)"></i><i style="flex:2;background:var(--st-meet)"></i><i style="flex:1;background:var(--st-rest)"></i><i style="flex:1;background:var(--st-busy)"></i></div>
+                <div class="bar" style="height:80%"><i style="flex:4;background:var(--st-work)"></i><i style="flex:3;background:var(--st-meet)"></i><i style="flex:1;background:var(--st-rest)"></i></div>
+                <div class="bar" style="height:100%"><i style="flex:6;background:var(--st-work)"></i><i style="flex:1;background:var(--st-meet)"></i><i style="flex:1;background:var(--st-rest)"></i><i style="flex:2;background:var(--st-busy)"></i></div>
+                <div class="bar" style="height:74%"><i style="flex:4;background:var(--st-work)"></i><i style="flex:2;background:var(--st-meet)"></i><i style="flex:1;background:var(--st-rest)"></i></div>
+                <div class="bar" style="height:46%"><i style="flex:2;background:var(--st-work)"></i><i style="flex:1;background:var(--st-meet)"></i></div>
+              </div>
+              <div class="bar-x"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span></div>
+              <div class="legend"><span style="--c:var(--st-work)">工作中</span><span style="--c:var(--st-meet)">会议中</span><span style="--c:var(--st-busy)">勿扰</span><span style="--c:var(--st-rest)">休息</span></div>
+              <div class="disclaimer"><svg class="i"><use href="#i-shield"/></svg>状态时长只反映你设置的状态，不代表工作效率</div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <div class="fab"><span class="tip">说一句话，创建提醒</span><button aria-label="语音创建提醒"><svg class="i"><use href="#i-mic"/></svg></button></div>
+  </div>
+
+  <!-- ===================== SPEC ===================== -->
+  <div class="sec" id="s0">
+    <div class="sec-h"><span class="n">00</span><h2>参考来源</h2></div>
+    <p class="sec-d">左：用户提供的 Remote 仪表盘参考图。右侧列出我们具体借鉴了哪些做法。</p>
+    <div class="grid g2" style="align-items:start">
+      <img class="ref-img" src="screenshots/ref-remote-dashboard.png" alt="Remote 仪表盘参考">
+      <div class="card pad">
+        <div class="lbl-s">从 REMOTE 借鉴</div>
+        <div class="grid" style="gap:10px">
+          <div class="do"><svg class="i"><use href="#i-check"/></svg><span><b>浅灰画布 + 白色大圆角卡片</b>，卡片标题栏和内容之间用细线分隔</span></div>
+          <div class="do"><svg class="i"><use href="#i-check"/></svg><span><b>分组侧栏</b>：小号灰色分组标题，选中项为浅主色底 + 主色文字，底部固定个人信息</span></div>
+          <div class="do"><svg class="i"><use href="#i-check"/></svg><span><b>彩色图标小方块</b> + “标题 / 一行说明 / 右侧时间”的列表行</span></div>
+          <div class="do"><svg class="i"><use href="#i-check"/></svg><span><b>“查看全部 ›”</b>链接、计数（4）、测试版徽标、右上角搜索/帮助/通知</span></div>
+          <div class="do"><svg class="i"><use href="#i-check"/></svg><span><b>右下角悬浮按钮</b>：我们用作“语音创建提醒”（PRD 3.14）</span></div>
+          <div class="dont"><svg class="i"><use href="#i-x"/></svg><span>不照搬它的 HR / 薪资信息结构；不使用 emoji 作为界面元素</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec" id="s1">
+    <div class="sec-h"><span class="n">01</span><h2>色彩</h2></div>
+    <p class="sec-d">中性色铺底；主色靛蓝用于导航、链接和主按钮；落日渐变只给“收工”。</p>
+    <div class="grid g6">
+      <div class="sw"><div class="c" style="background:var(--canvas)"></div><div class="t">画布 Canvas<code>#F5F6F8</code></div></div>
+      <div class="sw"><div class="c" style="background:var(--surface);border-bottom:1px solid var(--line)"></div><div class="t">卡片 Surface<code>#FFFFFF</code></div></div>
+      <div class="sw"><div class="c" style="background:var(--line-2)"></div><div class="t">线 Line<code>#ECEEF2 / #E2E5EB</code></div></div>
+      <div class="sw"><div class="c" style="background:var(--ink)"></div><div class="t">文字 Ink<code>#141A24 / #5A6475</code></div></div>
+      <div class="sw"><div class="c" style="background:linear-gradient(135deg,var(--primary),#8B5CF6)"></div><div class="t">主色 Primary<code>#4C5CF6 → #8B5CF6</code></div></div>
+      <div class="sw"><div class="c" style="background:linear-gradient(140deg,var(--sunset-1),var(--sunset-2),var(--sunset-3))"></div><div class="t">落日 Sunset<code>#FF9A5A → #F2643A → #E8436B</code></div></div>
+    </div>
+    <div class="lbl-s" style="margin-top:22px">图标小方块（浅底 + 同色图标）</div>
+    <div class="row">
+      <span class="tile t-orange"><svg class="i"><use href="#i-bell"/></svg></span>
+      <span class="tile t-violet"><svg class="i"><use href="#i-cal"/></svg></span>
+      <span class="tile t-blue"><svg class="i"><use href="#i-spark"/></svg></span>
+      <span class="tile t-green"><svg class="i"><use href="#i-coffee"/></svg></span>
+      <span class="tile t-pink"><svg class="i"><use href="#i-mic"/></svg></span>
+      <span class="tile t-teal"><svg class="i"><use href="#i-lock"/></svg></span>
+      <span style="font-size:12.5px;color:var(--ink-2)">提醒 · 计划 · Agent · 休息 · 语音 · 隐私</span>
+    </div>
+  </div>
+
+  <div class="sec" id="s2">
+    <div class="sec-h"><span class="n">02</span><h2>状态色系统</h2></div>
+    <p class="sec-d">网页、RGB 灯、OLED 屏三端一致。OLED 是黑底白字的单色屏，所以每个状态都配一个图案。界面上状态始终是“颜色 + 文字”，不只靠颜色。</p>
+    <div class="grid g3">
+      <div class="card status-card"><span class="chip s-work"><span class="d"></span>工作中</span><p><code>#22A06B</code> · 灯：绿常亮 · 图案：空心圆</p><div class="oled"><div><div class="big">工作中</div><div class="sub">可以找我</div></div><div class="ico pat-ring"></div><div class="led" style="background:var(--st-work)"></div></div></div>
+      <div class="card status-card"><span class="chip s-busy"><span class="d"></span>忙碌 / 勿扰</span><p><code>#E5484D</code> · 灯：红常亮 · 图案：实心圆</p><div class="oled"><div><div class="big">请勿打扰</div><div class="sub">11:30 后有空</div></div><div class="ico pat-solid"></div><div class="led" style="background:var(--st-busy)"></div></div></div>
+      <div class="card status-card"><span class="chip s-focus"><span class="d"></span>专注中</span><p><code>#B4232C</code> · 灯：红慢呼吸 · 图案：半圆</p><div class="oled"><div><div class="big">专注中</div><div class="sub">剩余 23:00</div></div><div class="ico pat-half"></div><div class="led" style="background:var(--st-focus)"></div></div></div>
+      <div class="card status-card"><span class="chip s-meet"><span class="d"></span>会议中</span><p><code>#7C5CFA</code> · 灯：紫常亮 · 图案：斜线</p><div class="oled"><div><div class="big">会议中</div><div class="sub">10:30 – 11:30</div></div><div class="ico pat-hatch"></div><div class="led" style="background:var(--st-meet)"></div></div></div>
+      <div class="card status-card"><span class="chip s-rest"><span class="d"></span>休息中</span><p><code>#0EA5B7</code> · 灯：青色 · 图案：点阵</p><div class="oled"><div><div class="big">休息一下</div><div class="sub">15 分钟后回来</div></div><div class="ico pat-dots"></div><div class="led" style="background:var(--st-rest)"></div></div></div>
+      <div class="card status-card"><span class="chip s-off"><span class="d"></span>已下班</span><p><code>#3B4252</code> · 灯：熄灭 · 图案：月亮</p><div class="oled"><div><div class="big">已收工</div><div class="sub">明天 09:00 见</div></div><div class="ico pat-moon"></div><div class="led" style="background:transparent"></div></div></div>
+    </div>
+  </div>
+
+  <div class="sec" id="s3">
+    <div class="sec-h"><span class="n">03</span><h2>字体与文案</h2></div>
+    <p class="sec-d">只用系统字体，不加载海外字体；数字和时间用等宽字体，倒计时不跳动。</p>
+    <div class="grid g2">
+      <div class="card pad">
+        <div style="font:700 36px/1.25 var(--font)">清爽的控制台</div><div style="font-size:12px;color:var(--ink-3);margin-bottom:14px">Display 36/700 · 官网首屏、收工完成页</div>
+        <div style="font:700 26px/1.3 var(--font)">下午好，阿杰</div><div style="font-size:12px;color:var(--ink-3);margin-bottom:14px">H1 页面标题 26/700</div>
+        <div style="font:700 16px/1.4 var(--font)">今天要做的</div><div style="font-size:12px;color:var(--ink-3);margin-bottom:14px">H3 卡片标题 16/700</div>
+        <div style="font:600 14px/1.5 var(--font)">提交本周周报</div><div style="font-size:12px;color:var(--ink-3);margin-bottom:14px">列表标题 14/600</div>
+        <div style="font:400 12.5px/1.5 var(--font);color:var(--ink-2)">下班前提醒 · 到点时设备和手机同时提示</div><div style="font-size:12px;color:var(--ink-3);margin-bottom:14px">说明 12.5/400</div>
+        <div class="num" style="font-size:40px;font-weight:700">02:48:10</div><div style="font-size:12px;color:var(--ink-3)">Timer 等宽 40/700 · tabular-nums</div>
+      </div>
+      <div class="card pad">
+        <div class="lbl-s">文案原则</div>
+        <div class="grid" style="gap:10px">
+          <div class="do"><svg class="i"><use href="#i-check"/></svg><span>今天在“工作中”状态 6 小时 20 分</span></div>
+          <div class="dont"><svg class="i"><use href="#i-x"/></svg><span>你今天工作了 6 小时，效率超过 80% 的同事</span></div>
+          <div class="do"><svg class="i"><use href="#i-check"/></svg><span>陈姐 · 最后更新 09:42 · 可能已过期</span></div>
+          <div class="dont"><svg class="i"><use href="#i-x"/></svg><span>陈姐 · 工作中（实际已离线 3 小时）</span></div>
+          <div class="do"><svg class="i"><use href="#i-check"/></svg><span>iOS 不允许网页直接开启专注模式，可以改用快捷指令</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec" id="s4">
+    <div class="sec-h"><span class="n">04</span><h2>基础组件</h2></div>
+    <p class="sec-d">按钮、徽标、连接状态、列表行、空状态、撤销提示。</p>
+    <div class="grid g2">
+      <div class="card pad">
+        <div class="lbl-s">按钮</div>
+        <div class="row" style="margin-bottom:18px">
+          <button class="btn btn-primary"><svg class="i"><use href="#i-plus"/></svg>新建计划</button>
+          <button class="btn btn-secondary">取消</button>
+          <button class="btn btn-ghost">更多</button>
+          <button class="btn btn-danger">移除设备</button>
+          <button class="btn btn-primary" disabled>同步中…</button>
+        </div>
+        <div class="lbl-s">徽标与状态标签</div>
+        <div class="row" style="margin-bottom:18px">
+          <span class="badge b-beta">测试版</span><span class="badge b-new">新</span><span class="badge b-warn">待处理</span>
+          <span class="chip s-work"><span class="d"></span>工作中</span><span class="chip unknown">状态未知</span>
+        </div>
+        <div class="lbl-s">连接状态（始终可见）</div>
+        <div class="row">
+          <span class="conn"><i style="background:var(--st-work)"></i><svg class="i"><use href="#i-bt"/></svg>蓝牙已连接</span>
+          <span class="conn"><i style="background:var(--primary)"></i><svg class="i"><use href="#i-wifi"/></svg>同一 Wi‑Fi</span>
+          <span class="conn"><i style="background:#D69E2E"></i><svg class="i"><use href="#i-radio"/></svg>ESP-NOW 网关</span>
+          <span class="conn"><i style="background:var(--ink-3)"></i>离线 · 18:02</span>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <div class="empty"><span class="tile t-violet"><svg class="i" style="width:22px;height:22px"><use href="#i-device"/></svg></span><b>还没有连接收工牌</b><p>用 Chrome 或 Edge 打开本页，点击下方按钮，通过蓝牙连接设备。</p><button class="btn btn-primary"><svg class="i"><use href="#i-bt"/></svg>连接设备</button></div>
+        </div>
+        <div class="toast"><span>已收工，今天辛苦了。</span><a href="#">撤销 (9s)</a></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec" id="s5">
+    <div class="sec-h"><span class="n">05</span><h2>手机端</h2></div>
+    <p class="sec-d">同一套卡片，侧栏变为底部 5 个标签页；收工卡片固定在首屏。</p>
+    <div class="grid g2" style="align-items:center">
+      <div class="phone"><div class="in">
+        <div class="row" style="justify-content:space-between"><div><div style="font-weight:800;font-size:18px">下午好，阿杰</div><div style="font-size:12px;color:var(--ink-2)">今天 18:00 收工</div></div><span class="icon-btn"><svg class="i"><use href="#i-bell"/></svg><span class="dot-alert"></span></span></div>
+        <section class="card"><div class="card-b">
+          <div class="row" style="justify-content:space-between;margin-bottom:12px"><b>收工牌-A12</b><span class="conn"><i style="background:var(--st-work)"></i>蓝牙</span></div>
+          <div class="oled"><div><div class="big">请勿打扰</div><div class="sub">11:30 后有空</div></div><div class="ico pat-solid"></div><div class="led glow" style="background:var(--st-busy);color:var(--st-busy)"></div></div>
+          <div class="presets" style="grid-template-columns:repeat(2,1fr)">
+            <div class="preset"><span class="d" style="background:var(--st-work)"></span>工作中</div>
+            <div class="preset on" style="--c:var(--st-busy)"><span class="d" style="background:var(--st-busy)"></span>勿扰</div>
+            <div class="preset"><span class="d" style="background:var(--st-meet)"></span>会议中</div>
+            <div class="preset"><span class="d" style="background:var(--st-rest)"></span>休息中</div>
+          </div>
+        </div></section>
+        <section class="card offwork"><div class="card-b" style="padding:16px">
+          <div class="lbl"><svg class="i" style="width:14px;height:14px"><use href="#i-sunset"/></svg>距离计划收工</div>
+          <div class="big" style="font-size:30px">02:48:10</div>
+          <button class="btn hold" data-hold style="margin-top:8px"><span class="fill"></span><span>按住收工</span></button>
+        </div></section>
+        <div class="tabbar">
+          <span class="on"><svg class="i"><use href="#i-dash"/></svg>总览</span>
+          <span><svg class="i"><use href="#i-cal"/></svg>计划</span>
+          <span><svg class="i"><use href="#i-list"/></svg>提醒</span>
+          <span><svg class="i"><use href="#i-users"/></svg>看板</span>
+          <span><svg class="i"><use href="#i-user"/></svg>我的</span>
+        </div>
+      </div></div>
+      <div class="card pad">
+        <div class="lbl-s">布局与尺寸</div>
+        <div class="grid" style="gap:12px;font-size:13px;color:var(--ink-2)">
+          <div><b style="color:var(--ink)">断点</b>　&lt;640 手机单列 + 底部标签页；640–1100 侧栏可收起、卡片单列；≥1100 侧栏 236px + 主列 1.7 : 副列 1</div>
+          <div><b style="color:var(--ink)">间距</b>　4 的倍数；卡片之间 20px，卡片内边距 20–22px，列表行高约 64px</div>
+          <div><b style="color:var(--ink)">圆角</b>　徽标 6 · 控件/图标方块 10 · 卡片 16 · 外框 22 · 按钮和状态标签全圆角</div>
+          <div><b style="color:var(--ink)">阴影</b>　卡片只用极浅阴影 + 1px 线；悬浮按钮、浮层、设备镜像用较深阴影</div>
+          <div><b style="color:var(--ink)">图标</b>　24 网格线性图标，线宽 1.8，圆角端点；开发时建议用 Lucide 图标库统一风格</div>
+          <div><b style="color:var(--ink)">动效</b>　悬停 150ms；状态切换时设备镜像做 OLED 式瞬时淡入过渡；收工完成播放一次落日渐变；尊重“减少动态效果”</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script type="module">
+import { initAllHoldButtons, showUndoToast } from "../scripts/hold-button.js";
+for (const { el, reset } of initAllHoldButtons()) {
+  const label = [...el.querySelectorAll("span")].pop();
+  const original = label.textContent;
+  el.addEventListener("hold:complete", () => {
+    label.textContent = "已收工";
+    showUndoToast({ message: "已收工，今天辛苦了。", onUndo: () => { reset(); label.textContent = original; } });
+  });
+}
+</script>
+</body>
+</html>

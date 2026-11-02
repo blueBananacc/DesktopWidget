@@ -1,0 +1,45 @@
+/* 收工牌 Design Tokens v1.0 — see website/design-research/DESIGN_SPEC.md */
+:root {
+  --canvas: #F5F6F8;
+  --surface: #FFFFFF;
+  --surface-2: #F9FAFB;
+  --line: #ECEEF2;
+  --line-2: #E2E5EB;
+  --ink: #141A24;
+  --ink-2: #5A6475;
+  --ink-3: #9AA3B2;
+
+  --primary: #4C5CF6;
+  --primary-hover: #3D4BE0;
+  --primary-soft: #EEF0FE;
+
+  --sunset-1: #FF9A5A;
+  --sunset-2: #F2643A;
+  --sunset-3: #E8436B;
+  --brand-gradient: linear-gradient(135deg, var(--primary), #8B5CF6);
+  --sunset-gradient: linear-gradient(140deg, var(--sunset-1) 0%, var(--sunset-2) 48%, var(--sunset-3) 100%);
+
+  --hold-duration: 1.5s;
+  --undo-window: 10s;
+
+  --st-work: #22A06B;   --st-work-soft: #E6F6EE;
+  --st-busy: #E5484D;   --st-busy-soft: #FDECEC;
+  --st-focus: #B4232C;  --st-focus-soft: #F9E3E4;
+  --st-meet: #7C5CFA;   --st-meet-soft: #F0EBFF;
+  --st-rest: #0EA5B7;   --st-rest-soft: #E2F6F8;
+  --st-off: #3B4252;    --st-off-soft: #ECEEF2;
+
+  --t-orange: #FFF1EA; --t-orange-i: #F2643A;
+  --t-violet: #F0EBFF; --t-violet-i: #7C5CFA;
+  --t-blue: #EAF1FF;   --t-blue-i: #3B76F6;
+  --t-green: #E6F6EE;  --t-green-i: #22A06B;
+  --t-pink: #FDEBF3;   --t-pink-i: #D9468F;
+  --t-teal: #E2F6F8;   --t-teal-i: #0EA5B7;
+
+  --r-xs: 6px; --r-sm: 10px; --r-md: 16px; --r-lg: 22px; --r-pill: 999px;
+  --shadow-1: 0 1px 2px rgba(16,24,40,.04);
+  --shadow-2: 0 8px 24px -8px rgba(16,24,40,.12);
+  --shadow-3: 0 30px 80px -30px rgba(16,24,40,.28);
+  --font: "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --font-num: "JetBrains Mono", "SF Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+}
