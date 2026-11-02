@@ -12,17 +12,17 @@
 - BLE 下单条按 180 字节分包（`bleTransport.ts` 的 `CHUNK`）；固件按行重组
 - **UUID 已正式启用**（`protocol.ts` 底部三个 NUS 风格 UUID，固件同款）；设备广播名 `Shougong-A1`，前缀 `Shougong`
 - 上行（设备→网页）：hello（客户端订阅 TX 后发）/ touch(left|right) / shortcut(single|long) / offworkKey / knob（暂留）/ breakState（休息提醒计时镜像：minutes+accumMs+enabled+offToday+due，连接后、每 10s、到点各发一次）/ wantTime（设备未校时请求 time）/ segments{phase:begin|end} + seg{status,start,end?}（今日状态区间全量推送：连接后、状态变化 ~2s 内、每 10 分钟兜底）
-- 下行（网页→设备）：state（status+screen+sub+led+brightness 0–100）/ schedule（固件 v0.1 暂不处理）/ time（epoch ms + tzOffsetMin，驱动 OLED 时钟）/ break（minutes+enabled+offToday，可选 accumMs；仅用户操作时发送，连接快照不携带）
+- 下行（网页→设备）：state（status+screen+sub+led+brightness 0–100）/ schedule（**设备自治执行，v0.4.0 起**：kind=repeat 按 weekdays / kind=date 按单日；nodes={time,status} 最多 32 个；override=当天单日计划覆盖主表；paused=网页今日暂停；mode=next|today 为手动干预恢复策略——next=手动切状态挂起到下个节点，today=手动切状态即今日暂停；**今天进入过 off 即视今日计划完成，后续所有节点作废**，手动切回工作/其他状态不受影响且正常记录；跨天全部重置）/ time（epoch ms + tzOffsetMin，驱动 OLED 时钟与计划表；设备需先校时一次，之后不断电即可断连自治）/ break（minutes+enabled+offToday，可选 accumMs；仅用户操作时发送，连接快照不携带）/ keys（k1–k4 动作映射：offwork/focus25/pauseToday/状态 id；设备离线时按键按此执行，连接时按键只上报事件由网页 runKey 统一处理）
 
 ## 设备端事件映射（固件 v0.1）
 
 | 输入 | 上报事件 | 网页响应 |
 |---|---|---|
-| K1 收工键 | `offworkKey` | 触发收工流程 |
+| K1 收工键（**按住 1.5s 才触发**，松早了取消；离线同规则） | `offworkKey` | 触发收工流程 |
 | K2 快捷键 短按/长按 | `shortcut` | 按设置切换状态/启动专注 25′ |
 | K3 / K4（暂代触摸区） | `touch` left / right | 切到 touchLeft / touchRight 状态 |
 | 电容触摸 GPIO13/14 | 同 touch（`ENABLE_CAPSENSE=1` 后启用） | 同上 |
-| 网页为状态大脑：设备只报事件，显示文本由 `state.screen/sub` 决定；未连接时按键仅本地演示 |
+| 网页为状态大脑：设备只报事件，显示文本由 `state.screen/sub` 决定；未连接时按键按最近一次下发的 keys 映射本地执行（出厂默认 K1=收工、K2=请勿打扰、K3/K4=状态循环），其中 pauseToday 直接切换本地 schedPausedLocal |
 
 ## 休息提醒（固件 v0.2 起设备自治）
 

@@ -8,6 +8,7 @@
  *  - 4 位按键：K1 收工键 / K2 快捷键（短按、长按）/ K3·K4 暂代左右触摸区
  *  - 电容触摸区（GPIO13/14 + 铜箔电极）代码已写好，ENABLE_CAPSENSE 置 1 启用
  *  - 休息提醒：设备自治累计工作类状态时长，到点 OLED 提醒 + RGB 闪烁 3s，自动下一轮
+ *  - 计划表：网页 schedule 消息下发后由设备自治执行（需先校时一次；之后不断电即可断连自治）
  *
  * 依赖库（Arduino 库管理器安装）：
  *  - NimBLE-Arduino 2.x（h2zero）
@@ -26,7 +27,7 @@
 
 // ===================== 配置 =====================
 
-#define FIRMWARE_VER   "0.3.1"
+#define FIRMWARE_VER   "0.4.0"
 #define DEVICE_NAME    "Shougong-A1"
 #define ENABLE_CAPSENSE 0   // 有铜箔电极接 GPIO13/14 后改为 1
 
@@ -99,6 +100,29 @@ uint32_t breakReportMs = 0;       // breakState 心跳
 int32_t  breakDay = -1;           // 已校时的日期编号，跨天自动清零
 uint32_t lastWantTime = 0;        // 未校时时定期向网页/app 请求 time 消息
 
+// 计划表（网页下发后设备自治执行；只存生效的一张表。校时过一次即永久可用，直到断电）
+struct SchedNode { uint16_t min; char status[8]; };
+SchedNode schedNodes[32];
+int      schedCount = 0;
+uint8_t  schedWeekdays = 0x7F;    // kind=repeat：bit0=周日…bit6=周六；缺省每天适用（兼容旧格式）
+bool     schedDateSet = false;    // kind=date 时才看下面三个字段
+int      schedY = 0, schedMo = 0, schedD = 0;
+bool     schedPaused = false;     // 网页 pausedToday：今天暂停执行
+bool     schedModeToday = false;  // mode="today"：手动切状态则今天暂停（对应 overrideMode=pauseToday）
+bool     schedPausedLocal = false;// mode=today 下本地手动干预导致的今日暂停（跨天清除，网页快照不清它）
+bool     schedHold = false;       // mode="next"：手动切状态后挂起，到下个节点恢复
+int32_t  schedDay = -1;           // 计划表使用的日期编号（跨天重置暂停/挂起）
+int      schedLastMin = -1;       // 上次执行检查的分钟，分钟粒度去重
+int32_t  offSetDay = -1;          // 进入 off 状态的日期编号；当天的非 off 节点不再自动切（blockedByOffwork）
+// 当日单日计划（override）：date==今天时覆盖主表执行，跨天自动失效；仍只占一份空间
+SchedNode ovrNodes[16];
+int      ovrCount = 0;
+bool     ovrSet = false;
+int      ovrY = 0, ovrMo = 0, ovrD = 0;
+
+// 按键映射（网页 keys 消息下发；设备离线时按此执行。cycleL/cycleR 为出厂默认，网页不下发这两个值）
+char keyAct[4][12] = { "offwork", "busy", "cycleL", "cycleR" };  // K1 K2 K3 K4
+
 // 今日状态区间记录（设备是时长记录权威；millis 域时间戳，推送时按校时基准换算 epoch）
 struct Seg { char status[8]; uint32_t startMs; uint32_t endMs; };  // endMs=0 表示进行中
 Seg      segs[96];
@@ -106,8 +130,63 @@ int      segCount = 0;
 bool     segDirty = false;
 uint32_t lastSegPush = 0;
 
+// 本地时间换算（校时后可用）
+int64_t localEpochMs() { return epochBase + millis() - epochBaseMs + (int64_t)tzOffsetMin * 60000; }
+int32_t dayOf(int64_t e) { return (int32_t)(e / 86400000); }
+int     minOf(int64_t e) { return (int)((e % 86400000) / 60000); }
+int     weekdayOf(int32_t day) { return (int)((day + 4) % 7); }   // 0=周日；1970-01-01=周四
+// 天数→年月日（Hinnant civil_from_days）
+void daysToYMD(int32_t z, int &y, int &m, int &d) {
+  z += 719468;
+  const int32_t era = (z >= 0 ? z : z - 146096) / 146097;
+  const uint32_t doe = (uint32_t)(z - era * 146097);
+  const uint32_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  y = (int)yoe + era * 400;
+  const uint32_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  const uint32_t mp = (5 * doy + 2) / 153;
+  d = (int)(doy - (153 * mp + 2) / 5 + 1);
+  m = (int)(mp < 10 ? mp + 3 : mp - 9);
+  y += (m <= 2);
+}
+bool schedApplies(int32_t day) {
+  if (schedDateSet) {
+    int y, m, d; daysToYMD(day, y, m, d);
+    return y == schedY && m == schedMo && d == schedD;
+  }
+  return (schedWeekdays >> weekdayOf(day)) & 1;
+}
+bool ovrApplies(int32_t day) {
+  if (!ovrSet) return false;
+  int y, m, d; daysToYMD(day, y, m, d);
+  return y == ovrY && m == ovrMo && d == ovrD;
+}
+// 当天实际执行的节点表（单日计划优先，其次主表）。返回值/签名不含自定义类型，避开 .ino 自动原型提升的类型问题
+const SchedNode* curTable = schedNodes;
+int tableFor(int32_t day) {
+  if (ovrApplies(day))   { curTable = ovrNodes;   return ovrCount; }
+  if (schedApplies(day)) { curTable = schedNodes; return schedCount; }
+  curTable = schedNodes; return 0;
+}
+// 应处节点索引（作用于 curTable）：最后一个 min <= nowMin 的节点，没有则 -1
+int expectedIdxOf(int count, int nowMin) {
+  int idx = -1;
+  for (int i = 0; i < count; i++) if (curTable[i].min <= nowMin) idx = i;
+  return idx;
+}
+// 手动切状态（按键或网页下发）且与计划应处状态不同 → 按模式挂起/暂停计划表
+void registerManualOverride(const char* newStatus) {
+  if (epochBase < 0) return;
+  const int64_t e = localEpochMs();
+  const int count = tableFor(dayOf(e));
+  if (count == 0) return;
+  const int exp = expectedIdxOf(count, minOf(e));
+  if (exp >= 0 && !strcmp(curTable[exp].status, newStatus)) return;
+  if (schedModeToday) schedPausedLocal = true; else schedHold = true;
+}
+
 void markStatus(const char* id) {
   const uint32_t now = millis();
+  if (!strcmp(id, "off") && epochBase >= 0) offSetDay = dayOf(localEpochMs()); // 记录收工日，挡当天后续节点
   if (segCount > 0 && segs[segCount - 1].endMs == 0) segs[segCount - 1].endMs = now;
   if (segCount < 96) {
     strncpy(segs[segCount].status, id, sizeof(segs[0].status) - 1);
@@ -225,7 +304,7 @@ void handleLine(const String& line) {
     uint8_t br = doc["brightness"] | 40;
     // 与当前完全一致时跳过：避免同状态重按导致 OLED 闪屏
     if (nId != curStatusId || nm != scrMain || ns != scrSub || lm != ledMode || br != ledBrightness) {
-      if (nId != curStatusId) markStatus(st);
+      if (nId != curStatusId) { markStatus(st); registerManualOverride(st); }
       curStatusId = nId; scrMain = nm; scrSub = ns; ledMode = lm; ledBrightness = br;
       oledDirty = true;
     }
@@ -243,10 +322,77 @@ void handleLine(const String& line) {
     if (!doc["offToday"].isNull())  breakOffToday = doc["offToday"];
     if (!doc["accumMs"].isNull())   breakAccumMs  = doc["accumMs"];
     sendBreakState(false);                  // 回执：让网页立即对齐
+  } else if (!strcmp(type, "schedule")) {
+    // 网页把生效计划表完整下发；之后设备自治执行（repeat 按星期，date 按日期）
+    schedCount = 0;
+    schedWeekdays = 0;
+    schedDateSet = false;
+    const char* kind = doc["kind"] | "repeat";
+    if (!strcmp(kind, "date")) {
+      const char* d = doc["date"] | "";
+      int y, m, dd;
+      if (strlen(d) >= 8 && sscanf(d, "%d-%d-%d", &y, &m, &dd) == 3) {
+        schedY = y; schedMo = m; schedD = dd; schedDateSet = true;
+      }
+    } else if (doc["weekdays"].is<JsonArray>()) {
+      for (JsonVariant v : doc["weekdays"].as<JsonArray>()) schedWeekdays |= (uint8_t)(1u << (((int)v) % 7));
+    } else {
+      schedWeekdays = 0x7F;                 // 旧格式没带星期：当作每天适用
+    }
+    schedModeToday = !strcmp(doc["mode"] | "next", "today");
+    schedPaused = doc["paused"] | false;    // 只更新网页侧暂停；本地干预标志不被快照覆盖
+    for (JsonObject n : doc["nodes"].as<JsonArray>()) {
+      const char* t = n["time"] | "";
+      const char* st = n["status"] | "work";
+      int hh, mm;
+      if (schedCount < 32 && sscanf(t, "%d:%d", &hh, &mm) == 2) {
+        schedNodes[schedCount].min = (uint16_t)(hh * 60 + mm);
+        strncpy(schedNodes[schedCount].status, st, sizeof(schedNodes[0].status) - 1);
+        schedNodes[schedCount].status[sizeof(schedNodes[0].status) - 1] = 0;
+        schedCount++;
+      }
+    }
+    // 按时间排序（网页已排序，防御性再来一遍）
+    for (int i = 1; i < schedCount; i++) {
+      SchedNode tmp = schedNodes[i];
+      int j = i - 1;
+      while (j >= 0 && schedNodes[j].min > tmp.min) { schedNodes[j + 1] = schedNodes[j]; j--; }
+      schedNodes[j + 1] = tmp;
+    }
+    // 当日单日计划（override）：date==今天时覆盖主表
+    ovrSet = false; ovrCount = 0;
+    if (doc["override"].is<JsonObject>()) {
+      JsonObject ov = doc["override"].as<JsonObject>();
+      const char* d = ov["date"] | "";
+      int y, m, dd;
+      const bool ok = strlen(d) >= 8 && sscanf(d, "%d-%d-%d", &y, &m, &dd) == 3;
+      for (JsonObject n : ov["nodes"].as<JsonArray>()) {
+        const char* t = n["time"] | "";
+        const char* st = n["status"] | "work";
+        int hh, mm;
+        if (ovrCount < 16 && sscanf(t, "%d:%d", &hh, &mm) == 2) {
+          ovrNodes[ovrCount].min = (uint16_t)(hh * 60 + mm);
+          strncpy(ovrNodes[ovrCount].status, st, sizeof(ovrNodes[0].status) - 1);
+          ovrNodes[ovrCount].status[sizeof(ovrNodes[0].status) - 1] = 0;
+          ovrCount++;
+        }
+      }
+      if (ok && ovrCount) { ovrSet = true; ovrY = y; ovrMo = m; ovrD = dd; }
+    }
+    schedLastMin = -1;                      // 立即按新表重算一次
+    Serial.printf("[SCHED] loaded %d nodes, weekdays=0x%02X date=%s ovr=%d paused=%d mode=%s\n",
+      schedCount, schedWeekdays, schedDateSet ? "set" : "none", ovrCount, schedPaused, schedModeToday ? "today" : "next");
+  } else if (!strcmp(type, "keys")) {
+    // 按键映射下发：设备离线时按此执行（K1 仍须按住 1.5s）
+    const char* ks[4] = { "k1", "k2", "k3", "k4" };
+    for (int i = 0; i < 4; i++) {
+      const char* a = doc[ks[i]] | "";
+      if (strlen(a) && strlen(a) < sizeof(keyAct[0])) { strncpy(keyAct[i], a, sizeof(keyAct[0]) - 1); keyAct[i][sizeof(keyAct[0]) - 1] = 0; }
+    }
+    Serial.printf("[KEYS] %s %s %s %s\n", keyAct[0], keyAct[1], keyAct[2], keyAct[3]);
   } else if (!strcmp(type, "sync")) {
     wantHello = true;                        // 网页握手 → 回 hello
   }
-  // schedule 消息 v0.1 先忽略：网页是状态大脑，设备仅显示
 }
 
 // ===================== BLE 回调 =====================
@@ -310,7 +456,16 @@ Key keys[] = {
   { KEY_TOUCH_L,  "touchL",     nullptr, true, 0, false, false, false },
   { KEY_TOUCH_R,  "touchR",     nullptr, true, 0, false, false, false },
 };
-constexpr uint32_t DEBOUNCE_MS = 30, LONG_MS = 600;
+constexpr uint32_t DEBOUNCE_MS = 30, LONG_MS = 600, OFFWORK_HOLD_MS = 1500;  // K1 收工须按住 1.5s（对齐网页按住收工，防误触）
+
+void applyKeyAction(const char* act) {
+  if (!strcmp(act, "offwork"))         { setLocalStatus("off");   registerManualOverride("off"); }
+  else if (!strcmp(act, "pauseToday")) { schedPausedLocal = !schedPausedLocal; Serial.printf("[KEY] pauseToday=%d\n", schedPausedLocal); }
+  else if (!strcmp(act, "focus25"))    { setLocalStatus("focus"); registerManualOverride("focus"); }
+  else if (!strcmp(act, "cycleL"))     { cycleLocal(-1); registerManualOverride(curStatusId.c_str()); }
+  else if (!strcmp(act, "cycleR"))     { cycleLocal(1);  registerManualOverride(curStatusId.c_str()); }
+  else                                 { setLocalStatus(act);     registerManualOverride(act); }
+}
 
 void pollKeys() {
   for (auto& k : keys) {
@@ -325,22 +480,27 @@ void pollKeys() {
     if (k.pin == KEY_SHORTCUT) {
       if (pressed && !k.longSent && now - k.t0 > LONG_MS) {
         sendLine(F("{\"type\":\"shortcut\",\"press\":\"long\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0;
-        if (!bleConnected) setLocalStatus("focus");        // 离线：长按 = 专注中
+        if (!bleConnected) { setLocalStatus("focus"); registerManualOverride("focus"); }   // 离线：长按固定 = 专注中
       } else if (!pressed && !k.longSent && k.sawPress && now - k.t0 > DEBOUNCE_MS) {
         sendLine(F("{\"type\":\"shortcut\",\"press\":\"single\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0;
-        if (!bleConnected) setLocalStatus("busy");         // 离线：短按 = 请勿打扰（对齐网页默认映射）
+        if (!bleConnected) applyKeyAction(keyAct[1]);    // 离线：短按按网页下发的 K2 映射执行
+      }
+    } else if (k.pin == KEY_OFFWORK) {
+      // K1：按住 1.5s 才触发收工动作（与网页按住收工一致，防误触）；松早了取消
+      if (pressed && !k.longSent && now - k.t0 > OFFWORK_HOLD_MS) {
+        k.longSent = true; k.sawPress = false; breakNoticeUntil = 0;
+        sendLine(F("{\"type\":\"offworkKey\"}"));
+        if (!bleConnected) applyKeyAction(keyAct[0]);
+      } else if (!pressed) {
+        k.sawPress = false;
       }
     } else if (pressed && now - k.t0 > DEBOUNCE_MS && !k.longSent) {
       k.longSent = true;
       breakNoticeUntil = 0;                // 任意按键提前关闭提醒画面
       if (!strcmp(k.ev1, "touchL")) sendLine(F("{\"type\":\"touch\",\"zone\":\"left\"}"));
       else if (!strcmp(k.ev1, "touchR")) sendLine(F("{\"type\":\"touch\",\"zone\":\"right\"}"));
-      else sendLine(F("{\"type\":\"offworkKey\"}"));
-      // 离线默认：K1 收工键=已收工；K3/K4（左右触摸区）= 上一个/下一个状态循环
-      if (!bleConnected) {
-        if (k.pin == KEY_OFFWORK) setLocalStatus("off");
-        else cycleLocal(k.pin == KEY_TOUCH_L ? -1 : 1);
-      }
+      // 离线：K3/K4 按网页下发的映射执行（出厂默认 = 上一个/下一个状态循环）
+      if (!bleConnected) applyKeyAction(k.pin == KEY_TOUCH_L ? keyAct[2] : keyAct[3]);
     }
   }
 }
@@ -357,6 +517,36 @@ void cycleLocal(int dir) {
   const int n = sizeof(STATUSES) / sizeof(STATUSES[0]);
   for (int i = 0; i < n; i++) if (!strcmp(STATUSES[i].id, curStatusId.c_str())) idx = i;
   setLocalStatus(STATUSES[(idx + dir + n) % n].id);
+}
+
+// ===================== 计划表执行（设备自治） =====================
+
+void pollSchedule() {
+  if (epochBase < 0) return;                         // 未校时无法执行（wantTime 会持续请求）
+  const int64_t e = localEpochMs();
+  const int32_t day = dayOf(e);
+  const int nowMin = minOf(e);
+  if (day != schedDay) {                             // 跨天：今天的暂停/挂起/收工阻断全部重置
+    schedDay = day; schedPaused = false; schedPausedLocal = false; schedHold = false; schedLastMin = -1;
+  }
+  const int count = tableFor(day);                   // 单日计划优先于主表；适用表写入 curTable
+  if (count == 0) return;
+  if (nowMin == schedLastMin) return;                // 每分钟最多评估一次
+  const int prevMin = schedLastMin; schedLastMin = nowMin;
+  // mode="next"：跨过节点边界 → 手动干预结束，计划表恢复执行
+  if (prevMin >= 0 && schedHold) {
+    for (int i = 0; i < count; i++)
+      if (curTable[i].min > prevMin && curTable[i].min <= nowMin) { schedHold = false; break; }
+  }
+  if (schedPaused || schedPausedLocal || schedHold) return;
+  const int exp = expectedIdxOf(count, nowMin);
+  if (exp < 0) return;                               // 首个节点之前不干预
+  const char* expStatus = curTable[exp].status;
+  if (offSetDay == day) return;                          // 今天已收工 = 今日计划完成，所有节点作废（手动切换不受影响）
+  if (strcmp(expStatus, curStatusId.c_str())) {
+    Serial.printf("[SCHED] %02d:%02d -> %s\n", nowMin / 60, nowMin % 60, expStatus);
+    setLocalStatus(expStatus);
+  }
 }
 
 // ===================== 休息提醒 =====================
@@ -449,6 +639,7 @@ void loop() {
   pollKeys();
   pollTouch();
   pollBreak();
+  pollSchedule();
   // 串口通道：与 BLE 共用同一套 JSON 行协议
   static String serBuf;
   while (Serial.available()) {

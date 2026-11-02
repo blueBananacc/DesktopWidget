@@ -165,7 +165,7 @@ const tick = (s: AppState, now: number): AppState => {
   const node = currentNode(sched, now);
   const key = node ? `${today}:${node.id}` : undefined;
   if (node && key !== next.lastAppliedNode) {
-    const blockedByOffwork = next.offworkToday && node.status !== "off";
+    const blockedByOffwork = next.offworkToday; // 收工 = 今日计划完成，所有节点作废（手动切回工作不受影响）
     next = { ...next, lastAppliedNode: key };
     if (!next.pausedToday && !blockedByOffwork && next.current.id !== node.status) {
       next = applyStatus(next, node.status, "schedule", now, scheduleUntil(next, now), node.note);
@@ -295,7 +295,8 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
   deleteSchedule(id: string) {
     set((s) => {
       const schedules = s.schedules.filter((x) => x.id !== id);
-      const activeScheduleId = s.activeScheduleId === id ? schedules.find((x) => x.kind === "repeat")?.id ?? "" : s.activeScheduleId;
+      // 删除生效中的重复计划 → 不再启用任何表，设备上这份计划随之清空（不静默换另一张）
+      const activeScheduleId = s.activeScheduleId === id ? "" : s.activeScheduleId;
       return { ...s, schedules, activeScheduleId };
     });
   },
@@ -404,10 +405,24 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     const t = transportRef.current;
     if (!t) return;
     const st = stateRef.current;
-    const sched = scheduleForDay(st.schedules, st.activeScheduleId, Date.now());
+    const main = st.schedules.find((x) => x.id === st.activeScheduleId && x.kind === "repeat");
+    const eff = scheduleForDay(st.schedules, st.activeScheduleId, Date.now());
+    const nodesOf = (sc: typeof eff) => (sc ? sortedNodes(sc).map(({ time, status }) => ({ time, status })) : []);
     await t.send(toOutbound(st));
     await t.send({ type: "time", epoch: Date.now(), tzOffsetMin: -new Date().getTimezoneOffset() });
-    await t.send({ type: "schedule", nodes: sched ? sortedNodes(sched).map(({ time, status }) => ({ time, status })) : [], paused: st.pausedToday, ts: Date.now() });
+    // 生效计划表下发设备自治执行：主表=选中的重复计划；今天的单日计划作 override 优先执行、跨天自动失效
+    await t.send({
+      type: "schedule",
+      kind: "repeat",
+      weekdays: main?.weekdays ?? [],
+      nodes: nodesOf(main),
+      override: eff && eff.kind === "date" && eff.date ? { date: eff.date, nodes: nodesOf(eff) } : undefined,
+      paused: st.pausedToday,
+      mode: st.settings.overrideMode === "pauseToday" ? "today" : "next",
+      ts: Date.now(),
+    });
+    // 按键映射下发：设备离线时按用户配置执行（含暂停/恢复今日计划）
+    await t.send({ type: "keys", k1: st.settings.keys.k1, k2: st.settings.keys.k2, k3: st.settings.keys.k3, k4: st.settings.keys.k4, ts: Date.now() });
     // 休息提醒不再随快照下发：间隔/开关/计时均以设备为准，连接后由 breakState 对齐网页
     setDevice((d) => ({ ...d, lastSyncAt: Date.now(), pending: 0 }));
   }, []);
@@ -419,7 +434,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       return;
     }
     sendSnapshot().catch(() => setDevice((d) => ({ ...d, pending: d.pending + 1 })));
-  }, [s.current, s.settings.led, s.settings.ledBrightness, s.schedules, s.activeScheduleId, s.pausedToday]);
+  }, [s.current, s.settings.led, s.settings.ledBrightness, s.settings.overrideMode, s.settings.keys, s.schedules, s.activeScheduleId, s.pausedToday]);
 
   const handleInbound = useCallback(
     (m: InboundMessage) => {
@@ -427,6 +442,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const runKey = (a: KeyAction, src: StatusSource) => {
         if (a === "offwork") actions.offwork("offwork");
         else if (a === "focus25") actions.startTimer(25);
+        else if (a === "pauseToday") actions.pauseToday(!cur.pausedToday);
         else if (a !== cur.current.id) actions.setStatus(a, src); // 同状态重按不产生新区间，也不重发设备
       };
       switch (m.type) {

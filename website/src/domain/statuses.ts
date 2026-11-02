@@ -23,7 +23,7 @@ export const STATUSES: Record<StatusId, StatusMeta> = {
 export const STATUS_ORDER: StatusId[] = ["work", "busy", "focus", "meet", "rest", "off"];
 
 export const keyActionLabel = (a: KeyAction): string =>
-  a === "offwork" ? "收工" : a === "focus25" ? "专注 25′" : STATUSES[a].label;
+  a === "offwork" ? "收工" : a === "focus25" ? "专注 25′" : a === "pauseToday" ? "暂停/恢复计划" : STATUSES[a].label;
 
 export const SOURCE_LABEL: Record<StatusSource, string> = {
   manual: "网页手动切换",

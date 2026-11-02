@@ -107,7 +107,10 @@ input[type="range"] { accent-color: var(--primary); width: 180px; }
 /* Timeline */
 .tl { position: relative; height: 40px; border-radius: var(--r-sm); overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); }
 .tl > div { position: absolute; top: 0; bottom: 0; font-size: 11px; color: #fff; padding: 4px 6px; white-space: nowrap; overflow: hidden; font-weight: 600; border-right: 1px solid rgba(255,255,255,.35); }
-.tl .now { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ink); box-shadow: 0 0 0 2px #fff; }
+.tl .now { position: absolute; top: -2px; bottom: -2px; width: 3px; background: var(--ink); box-shadow: 0 0 0 1.5px #fff, 0 0 6px rgba(16,24,40,.4); z-index: 2; }
+.tl .now[data-label]::after { content: attr(data-label); position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; font: 700 10px/1 var(--font-num); padding: 3px 5px; border-radius: 4px; white-space: nowrap; }
+.tl .now.edge-l::after { transform: translateX(-2px); }
+.tl .now.edge-r::after { transform: translateX(calc(-100% + 2px)); }
 .hours { display: flex; justify-content: space-between; font: 11px var(--font-num); color: var(--ink-3); margin-top: 6px; }
 
 /* Review */

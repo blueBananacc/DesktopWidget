@@ -70,8 +70,8 @@ export interface DeviceInfo {
 
 export type LedMode = "solid" | "breath" | "off";
 
-/** 实体按键动作：收工流程 / 25 分钟专注 / 直接切换状态 */
-export type KeyAction = "offwork" | "focus25" | StatusId;
+/** 实体按键动作：收工流程 / 25 分钟专注 / 暂停或恢复今日计划 / 直接切换状态 */
+export type KeyAction = "offwork" | "focus25" | "pauseToday" | StatusId;
 
 export interface KeyMap {
   k1: KeyAction; // 收工键

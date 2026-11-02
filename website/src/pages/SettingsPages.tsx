@@ -13,6 +13,7 @@ import { useToast } from "../ui/Toast";
 const KEY_ACTIONS: { value: KeyAction; label: string }[] = [
   { value: "offwork", label: "收工（结束今天）" },
   { value: "focus25", label: "开始 25 分钟专注" },
+  { value: "pauseToday", label: "暂停/恢复今日计划" },
   ...STATUS_ORDER.map((id) => ({ value: id as KeyAction, label: `切换为${STATUSES[id].label}` })),
 ];
 

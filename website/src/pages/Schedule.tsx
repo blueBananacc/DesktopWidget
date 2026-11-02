@@ -3,7 +3,7 @@ import { CalendarDays, Copy, Pencil, Plus, Trash2, Pause, Play, TriangleAlert } 
 import { useStore } from "../store/AppStore";
 import { STATUSES, STATUS_ORDER } from "../domain/statuses";
 import type { Schedule, StatusId } from "../domain/types";
-import { WEEK_SHORT, dateKey, toMinutes, uid } from "../domain/time";
+import { WEEK_SHORT, dateKey, hhmm, toMinutes, uid } from "../domain/time";
 import { conflicts, currentNode, nextNode, scheduleForDay, sortedNodes } from "../domain/schedule";
 import { Banner, Card, CardHeader, Modal, PageHeader, Segmented, StatusChip, Tile } from "../ui/Primitives";
 import { useToast } from "../ui/Toast";
@@ -27,7 +27,9 @@ function Timeline({ schedule, now, showNow }: { schedule: Schedule; now: number;
             </div>
           );
         })}
-        {showNow && nowMin > DAY_START && nowMin < DAY_END && <span className="now" style={{ left: `${pct(nowMin)}%` }} />}
+        {showNow && nowMin > DAY_START && nowMin < DAY_END && (
+          <span className={`now${pct(nowMin) < 8 ? " edge-l" : pct(nowMin) > 92 ? " edge-r" : ""}`} data-label={hhmm(now)} style={{ left: `${pct(nowMin)}%` }} />
+        )}
       </div>
       <div className="hours">{[7, 9, 11, 13, 15, 17, 19, 21].map((h) => <span key={h}>{String(h).padStart(2, "0")}:00</span>)}</div>
     </div>
@@ -35,7 +37,7 @@ function Timeline({ schedule, now, showNow }: { schedule: Schedule; now: number;
 }
 
 function Editor({ initial, onClose }: { initial: Schedule; onClose: () => void }) {
-  const { actions } = useStore();
+  const { actions, s } = useStore();
   const toast = useToast();
   const [draft, setDraft] = useState<Schedule>(initial);
   const dup = conflicts(draft);
@@ -47,7 +49,7 @@ function Editor({ initial, onClose }: { initial: Schedule; onClose: () => void }
       onClose={onClose}
       footer={<>
         <button className="btn btn-ghost" onClick={onClose}>取消</button>
-        <button className="btn btn-primary" disabled={!valid} onClick={() => { actions.saveSchedule(draft); toast({ message: "计划表已保存，已同步到设备" }); onClose(); }}>保存</button>
+        <button className="btn btn-primary" disabled={!valid} onClick={() => { actions.saveSchedule(draft); const onDevice = draft.kind === "date" ? draft.date === dateKey(Date.now()) : draft.id === s.activeScheduleId; toast({ message: onDevice ? "已保存并同步到设备" : "已保存（未启用，不会下发到设备）" }); onClose(); }}>保存</button>
       </>}
     >
       <div className="form">
@@ -89,7 +91,8 @@ function Editor({ initial, onClose }: { initial: Schedule; onClose: () => void }
 }
 
 export function SchedulePage() {
-  const { s, now, actions } = useStore();
+  const { s, now, device, actions } = useStore();
+  const connected = device.state === "connected";
   const toast = useToast();
   const [editing, setEditing] = useState<Schedule | null>(null);
   const today = scheduleForDay(s.schedules, s.activeScheduleId, now);
@@ -109,8 +112,8 @@ export function SchedulePage() {
           icon={<Tile color="violet" size={30}><CalendarDays /></Tile>}
           title={today ? `今天生效：${today.name}` : "今天没有生效的计划表"}
           extra={today && (s.pausedToday
-            ? <button className="btn btn-primary btn-sm" onClick={() => { actions.pauseToday(false); toast({ message: "已恢复今日计划" }); }}><Play />恢复计划</button>
-            : <button className="btn btn-secondary btn-sm" onClick={() => { actions.pauseToday(true); toast({ message: "今日计划已暂停，状态不再自动切换" }); }}><Pause />暂停今日计划</button>)}
+            ? <button className="btn btn-primary btn-sm" disabled={!connected} title={connected ? "" : "连接设备后才能操作"} onClick={() => { actions.pauseToday(false); toast({ message: "已恢复今日计划" }); }}><Play />恢复计划</button>
+            : <button className="btn btn-secondary btn-sm" disabled={!connected} title={connected ? "" : "连接设备后才能操作"} onClick={() => { actions.pauseToday(true); toast({ message: "今日计划已暂停，状态不再自动切换" }); }}><Pause />暂停今日计划</button>)}
         />
         <div className="card-b" style={{ display: "grid", gap: 16 }}>
           {today ? <Timeline schedule={today} now={now} showNow /> : <p className="hint">在下方选择一个重复计划，或新建单日计划。</p>}
@@ -120,7 +123,7 @@ export function SchedulePage() {
             <div><div className="hint">手动切换时</div><b>{s.settings.overrideMode === "untilNextNode" ? "只覆盖到下一个节点" : "暂停今日计划"}</b></div>
           </div>
           {s.pausedToday && <Banner tone="warn" icon={<Pause className="i" />}>今日计划已暂停，到点不会自动切换状态。</Banner>}
-          {s.offworkToday && <Banner tone="info" icon={<CalendarDays className="i" />}>今天已收工，后续工作节点不会再把状态切回工作。</Banner>}
+          {s.offworkToday && <Banner tone="info" icon={<CalendarDays className="i" />}>今天已收工，后续计划节点不会再自动切换；手动切回工作不受影响，也会正常记录。</Banner>}
         </div>
       </Card>
 
@@ -150,7 +153,11 @@ export function SchedulePage() {
                   <div className="row" style={{ gap: 2 }}>
                     <button className="icon-btn" aria-label="编辑" onClick={() => setEditing(sc)}><Pencil className="i" /></button>
                     <button className="icon-btn" aria-label="复制" onClick={() => { actions.duplicateSchedule(sc.id); toast({ message: "已复制计划表" }); }}><Copy className="i" /></button>
-                    <button className="icon-btn" aria-label="删除" disabled={s.schedules.length <= 1} onClick={() => { if (confirm(`删除“${sc.name}”？删除后设备上的这份计划也会被清除。`)) actions.deleteSchedule(sc.id); }}><Trash2 className="i" /></button>
+                    <button className="icon-btn" aria-label="删除" disabled={s.schedules.length <= 1} onClick={() => {
+                      const onDevice = sc.kind === "date" ? sc.date === dateKey(now) : sc.id === s.activeScheduleId;
+                      const tip = onDevice ? `删除“${sc.name}”？它是当前生效的计划，删除后设备上的这份计划也会被清除。` : `删除“${sc.name}”？这份计划没有下发到设备，删除只影响网页计划库。`;
+                      if (confirm(tip)) { actions.deleteSchedule(sc.id); toast({ message: `已删除“${sc.name}”` }); }
+                    }}><Trash2 className="i" /></button>
                   </div>
                 </div>
               </div>
