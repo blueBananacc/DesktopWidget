@@ -56,7 +56,7 @@ export interface AppState {
   lastAppliedNode?: string;
   reminders: Reminder[];
   /** 最近一次触发的提醒（UI 据此弹 toast） */
-  reminderFlash?: { text: string; at: number };
+  reminderFlash?: { text: string; at: number; ids: string[] };
   /** "昨天遗留"演示数据是否已注入；持久化标记，删除后不再注入 */
   seededLeftover?: boolean;
   members: Member[];
@@ -126,6 +126,7 @@ const load = (now: number): AppState => {
           ...(saved.reminders ?? []).map((r) => ({ ...r, day: r.day ?? dateKey(now) })),
         ],
         seededLeftover: true,
+        reminderFlash: undefined, // 只用于本次会话弹 toast，重新打开页面不重弹旧提醒
         ...(past ? { history: past.history, historySegments: past.segments } : {}),
       };
     }
@@ -202,7 +203,7 @@ const tick = (s: AppState, now: number): AppState => {
     next = {
       ...next,
       reminders: next.reminders.map((r) => (willFire(r) ? { ...r, firedAt: now } : r)),
-      reminderFlash: { text: firing.map((r) => r.title).join("、"), at: now },
+      reminderFlash: { text: firing.map((r) => r.title).join("、"), at: now, ids: firing.map((r) => r.id) },
     };
     for (const r of firing) deviceSend?.({ type: "reminder", text: r.showOnDevice ? r.deviceText?.trim() || r.title : undefined, count: firing.length, ts: now });
   }
@@ -345,12 +346,41 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
   toggleReminder(id: string) {
     set((s) => ({ ...s, reminders: s.reminders.map((r) => (r.id === id ? { ...r, done: !r.done } : r)) }));
   },
-  /** 直接改定时提醒的时间；清除已触发标记以便重新提醒 */
-  setReminderAt(id: string, at: string) {
-    set((s) => ({ ...s, reminders: s.reminders.map((r) => (r.id === id && r.trigger === "time" ? { ...r, at, firedAt: undefined } : r)) }));
+  /** 修改待办；改了触发方式或时间则清除已触发标记，以便按新时间重新提醒 */
+  updateReminder(id: string, patch: Partial<Omit<Reminder, "id">>) {
+    set((s) => ({
+      ...s,
+      reminders: s.reminders.map((r) => {
+        if (r.id !== id) return r;
+        const retime = (patch.at !== undefined && patch.at !== r.at) || (patch.trigger !== undefined && patch.trigger !== r.trigger);
+        return { ...r, ...patch, ...(retime ? { firedAt: undefined } : {}) };
+      }),
+    }));
   },
-  deleteReminder(id: string) {
-    set((s) => ({ ...s, reminders: s.reminders.filter((r) => r.id !== id) }));
+  /** 遗留待办移到今天：归属日改为今天；时间未到的重新参与到点提醒，已过的标为已提醒（不立刻轰炸设备），由用户改时间 */
+  moveRemindersToToday(ids: string[]) {
+    const now = Date.now();
+    const today = dateKey(now);
+    set((s) => ({
+      ...s,
+      reminders: s.reminders.map((r) => {
+        if (!ids.includes(r.id)) return r;
+        const passed = r.trigger === "time" && !!r.at && atToday(r.at, now) <= now;
+        return { ...r, day: today, firedAt: passed ? now : undefined };
+      }),
+    }));
+  },
+  completeReminders(ids: string[]) {
+    set((s) => ({ ...s, reminders: s.reminders.map((r) => (ids.includes(r.id) ? { ...r, done: true } : r)) }));
+  },
+  /** 删除并返回被删的条目（供撤销恢复） */
+  deleteReminders(ids: string[]): Reminder[] {
+    const removed = get().reminders.filter((r) => ids.includes(r.id));
+    set((s) => ({ ...s, reminders: s.reminders.filter((r) => !ids.includes(r.id)) }));
+    return removed;
+  },
+  restoreReminders(rs: Reminder[]) {
+    set((s) => ({ ...s, reminders: [...rs.filter((r) => !s.reminders.some((x) => x.id === r.id)), ...s.reminders] }));
   },
   setUserName(name: string) {
     set((s) => ({ ...s, user: { ...s.user, name } })); // 共享场景展示的是用户姓名，不是设备名

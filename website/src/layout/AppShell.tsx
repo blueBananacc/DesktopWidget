@@ -55,7 +55,7 @@ const TABS: NavItem[] = [
 const ME_PATHS = ["/me", "/review", "/agent", "/device", "/controls", "/screen", "/lighting", "/settings"];
 
 export function AppShell() {
-  const { s } = useStore();
+  const { s, actions } = useStore();
   const toast = useToast();
   const [voice, setVoice] = useState(false);
   const { pathname } = useLocation();
@@ -65,7 +65,8 @@ export function AppShell() {
     // 提醒到点/收工触发：任何页面都弹 toast（设备端另有 OLED+灯光提示）
     if (s.reminderFlash && s.reminderFlash.at !== flashedAt.current) {
       flashedAt.current = s.reminderFlash.at;
-      toast({ message: `提醒：${s.reminderFlash.text}` });
+      const ids = s.reminderFlash.ids;
+      toast({ message: `提醒：${s.reminderFlash.text}`, action: { label: "标记完成", onClick: () => actions.completeReminders(ids) }, seconds: 10 });
     }
   }, [s.reminderFlash]);
 
