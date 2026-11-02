@@ -146,7 +146,7 @@ export function RemindersPage() {
   const dayLabel = (r: Reminder) => (r.day === today ? "今天" : r.day === yesterday ? "昨天" : `${Number(r.day.slice(5, 7))} 月 ${Number(r.day.slice(8))} 日`);
   const desc = (r: Reminder) => [
     r.trigger === "afterOffwork" ? "收工后提醒" : `${dayLabel(r)} ${r.at}`,
-    r.showOnDevice ? (r.deviceText ? `设备显示“${r.deviceText}”` : "在设备上显示") : "仅网页可见",
+    r.showOnDevice ? (r.deviceText ? `设备显示“${r.deviceText}”` : "在设备上显示") : "桌牌不显示正文",
     ...(r.createdBy === "voice" ? ["语音创建"] : []),
   ].join(" · ");
   const lead = (r: Reminder) => (
