@@ -112,11 +112,12 @@ export function SchedulePage() {
           icon={<Tile color="violet" size={30}><CalendarDays /></Tile>}
           title={today ? `今天生效：${today.name}` : "今天没有生效的计划表"}
           extra={today && (s.pausedToday
-            ? <button className="btn btn-primary btn-sm" disabled={!connected} title={connected ? "" : "连接设备后才能操作"} onClick={() => { actions.pauseToday(false); toast({ message: "已恢复今日计划" }); }}><Play />恢复计划</button>
-            : <button className="btn btn-secondary btn-sm" disabled={!connected} title={connected ? "" : "连接设备后才能操作"} onClick={() => { actions.pauseToday(true); toast({ message: "今日计划已暂停，状态不再自动切换" }); }}><Pause />暂停今日计划</button>)}
+            ? <button className="btn btn-primary btn-sm" disabled={!connected} onClick={() => { actions.pauseToday(false); toast({ message: "已恢复今日计划" }); }}><Play />恢复计划</button>
+            : <button className="btn btn-secondary btn-sm" disabled={!connected} onClick={() => { actions.pauseToday(true); toast({ message: "今日计划已暂停，状态不再自动切换" }); }}><Pause />暂停今日计划</button>)}
         />
         <div className="card-b" style={{ display: "grid", gap: 16 }}>
           {today ? <Timeline schedule={today} now={now} showNow /> : <p className="hint">在下方选择一个重复计划，或新建单日计划。</p>}
+          {!connected && today && <Banner tone="info" icon={<CalendarDays className="i" />}>未连接设备：计划表在设备上执行，连接后才能暂停或恢复今日计划。</Banner>}
           <div className="row" style={{ gap: 24 }}>
             <div><div className="hint">当前节点</div><b>{cur ? `${cur.time} ${STATUSES[cur.status].label}` : "—"}</b></div>
             <div><div className="hint">下一次切换</div><b>{nn ? `${nn.time} → ${STATUSES[nn.status].label}` : "今天没有了"}</b></div>

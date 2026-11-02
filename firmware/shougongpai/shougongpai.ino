@@ -516,7 +516,11 @@ void cycleLocal(int dir) {
   int idx = 0;
   const int n = sizeof(STATUSES) / sizeof(STATUSES[0]);
   for (int i = 0; i < n; i++) if (!strcmp(STATUSES[i].id, curStatusId.c_str())) idx = i;
-  setLocalStatus(STATUSES[(idx + dir + n) % n].id);
+  for (int step = 0; step < n; step++) {               // 循环只走日常状态；off 由收工键单独触发，不参与循环
+    idx = (idx + dir + n) % n;
+    if (strcmp(STATUSES[idx].id, "off")) break;
+  }
+  setLocalStatus(STATUSES[idx].id);
 }
 
 // ===================== 计划表执行（设备自治） =====================
