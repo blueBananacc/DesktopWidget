@@ -357,17 +357,12 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
       }),
     }));
   },
-  /** 遗留待办移到今天：归属日改为今天；时间未到的重新参与到点提醒，已过的标为已提醒（不立刻轰炸设备），由用户改时间 */
-  moveRemindersToToday(ids: string[]) {
-    const now = Date.now();
-    const today = dateKey(now);
+  /** 遗留待办移到今天：归属日改为今天；定时提醒必须先选新时间（at），清除已触发标记重新参与到点提醒 */
+  moveRemindersToToday(ids: string[], at?: string) {
+    const today = dateKey(Date.now());
     set((s) => ({
       ...s,
-      reminders: s.reminders.map((r) => {
-        if (!ids.includes(r.id)) return r;
-        const passed = r.trigger === "time" && !!r.at && atToday(r.at, now) <= now;
-        return { ...r, day: today, firedAt: passed ? now : undefined };
-      }),
+      reminders: s.reminders.map((r) => (ids.includes(r.id) ? { ...r, day: today, ...(r.trigger === "time" && at ? { at } : {}), firedAt: undefined } : r)),
     }));
   },
   completeReminders(ids: string[]) {

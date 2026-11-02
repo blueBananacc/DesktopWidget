@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { MouseEvent, RefObject } from "react";
-import { ArrowRight, Bell, Check, History, Mic, Moon, Plus, ShieldCheck, Trash2, Undo2, Unplug } from "lucide-react";
+import { ArrowRight, Bell, Check, History, Mic, Moon, Plus, Trash2, Undo2, Unplug } from "lucide-react";
 import { useStore } from "../store/AppStore";
 import type { Reminder, ReminderTrigger } from "../domain/types";
 import { atToday, dateKey, hhmm, startOfDay } from "../domain/time";
@@ -89,6 +89,7 @@ export function RemindersPage() {
   const blank = (): Draft => ({ title: "", trigger: "time", at: nextHalfHour(Date.now()), showOnDevice: s.settings.showReminderOnDevice, deviceText: "" });
   const [draft, setDraft] = useState<Draft>(blank);
   const [editing, setEditing] = useState<(Draft & { id: string }) | null>(null);
+  const [moving, setMoving] = useState<{ ids: string[]; at: string } | null>(null);
 
   const today = dateKey(now);
   const yesterday = dateKey(startOfDay(now) - 1);
@@ -126,6 +127,21 @@ export function RemindersPage() {
     toast({ message: label, action: { label: "撤销", onClick: () => actions.restoreReminders(removed) }, seconds: 10, countdown: true });
   };
   const edit = (r: Reminder) => setEditing({ id: r.id, title: r.title, trigger: r.trigger, at: r.at ?? nextHalfHour(now), showOnDevice: r.showOnDevice, deviceText: r.deviceText ?? "" });
+  // 移到今天：定时待办必须先选新时间；只有收工后触发的可以直接移
+  const askMove = (rs: Reminder[]) => {
+    if (rs.every((r) => r.trigger === "afterOffwork")) {
+      actions.moveRemindersToToday(rs.map((r) => r.id));
+      toast({ message: `${rs.length} 条已移到今天` });
+    } else {
+      setMoving({ ids: rs.map((r) => r.id), at: nextHalfHour(now) });
+    }
+  };
+  const doMove = () => {
+    if (!moving) return;
+    actions.moveRemindersToToday(moving.ids, moving.at);
+    toast({ message: `已移到今天，${moving.at} 提醒` });
+    setMoving(null);
+  };
 
   const dayLabel = (r: Reminder) => (r.day === today ? "今天" : r.day === yesterday ? "昨天" : `${Number(r.day.slice(5, 7))} 月 ${Number(r.day.slice(8))} 日`);
   const desc = (r: Reminder) => [
@@ -161,7 +177,7 @@ export function RemindersPage() {
     <RowItem key={r.id} lead={lead(r)} title={titleOf(r)} desc={desc(r)} onClick={() => edit(r)}
       meta={
         <div className="row" style={{ gap: 4 }} onClick={stop}>
-          <button className="btn btn-ghost btn-sm" onClick={() => { actions.moveRemindersToToday([r.id]); toast({ message: `已移到今天${r.trigger === "time" && r.at && atToday(r.at, now) <= now ? "，原时间已过，可以改个时间" : ""}` }); }}><ArrowRight />移到今天</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => askMove([r])}><ArrowRight />移到今天</button>
           <button className="btn btn-secondary btn-sm" onClick={() => complete([r.id], `已完成“${r.title}”`)}><Check />完成</button>
           <button className="icon-btn" aria-label="删除" onClick={() => remove([r.id], `已删除“${r.title}”`)}><Trash2 className="i" /></button>
         </div>
@@ -181,7 +197,7 @@ export function RemindersPage() {
             <Card>
               <CardHeader title="昨天遗留" count={leftover.length} icon={<Tile color="violet" size={30}><History /></Tile>}
                 extra={<>
-                  <button className="btn btn-ghost btn-sm" onClick={() => { actions.moveRemindersToToday(leftover.map((r) => r.id)); toast({ message: `${leftover.length} 条已移到今天` }); }}><ArrowRight />全部移到今天</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => askMove(leftover)}><ArrowRight />全部移到今天</button>
                   <button className="btn btn-ghost btn-sm" onClick={() => complete(leftover.map((r) => r.id), `${leftover.length} 条遗留已完成`)}><Check />全部完成</button>
                 </>} />
               {leftover.map(leftoverRow)}
@@ -219,15 +235,25 @@ export function RemindersPage() {
               <button className="btn btn-primary" onClick={add}><Plus />创建</button>
             </div>
           </Card>
-          <Card>
-            <CardHeader title="隐私" icon={<Tile color="green" size={30}><ShieldCheck /></Tile>} />
-            <div className="card-b form">
-              <SettingRow title="新建时默认在桌牌上显示" desc="建议关闭。待办只存在本机，访客能看到桌牌屏幕。"><Toggle checked={s.settings.showReminderOnDevice} onChange={(v) => { actions.updateSettings({ showReminderOnDevice: v }); setDraft((x) => ({ ...x, showOnDevice: v })); }} /></SettingRow>
-            </div>
-          </Card>
         </div>
       </div>
 
+      {moving && (
+        <Modal title={`移到今天的 ${moving.ids.length} 条待办`} onClose={() => setMoving(null)}
+          footer={<>
+            <button className="btn btn-secondary" onClick={() => setMoving(null)}>取消</button>
+            <button className="btn btn-primary" onClick={doMove}>移动并设为 {moving.at}</button>
+          </>}>
+          <div className="form">
+            <label>新的提醒时间
+              <input className="input" type="time" value={moving.at} autoFocus onChange={(e) => setMoving((m) => (m ? { ...m, at: e.target.value } : m))} />
+            </label>
+            {atToday(moving.at, now) <= now
+              ? <span className="hint" style={{ color: "#B7791F", fontWeight: 500 }}>这个时间今天已经过了，移过去会立即提醒。</span>
+              : <span className="hint">昨天的提醒时间已失效，需要重新选一个今天的时间。</span>}
+          </div>
+        </Modal>
+      )}
       {editing && (
         <Modal title="编辑待办" onClose={() => setEditing(null)}
           footer={<>
