@@ -193,17 +193,19 @@ export function RemindersPage() {
       <PageHeader title="待办与提醒" desc={summary} />
       <div className="cols">
         <div className="stack">
-          {leftover.length > 0 && (
-            <Card>
-              <CardHeader title="昨天遗留" count={leftover.length} icon={<Tile color="violet" size={30}><History /></Tile>}
-                extra={<>
-                  <button className="btn btn-ghost btn-sm" onClick={() => askMove(leftover)}><ArrowRight />全部移到今天</button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => complete(leftover.map((r) => r.id), `${leftover.length} 条遗留已完成`)}><Check />全部完成</button>
-                </>} />
-              {leftover.map(leftoverRow)}
-              <p className="hint" style={{ margin: 0, padding: "10px 22px 14px" }}>昨天没完成的待办会留在这里，不会自动删除。移到今天后重新参与到点提醒。</p>
-            </Card>
-          )}
+          <Card>
+            <CardHeader title="昨天遗留" count={leftover.length} icon={<Tile color="violet" size={30}><History /></Tile>}
+              extra={leftover.length > 0 && <>
+                <button className="btn btn-ghost btn-sm" onClick={() => askMove(leftover)}><ArrowRight />全部移到今天</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => complete(leftover.map((r) => r.id), `${leftover.length} 条遗留已完成`)}><Check />全部完成</button>
+              </>} />
+            {leftover.length === 0
+              ? <EmptyState icon={<History />} title="没有遗留内容" desc="昨天没处理完的待办会出现在这里，处理完就不会留到下一天。" />
+              : <>
+                  {leftover.map(leftoverRow)}
+                  <p className="hint" style={{ margin: 0, padding: "10px 22px 14px" }}>昨天没完成的待办会留在这里，不会自动删除。移到今天后重新参与到点提醒。</p>
+                </>}
+          </Card>
           <Card>
             <CardHeader title="待处理" count={todayOpen.length} />
             {todayOpen.length === 0

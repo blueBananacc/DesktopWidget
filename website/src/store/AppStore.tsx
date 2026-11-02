@@ -59,6 +59,7 @@ export interface AppState {
   reminderFlash?: { text: string; at: number; ids: string[] };
   /** "昨天遗留"演示数据是否已注入；持久化标记，删除后不再注入 */
   seededLeftover?: boolean;
+  seededLeftover2?: boolean;
   members: Member[];
   settings: Settings;
   timer?: TimerState;
@@ -117,15 +118,15 @@ const load = (now: number): AppState => {
         ...createInitial(now), ...saved, breakSyncedAt: 0, settings: { ...defaultSettings, ...saved.settings, keys },
         // 旧版本提醒没有归属日字段：按今天迁移；并一次性注入两条"昨天遗留"演示数据（标记持久化在状态里，幂等、删除后不再注入）
         reminders: [
-          ...(saved.seededLeftover
+          ...(saved.seededLeftover2
             ? []
             : [
-                { id: "seed-leftover-1", title: "回复客户邮件", trigger: "time" as const, at: "16:30", day: dateKey(startOfDay(now) - 1), showOnDevice: false, createdBy: "manual" as const, done: false },
-                { id: "seed-leftover-2", title: "确认打印机驱动", trigger: "time" as const, at: "10:00", day: dateKey(startOfDay(now) - 1), showOnDevice: false, createdBy: "manual" as const, done: false },
+                { id: "seed-leftover2-1", title: "给客户回电话", trigger: "time" as const, at: "14:20", day: dateKey(startOfDay(now) - 1), showOnDevice: false, createdBy: "manual" as const, done: false },
+                { id: "seed-leftover2-2", title: "整理周报附件", trigger: "time" as const, at: "11:00", day: dateKey(startOfDay(now) - 1), showOnDevice: true, createdBy: "manual" as const, done: false },
               ]),
           ...(saved.reminders ?? []).map((r) => ({ ...r, day: r.day ?? dateKey(now) })),
         ],
-        seededLeftover: true,
+        seededLeftover2: true,
         reminderFlash: undefined, // 只用于本次会话弹 toast，重新打开页面不重弹旧提醒
         ...(past ? { history: past.history, historySegments: past.segments } : {}),
       };
