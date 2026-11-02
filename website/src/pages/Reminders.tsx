@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bell, Check, Clock, History, Mic, Moon, Plus, Trash2, Undo2 } from "lucide-react";
+import { Bell, Check, History, Mic, Moon, Plus, Trash2, Undo2 } from "lucide-react";
 import { useStore } from "../store/AppStore";
 import type { Reminder, ReminderTrigger } from "../domain/types";
 import { dateKey, startOfDay } from "../domain/time";
@@ -21,7 +21,7 @@ export function RemindersPage() {
   const done = s.reminders.filter((r) => r.done);
 
   const add = () => {
-    if (!title.trim()) return;
+    if (!title.trim()) { toast({ message: "先填写提醒内容" }); return; }
     actions.addReminder({ title: title.trim(), trigger, at: trigger === "time" ? at : undefined, showOnDevice, createdBy: "manual" });
     setTitle("");
     toast({ message: "提醒已创建" });
@@ -39,7 +39,7 @@ export function RemindersPage() {
       desc={desc(r)}
       meta={
         <div className="row" style={{ gap: 2 }}>
-          {r.trigger === "time" && <button className="btn btn-ghost btn-sm" onClick={() => { actions.postponeReminder(r.id, 30); toast({ message: "已延后 30 分钟" }); }}><Clock />延后</button>}
+          {r.trigger === "time" && <input className="input" type="time" value={r.at} onChange={(e) => { actions.setReminderAt(r.id, e.target.value); toast({ message: `已改为 ${e.target.value} 提醒` }); }} style={{ width: 96, padding: "5px 8px", fontSize: 12.5 }} aria-label="修改提醒时间" />}
           <button className="btn btn-secondary btn-sm" onClick={() => actions.toggleReminder(r.id)}><Check />完成</button>
           <button className="icon-btn" aria-label="删除" onClick={() => actions.deleteReminder(r.id)}><Trash2 className="i" /></button>
         </div>
@@ -68,7 +68,12 @@ export function RemindersPage() {
               <CardHeader title="已完成" count={done.length} />
               {done.map((r) => (
                 <RowItem key={r.id} className="stale" lead={<Tile color="green"><Check /></Tile>} title={r.title} desc={r.trigger === "afterOffwork" ? "收工后提醒" : `${dayLabel(r)} ${r.at}`}
-                  meta={<button className="btn btn-ghost btn-sm" onClick={() => actions.toggleReminder(r.id)}><Undo2 />恢复</button>} />
+                  meta={
+                    <div className="row" style={{ gap: 2 }}>
+                      <button className="btn btn-ghost btn-sm" onClick={() => actions.toggleReminder(r.id)}><Undo2 />恢复</button>
+                      <button className="icon-btn" aria-label="删除" onClick={() => actions.deleteReminder(r.id)}><Trash2 className="i" /></button>
+                    </div>
+                  } />
               ))}
             </Card>
           )}
@@ -83,7 +88,7 @@ export function RemindersPage() {
               </div>
               {trigger === "time" && <label>时间<input className="input" type="time" value={at} onChange={(e) => setAt(e.target.value)} /></label>}
               <SettingRow title="在设备上显示正文" desc="关闭时设备只显示“有 1 条提醒”"><Toggle checked={showOnDevice} onChange={setShowOnDevice} /></SettingRow>
-              <button className="btn btn-primary" disabled={!title.trim()} onClick={add}><Plus />创建</button>
+              <button className="btn btn-primary" onClick={add}><Plus />创建</button>
             </div>
           </Card>
           <Card>

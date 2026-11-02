@@ -334,11 +334,9 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
   toggleReminder(id: string) {
     set((s) => ({ ...s, reminders: s.reminders.map((r) => (r.id === id ? { ...r, done: !r.done } : r)) }));
   },
-  postponeReminder(id: string, minutes: number) {
-    set((s) => ({
-      ...s,
-      reminders: s.reminders.map((r) => (r.id === id && r.trigger === "time" && r.at ? { ...r, at: hhmm(Math.max(Date.now(), atToday(r.at, Date.now())) + minutes * 60_000), firedAt: undefined } : r)),
-    }));
+  /** 直接改定时提醒的时间；清除已触发标记以便重新提醒 */
+  setReminderAt(id: string, at: string) {
+    set((s) => ({ ...s, reminders: s.reminders.map((r) => (r.id === id && r.trigger === "time" ? { ...r, at, firedAt: undefined } : r)) }));
   },
   deleteReminder(id: string) {
     set((s) => ({ ...s, reminders: s.reminders.filter((r) => r.id !== id) }));
