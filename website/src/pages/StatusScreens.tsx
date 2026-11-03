@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { Code2, Copy, Eraser, FileUp, Image, LayoutTemplate, Play, ShieldCheck, Upload, Cpu, TriangleAlert, HardDrive } from "lucide-react";
+import { BookmarkPlus, Code2, Copy, Eraser, FileUp, Image, LayoutTemplate, Play, ShieldCheck, Upload, Cpu, TriangleAlert, HardDrive, X } from "lucide-react";
 import { WAT_TEMPLATES } from "../domain/watTemplates";
 import { APP_H, APP_MAX_BYTES, APP_W, clearApp, deployedHashes, drawDefaultScreen, hashBytes, pendingClears, previewScreen, screenBytes, sendApp, setDeployedHash, setPendingClears, u8ToB64, validateApp, type DefaultScreen, type ScreenPreview } from "../device/app";
 import { getTransport, toOutbound, useStore } from "../store/AppStore";
 import { STATUSES, STATUS_ORDER } from "../domain/statuses";
-import type { DeviceApp, ScreenDef, StatusId } from "../domain/types";
+import type { DeviceApp, ScreenDef, ScreenPreset, StatusId } from "../domain/types";
 import { atToday, hhmm } from "../domain/time";
 import { nextNode, scheduleForDay } from "../domain/schedule";
 import { Banner, Card, CardHeader, StatusChip, Tile } from "../ui/Primitives";
@@ -158,6 +158,20 @@ export function StatusScreens() {
     }
     setDeployedHash(id); setDeployed(deployedHashes());
     toast({ message: `「${STATUSES[id].label}」已恢复默认屏幕${connected ? "" : "；设备上的程序会在下次连接时一并清除"}`, seconds: 6 });
+  };
+
+  /** 把当前 WAT 改动存成一块"我的屏幕块"：之后在任何状态的模板区都能选它复用 */
+  const savePreset = () => {
+    if (!def || def.kind !== "wat") return;
+    const name = (def.name ?? "").trim() || "未命名屏幕";
+    const p: ScreenPreset = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      name,
+      desc: (def.desc ?? "").trim(),
+      src: def.src,
+    };
+    actions.updateSettings({ screenPresets: [...s.settings.screenPresets, p] });
+    toast({ message: `已存为新的块「${name}」：在任何状态的模板区都能选它`, seconds: 6 });
   };
 
   const copyForAgent = async () => {
@@ -323,9 +337,23 @@ export function StatusScreens() {
                     )}
                     {WAT_TEMPLATES.map((t) => (
                       <button key={t.id} type="button" className="scr-tpl"
-                        onClick={() => setDef({ kind: "wat", src: t.code })}>
+                        onClick={() => setDef({ kind: "wat", src: t.code, name: t.name, desc: t.desc })}>
                         <b>{t.name}</b><span>{t.desc}</span>
                       </button>
+                    ))}
+                    {s.settings.screenPresets.map((p) => (
+                      <div key={p.id} className="scr-tpl scr-mine" role="button" tabIndex={0}
+                        onClick={() => setDef({ kind: "wat", src: p.src, name: p.name, desc: p.desc })}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); } }}>
+                        <b>{p.name}</b><span>{p.desc || "我的屏幕块"}</span>
+                        <button type="button" className="scr-tpl-del" title={`删除「${p.name}」`} aria-label={`删除「${p.name}」`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            actions.updateSettings({ screenPresets: s.settings.screenPresets.filter((x) => x.id !== p.id) });
+                          }}>
+                          <X size={13} />
+                        </button>
+                      </div>
                     ))}
                   </div>
                   {app && <Banner tone="info" icon={<Cpu className="i" />}>设备上已经装了这个状态的程序（{fmtSize(app.size)}），但本机没有源码。可以重新写一份覆盖，或点“恢复默认”删除它。</Banner>}
@@ -336,8 +364,16 @@ export function StatusScreens() {
                   <p className="hint" style={{ margin: "8px 0 0" }}>导入的二进制不能在这里编辑。要改内容，请在本地修改后重新导入，或从模板加载 WAT 覆盖。</p>
                 </div>
               ) : (
-                <textarea className="input scr-code" value={def!.src} spellCheck={false} aria-label="WAT 源码"
-                  onChange={(e) => setDef({ kind: "wat", src: e.target.value })} />
+                <>
+                  <div className="scr-meta">
+                    <input className="input scr-mn" value={def!.name ?? ""} maxLength={20} placeholder="给这块屏幕起个名字" aria-label="屏幕块名字"
+                      onChange={(e) => setDef({ ...def!, name: e.target.value })} />
+                    <input className="input" value={def!.desc ?? ""} maxLength={40} placeholder="一句话描述画面（可选）" aria-label="屏幕块描述"
+                      onChange={(e) => setDef({ ...def!, desc: e.target.value })} />
+                  </div>
+                  <textarea className="input scr-code" value={def!.src} spellCheck={false} aria-label="WAT 源码"
+                    onChange={(e) => setDef({ ...def!, src: e.target.value })} />
+                </>
               )}
 
               {error && <Banner tone="warn" icon={<TriangleAlert className="i" />}><b>预览没有跑通</b>{error}</Banner>}
@@ -363,6 +399,7 @@ export function StatusScreens() {
                 <div className="row" style={{ gap: 8 }}>
                   {hasCode(def) && <button className="btn btn-primary btn-sm" disabled={!connected || uploading || !!error || !size} onClick={() => void upload()}><Upload />{app && !app.bad ? "更新设备上的程序" : "上传到设备"}</button>}
                   {hasCode(def) && <button className="btn btn-secondary btn-sm" disabled={uploading} onClick={() => setNonce((n) => n + 1)}><Play />重新运行预览</button>}
+                  {def?.kind === "wat" && hasCode(def) && <button className="btn btn-secondary btn-sm" disabled={uploading} onClick={savePreset}><BookmarkPlus />存为新的块</button>}
                   <button className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }} disabled={uploading} onClick={() => void restore()}><Eraser />恢复默认</button>
                 </div>
               )}

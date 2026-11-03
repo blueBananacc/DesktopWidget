@@ -93,10 +93,13 @@ export interface KeyMap {
   k4: KeyAction; // 触摸区·右
 }
 
-/** 自定义屏幕来源：wat = 页面里编辑的 WAT 源码（wabt 编译上传）；wasm = 直接上传的预编译二进制（base64） */
+/** 自定义屏幕来源：wat = 页面里编辑的 WAT 源码（wabt 编译上传）；wasm = 直接上传的预编译二进制（base64）。wat 的 name/desc 是用户给这个"屏幕块"起的展示名和一句话描述 */
 export type ScreenDef =
-  | { kind: "wat"; src: string }
+  | { kind: "wat"; src: string; name?: string; desc?: string }
   | { kind: "wasm"; b64: string; name?: string };
+
+/** 用户保存的自定义屏幕块：在任何状态的模板区都能选它复用 */
+export interface ScreenPreset { id: string; name: string; desc: string; src: string }
 
 export interface Settings {
   overrideMode: OverrideMode;
@@ -118,6 +121,8 @@ export interface Settings {
   screenLayout: ScreenLayout;
   /** 按状态自定义屏幕：statusId -> WAT 源码或预编译 wasm；上传后设备按状态存 LittleFS，进入状态自动执行 */
   customScreens: Record<string, ScreenDef>;
+  /** 用户存下的屏幕块（跨状态复用的个人模板） */
+  screenPresets: ScreenPreset[];
 }
 
 export type AgentState = "idle" | "running" | "needsInput" | "done" | "error";

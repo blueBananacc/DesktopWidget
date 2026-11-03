@@ -22,6 +22,7 @@ export const defaultSettings: Settings = {
   staleMinutes: 15,
   screenLayout: "full",
   customScreens: {},
+  screenPresets: [],
 };
 
 export const seedSchedules = (): Schedule[] => [
