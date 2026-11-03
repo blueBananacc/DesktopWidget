@@ -48,7 +48,13 @@ export async function compileWat(src: string): Promise<Uint8Array> {
 // ---------- 预览：实例化 wasm + 与设备同语的宿主 shim ----------
 
 export interface ScreenPreview { stop(): void; press(key: number, down: boolean): void }
-export interface PreviewOpts { status?: number; keyboard?: boolean; onError?: (msg: string) => void }
+export interface PreviewOpts {
+  status?: number; keyboard?: boolean; onError?: (msg: string) => void;
+  /** 当前状态的区间起点（epoch ms）；不传则 segSec 从预览启动起算 */
+  segStart?: number;
+  /** 距下个计划节点的分钟数（-1 无），页面按 settings 计算后传入 */
+  nodeMin?: () => number;
+}
 
 /**
  * 在 canvas 上运行 wasm app：每 ~33ms 调一次 run()（与固件节流一致）。
@@ -62,6 +68,7 @@ export async function previewScreen(bytes: Uint8Array, canvas: HTMLCanvasElement
   const ctx = canvas.getContext("2d")!;
   const fb = new Uint8Array(1024); // u8g2 页序 1bpp
   let mask = 0;
+  const segStart = opts.segStart ?? Date.now(); // segSec 语义：当前状态已持续秒数；未知起点时按"刚进入状态"预览
   const px = (x: number, y: number) => { x |= 0; y |= 0; if (x >= 0 && x < APP_W && y >= 0 && y < APP_H) fb[(y >> 3) * APP_W + x] |= 1 << (y & 7); };
   const env = {
     clear: () => fb.fill(0),
@@ -87,6 +94,9 @@ export async function previewScreen(bytes: Uint8Array, canvas: HTMLCanvasElement
     millis: () => performance.now() | 0,
     buttons: () => mask,
     status: () => status,
+    clock: () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); }, // 与设备校时后同值；浏览器时钟即本地时间
+    segSec: () => Math.max(0, ((Date.now() - segStart) / 1000) | 0),
+    nodeMin: () => opts.nodeMin?.() ?? -1,
   };
   let mem: WebAssembly.Memory | null = null;
   const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes.slice().buffer), { env });

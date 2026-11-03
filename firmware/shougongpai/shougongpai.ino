@@ -699,6 +699,28 @@ m3ApiRawFunction(m3_status) { // 当前状态在 STATUSES 里的下标
   for (int i = 0; i < n; i++) if (!strcmp(STATUSES[i].id, curStatusId.c_str())) idx = i;
   m3ApiReturn((uint32_t)idx);
 }
+m3ApiRawFunction(m3_clock) {  // 本地时钟：今日已过分钟数 0-1439；未校时 -1
+  m3ApiReturnType(int32_t);
+  m3ApiReturn(epochBase >= 0 ? minOf(localEpochMs()) : -1);
+}
+m3ApiRawFunction(m3_segSec) { // 当前状态已持续秒数（millis 域，未校时也可用；做"专注 12:30"类计时）
+  m3ApiReturnType(uint32_t);
+  m3ApiReturn(segCount ? (millis() - segs[segCount - 1].startMs) / 1000 : 0);
+}
+m3ApiRawFunction(m3_nodeMin) { // 距今日下个计划节点的分钟数；-1=无节点/今日暂停/已收工/未校时（"会议还 X 分钟结束"）
+  m3ApiReturnType(int32_t);
+  int32_t r = -1;
+  if (epochBase >= 0 && !schedPaused && !schedPausedLocal) {
+    const int64_t e = localEpochMs();
+    if (offSetDay != dayOf(e)) {
+      const int nowMin = minOf(e);
+      const int count = tableFor(dayOf(e));
+      for (int i = 0; i < count; i++)
+        if (curTable[i].min > nowMin) { r = curTable[i].min - nowMin; break; }
+    }
+  }
+  m3ApiReturn(r);
+}
 
 void appUnload() {
   if (wasmRun) wasmRun = nullptr;
@@ -733,6 +755,9 @@ void appLoad(const String& statusId) {
     m3_LinkRawFunction(mod, "env", "millis",  "i()",     &m3_millis);
     m3_LinkRawFunction(mod, "env", "buttons", "i()",     &m3_buttons);
     m3_LinkRawFunction(mod, "env", "status",  "i()",     &m3_status);
+    m3_LinkRawFunction(mod, "env", "clock",   "i()",     &m3_clock);
+    m3_LinkRawFunction(mod, "env", "segSec",  "i()",     &m3_segSec);
+    m3_LinkRawFunction(mod, "env", "nodeMin", "i()",     &m3_nodeMin);
     r = m3_FindFunction(&wasmRun, wasmRt, "run");
   }
   if (!r) {

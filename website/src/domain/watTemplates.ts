@@ -11,6 +11,9 @@ export const HOST_API: { sig: string; desc: string }[] = [
   { sig: "millis() -> i32", desc: "设备毫秒计数（动画的时钟来源）" },
   { sig: "buttons() -> i32", desc: "K1-K4 按下位掩码（bit0=K1 … bit3=K4）" },
   { sig: "status() -> i32", desc: "当前状态下标（0 工作中 1 勿扰 2 专注 3 会议 4 休息 5 已下班）" },
+  { sig: "clock() -> i32", desc: "本地时钟：今日已过分钟数 0–1439（未校时 -1）" },
+  { sig: "segSec() -> i32", desc: "当前状态已持续的秒数（专注/会议计时用它）" },
+  { sig: "nodeMin() -> i32", desc: "距今日下个计划节点的分钟数（-1：无节点/已暂停/已收工）" },
 ];
 
 const COMMON = `;; 宿主 API（doc/display-app-spec.md）：
@@ -148,6 +151,47 @@ export const WAT_TEMPLATES: WatTemplate[] = [
     call $show))`,
   },
   {
+    id: "segTimer",
+    name: "状态计时",
+    desc: "大字显示进入当前状态以来的 MM:SS；演示 segSec() + 内存写数字",
+    code: `${COMMON}
+(module
+  (import "env" "clear"  (func $clear))
+  (import "env" "show"   (func $show))
+  (import "env" "text"   (func $text (param i32 i32 i32 i32)))
+  (import "env" "segSec" (func $segSec (result i32)))
+  (import "env" "clock"  (func $clock (result i32)))
+  (memory (export "memory") 1)
+  ;; 数字缓冲区在内存 16..20：手动把数值拆成 ASCII 数字写进去；clock()=-1（未校时）时保持 "--:--"
+  (data (i32.const 16) "--:--")
+  (func $digit (param $v i32) (result i32) (i32.add (i32.const 48) (i32.rem_u (local.get $v) (i32.const 10))))
+  (func $run (export "run")
+    (local $s i32) (local $m i32) (local $c i32)
+    call $clear
+    ;; 顶部居中：当前时钟 HH:MM（clock() 返回分钟数；-1 时显示 --:--）
+    (local.set $c (call $clock))
+    (if (i32.ge_s (local.get $c) (i32.const 0))
+      (then
+        (local.set $m (i32.div_u (local.get $c) (i32.const 60)))  ;; 小时
+        (local.set $s (i32.rem_u (local.get $c) (i32.const 60)))  ;; 分钟
+        (i32.store8 (i32.const 16) (call $digit (i32.div_u (local.get $m) (i32.const 10))))
+        (i32.store8 (i32.const 17) (call $digit (local.get $m)))
+        (i32.store8 (i32.const 18) (i32.const 58))                ;; ':'
+        (i32.store8 (i32.const 19) (call $digit (i32.div_u (local.get $s) (i32.const 10))))
+        (i32.store8 (i32.const 20) (call $digit (local.get $s)))))
+    (call $text (i32.const 50) (i32.const 20) (i32.const 16) (i32.const 5))
+    ;; 中部大字：本状态已持续 MM:SS（segSec()；分钟数超 99 取模防溢出）
+    (local.set $s (call $segSec))
+    (local.set $m (i32.rem_u (i32.div_u (local.get $s) (i32.const 60)) (i32.const 100)))
+    (local.set $s (i32.rem_u (local.get $s) (i32.const 60)))
+    (i32.store8 (i32.const 16) (call $digit (i32.div_u (local.get $m) (i32.const 10))))
+    (i32.store8 (i32.const 17) (call $digit (local.get $m)))
+    (i32.store8 (i32.const 19) (call $digit (i32.div_u (local.get $s) (i32.const 10))))
+    (i32.store8 (i32.const 20) (call $digit (local.get $s)))
+    (call $text (i32.const 44) (i32.const 46) (i32.const 16) (i32.const 5))
+    call $show))`,
+  },
+  {
     id: "custom",
     name: "自定义代码",
     desc: "空白骨架：全部宿主 API 已 import，直接在 run() 里画",
@@ -161,6 +205,9 @@ export const WAT_TEMPLATES: WatTemplate[] = [
   (import "env" "millis"  (func $millis (result i32)))
   (import "env" "buttons" (func $buttons (result i32)))
   (import "env" "status"  (func $status (result i32)))
+  (import "env" "clock"   (func $clock (result i32)))
+  (import "env" "segSec"  (func $segSec (result i32)))
+  (import "env" "nodeMin" (func $nodeMin (result i32)))
   (memory (export "memory") 1)
   (func $run (export "run")
     call $clear

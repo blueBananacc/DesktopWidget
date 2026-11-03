@@ -5,7 +5,8 @@ import { APP_H, APP_MAX_BYTES, APP_W, clearApp, deployedHashes, drawDefaultScree
 import { getTransport, toOutbound, useStore } from "../store/AppStore";
 import { STATUSES, STATUS_ORDER } from "../domain/statuses";
 import type { DeviceApp, ScreenDef, ScreenLayout, StatusId } from "../domain/types";
-import { hhmm } from "../domain/time";
+import { atToday, hhmm } from "../domain/time";
+import { nextNode, scheduleForDay } from "../domain/schedule";
 import { Banner, Card, CardHeader, RowItem, StatusChip, Tile } from "../ui/Primitives";
 import { useToast } from "../ui/Toast";
 
@@ -31,9 +32,10 @@ function sourceOf(def: ScreenDef | undefined, app: DeviceApp | undefined, known:
 const TONE_CLASS: Record<Source["tone"], string> = { muted: "scr-tag", ok: "scr-tag ok", warn: "scr-tag warn", new: "scr-tag new" };
 
 /** 128×64 OLED 画布：有程序就跑 wasm，否则画固件默认屏 */
-function OledCanvas({ def, status, screen, keyboard, nonce = 0, onReady, onError, style }: {
+function OledCanvas({ def, status, screen, keyboard, nonce = 0, onReady, onError, style, segStart, nodeMin }: {
   def?: ScreenDef; status: StatusId; screen: DefaultScreen; keyboard?: boolean; nonce?: number;
   onReady?: (p: ScreenPreview | null) => void; onError?: (msg: string) => void; style?: CSSProperties;
+  segStart?: number; nodeMin?: () => number;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const running = hasCode(def);
@@ -46,7 +48,7 @@ function OledCanvas({ def, status, screen, keyboard, nonce = 0, onReady, onError
       try {
         const bytes = await screenBytes(def);
         if (!alive || !ref.current) return;
-        p = await previewScreen(bytes, ref.current, { status: STATUS_ORDER.indexOf(status), keyboard, onError });
+        p = await previewScreen(bytes, ref.current, { status: STATUS_ORDER.indexOf(status), keyboard, onError, segStart, nodeMin });
         if (!alive) { p.stop(); return; }
         onError?.("");
         onReady?.(p);
@@ -56,7 +58,7 @@ function OledCanvas({ def, status, screen, keyboard, nonce = 0, onReady, onError
     }, keyboard ? 450 : 0); // 编辑器里边写边预览：停手 450ms 再编译
     return () => { alive = false; clearTimeout(t); p?.stop(); onReady?.(null); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [srcKey, running, status, keyboard, nonce]);
+  }, [srcKey, running, status, keyboard, nonce, segStart]);
   useEffect(() => {
     if (!running && ref.current) drawDefaultScreen(ref.current, screen);
   }, [running, screen.main, screen.sub, screen.clock, screen.connected, screen.layout]);
@@ -104,6 +106,14 @@ export function StatusScreens() {
     connected: connected && device.kind === "ble",
     layout: s.settings.screenLayout,
   });
+
+  // nodeMin() 预览值：按网页侧计划表算"距下个节点分钟数"（与固件同规则：暂停/已收工 → -1）
+  const nodeMinFor = () => {
+    if (s.pausedToday || s.offworkToday) return -1;
+    const n = nextNode(scheduleForDay(s.schedules, s.activeScheduleId, Date.now()), Date.now());
+    return n ? Math.max(0, Math.round((atToday(n.time, Date.now()) - Date.now()) / 60000)) : -1;
+  };
+  const segStartFor = (x: StatusId) => (x === s.current.id ? s.current.since : undefined);
 
   const setDef = (d: ScreenDef | undefined) => {
     const { [id]: _drop, ...rest } = s.settings.customScreens;
@@ -180,6 +190,9 @@ export function StatusScreens() {
       "millis() -> i32           设备毫秒计数（动画的时钟来源）",
       "buttons() -> i32          K1–K4 按键位掩码：bit0=K1，bit1=K2，bit2=K3，bit3=K4；按下为 1，可做交互",
       "status() -> i32           当前状态下标：0=工作中 1=勿扰 2=专注 3=会议 4=休息 5=已下班",
+      "clock() -> i32            本地时钟：今日已过分钟数 0–1439（/60 取小时、%60 取分钟）；设备未校时返回 -1，请做好该分支的显示",
+      "segSec() -> i32           当前状态已持续的秒数（做\"专注 12:30\"这类状态计时用它；未校时也可用）",
+      "nodeMin() -> i32          距今日下一个计划节点的分钟数（例如\"会议还 X 分钟结束\"）；-1=没有节点/今日计划暂停/已收工/未校时",
       "",
       "【WAT 骨架】",
       "(module",
@@ -227,7 +240,7 @@ export function StatusScreens() {
                   {a && !hasCode(d) ? (
                     <div className="scr-oled scr-unknown"><Cpu /><span>设备上的自定义程序</span></div>
                   ) : (
-                    <OledCanvas def={a?.bad ? undefined : d} status={x} screen={screenFor(x)} />
+                    <OledCanvas def={a?.bad ? undefined : d} status={x} screen={screenFor(x)} segStart={segStartFor(x)} nodeMin={nodeMinFor} />
                   )}
                   <div className="scr-cap">
                     <StatusChip id={x} />
@@ -251,30 +264,17 @@ export function StatusScreens() {
           <CardHeader icon={<Tile color="blue" size={30}><Code2 /></Tile>} title={<>编辑屏幕 · {STATUSES[id].label}</>}
             extra={<>
               <span className={TONE_CLASS[src.tone]}>{src.label}</span>
-              <select className="input input-sm" value="" aria-label="快速选择"
-                onChange={(e) => {
-                  const t = WAT_TEMPLATES.find((x) => x.id === e.target.value);
-                  if (t) { setDef({ kind: "wat", src: t.code }); }
-                  else {
-                    const l = LAYOUTS.find((x) => x.value === e.target.value);
-                    if (l) { actions.updateSettings({ screenLayout: l.value }); toast({ message: `默认屏样式已切换为「${l.label}」，对所有用默认屏幕的状态生效`, seconds: 6 }); }
-                  }
-                  e.target.value = "";
-                }}>
-                <option value="">快速选择…</option>
-                <optgroup label="默认屏样式">
-                  {LAYOUTS.map((l) => <option key={l.value} value={l.value}>{l.label}{s.settings.screenLayout === l.value ? "（使用中）" : ""}</option>)}
-                </optgroup>
-                <optgroup label="自定义程序模板">
-                  {WAT_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </optgroup>
+              <select className="input input-sm" value="" aria-label="从模板加载"
+                onChange={(e) => { const t = WAT_TEMPLATES.find((x) => x.id === e.target.value); if (t) setDef({ kind: "wat", src: t.code }); e.target.value = ""; }}>
+                <option value="">从模板加载…</option>
+                {WAT_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
               <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()}><FileUp />导入 .wasm</button>
               <input ref={fileRef} type="file" accept=".wasm" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickFile(f); e.target.value = ""; }} />
             </>} />
           <div className="card-b scr-edit">
             <div className="scr-side">
-              <OledCanvas def={def} status={id} screen={screenFor(id)} keyboard nonce={nonce} onReady={setPreview} onError={setError} style={{ maxWidth: 360 }} />
+              <OledCanvas def={def} status={id} screen={screenFor(id)} keyboard nonce={nonce} onReady={setPreview} onError={setError} style={{ maxWidth: 360 }} segStart={segStartFor(id)} nodeMin={nodeMinFor} />
               {hasCode(def) ? (
                 <>
                   <Keys preview={preview} />

@@ -43,6 +43,9 @@
 | `millis` | `() -> i32` | 设备毫秒计数（动画时钟） |
 | `buttons` | `() -> i32` | K1-K4 按下位掩码：bit0=K1(收工键) bit1=K2 bit2=K3 bit3=K4 |
 | `status` | `() -> i32` | 当前状态下标：0=work 1=busy 2=focus 3=meet 4=rest 5=off |
+| `clock` | `() -> i32` | 本地时钟：今日已过分钟数 0–1439（/60=小时、%60=分钟）；设备未校时返回 -1 |
+| `segSec` | `() -> i32` | 当前状态已持续的秒数（millis 域，未校时也可用；做状态计时用） |
+| `nodeMin` | `() -> i32` | 距今日下个计划节点的分钟数；-1=无节点/今日暂停/已收工/未校时（"会议还 X 分钟结束"） |
 
 ## 示例
 
@@ -89,6 +92,9 @@ __attribute__((import_module("env"), import_name("text")))    void text(int x,in
 __attribute__((import_module("env"), import_name("millis")))  int  millis(void);
 __attribute__((import_module("env"), import_name("buttons"))) int  buttons(void);
 __attribute__((import_module("env"), import_name("status")))  int  status(void);
+__attribute__((import_module("env"), import_name("clock")))   int  clock(void);
+__attribute__((import_module("env"), import_name("segSec")))  int  segSec(void);
+__attribute__((import_module("env"), import_name("nodeMin"))) int  nodeMin(void);
 
 void run(void) {                        // 必须导出 run
   clear();
