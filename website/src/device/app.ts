@@ -126,6 +126,21 @@ export async function previewScreen(bytes: Uint8Array, canvas: HTMLCanvasElement
   return { stop: stopFn, press };
 }
 
+/** 上传前校验：真实实例化并跑约 10 帧，trap / 缺 run / 缺内存导出都拦下来——不把坏代码写进设备 */
+export async function validateApp(bytes: Uint8Array, status: number): Promise<string> {
+  const cv = document.createElement("canvas");
+  cv.width = APP_W; cv.height = APP_H;
+  let err = "";
+  try {
+    const p = await previewScreen(bytes, cv, { status, onError: (m) => { err = m; } });
+    await new Promise((r) => setTimeout(r, 400));
+    p.stop();
+  } catch (e) {
+    err = e instanceof Error ? e.message : String(e);
+  }
+  return err;
+}
+
 // ---------- 上传 ----------
 
 /** 把 wasm 二进制分片写入设备某状态的存储槽；设备收齐落 flash，进入该状态自动执行。 */
@@ -152,6 +167,10 @@ export function hashBytes(u8: Uint8Array) {
 
 /** 本机记录的"最近一次上传到设备的指纹"（按状态）；设备只上报大小，指纹用来识别同体积的改动 */
 const DEPLOYED_KEY = "shougongpai.screenDeployed";
+/** 断开时点了"恢复默认"：下次连接后真正发 clear 清掉设备上的程序 */
+const PENDING_CLEAR_KEY = "shougongpai.pendingClear";
+export const pendingClears = (): string[] => { try { return JSON.parse(localStorage.getItem(PENDING_CLEAR_KEY) || "[]"); } catch { return []; } };
+export const setPendingClears = (list: string[]) => localStorage.setItem(PENDING_CLEAR_KEY, JSON.stringify(list));
 export const deployedHashes = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(DEPLOYED_KEY) || "{}"); } catch { return {}; } };
 export const setDeployedHash = (status: string, hash?: string) => {
   const { [status]: _drop, ...rest } = deployedHashes();

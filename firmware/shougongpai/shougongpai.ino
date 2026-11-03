@@ -147,6 +147,13 @@ File     appFile;
 char     appUpStatus[12] = "";
 uint32_t appUpSize = 0, appUpGot = 0;
 uint8_t  rxChunk[1408];                   // base64 解码缓冲（>1024B 数据）
+// dump：把设备上的 app 读回给网页（网页"以设备为准"渲染 / 取回没有源码的程序）。
+// 一条 ~1.1KB JSON 在 115200 波特约阻塞 100ms，摊到每次循环只发一行，避免长时间卡顿。
+File     appDumpFile;
+char     appDumpStatus[12] = "";
+uint32_t appDumpSeq = 0;
+uint8_t  dumpBuf[768];
+char     dumpB64[1100], dumpLine[1240];
 RTC_DATA_ATTR char crashedApp[12] = "";   // 崩溃防护：复位前正在运行的 app 状态名
 
 // 按键映射（网页 keys 消息下发；设备离线时按此执行。cycleL/cycleR 为出厂默认，网页不下发这两个值）
@@ -519,6 +526,17 @@ void handleLine(const String& line) {
       sendApps();
     } else if (!strcmp(op, "list")) {
       sendApps();
+    } else if (!strcmp(op, "dump")) {
+      const char* st = doc["status"] | "";
+      if (appDumpFile) appDumpFile.close();
+      appDumpFile = LittleFS.open("/app_" + String(st) + ".wasm", "r");
+      strncpy(appDumpStatus, st, sizeof(appDumpStatus) - 1); appDumpStatus[sizeof(appDumpStatus) - 1] = 0;
+      appDumpSeq = 0;
+      if (!appDumpFile) {
+        snprintf(dumpLine, sizeof dumpLine, "{\"type\":\"appData\",\"status\":\"%s\",\"last\":true,\"missing\":true}", st);
+        sendLine(dumpLine);
+      }
+      Serial.printf("[APP] dump %s\n", st);
     }
   } else if (!strcmp(type, "sync")) {
     wantHello = true;                        // 网页握手 → 回 hello
@@ -886,6 +904,20 @@ void loop() {
     char c = (char)Serial.read();
     if (c == '\n') { if (serBuf.length()) { handleLine(serBuf); serBuf = ""; } }
     else if (c != '\r') serBuf += c;
+  }
+  // app 读回：每次循环只发一行（~100ms 串口时间），逐帧摊薄避免阻塞
+  if (appDumpFile) {
+    size_t n = appDumpFile.read(dumpBuf, sizeof dumpBuf);
+    size_t olen = 0;
+    if (n) mbedtls_base64_encode((uint8_t*)dumpB64, sizeof dumpB64, &olen, dumpBuf, n);
+    dumpB64[olen] = 0;
+    const bool last = n == 0 || appDumpFile.position() >= appDumpFile.size();
+    snprintf(dumpLine, sizeof dumpLine,
+      "{\"type\":\"appData\",\"status\":\"%s\",\"seq\":%u,\"last\":%s,\"data\":\"%s\"}",
+      appDumpStatus, (unsigned)appDumpSeq, last ? "true" : "false", dumpB64);
+    sendLine(dumpLine);
+    appDumpSeq++;
+    if (last) appDumpFile.close();
   }
   updateLed();
   // 状态切换 → 加载该状态的 WASM 屏幕 app（LittleFS 持久）；没有则回到默认状态屏

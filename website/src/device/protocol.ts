@@ -17,6 +17,7 @@ export type OutboundMessage =
   | { type: "app"; op: "stop" } // 停掉当前 app 回默认屏
   | { type: "app"; op: "clear"; status: string } // 删除某状态的自定义屏幕（含被禁用的 .bad），恢复默认显示
   | { type: "app"; op: "list" } // 请求设备回 apps 清单（hello / run / clear 后设备也会主动上报）
+  | { type: "app"; op: "dump"; status: string } // 把设备上的 wasm 读回来（appData 分片），网页用它渲染"设备上的实际程序"
   | { type: "sync" }; // 握手：固件回 hello
 
 export type InboundMessage =
@@ -30,7 +31,8 @@ export type InboundMessage =
   | { type: "seg"; status: StatusId; start: number; end?: number } // 单个区间；end 缺省 = 进行中
   | { type: "hello"; name: string; firmware: string }
   | { type: "apps"; list: { status: string; size: number; bad?: boolean }[] } // 设备上实际安装的自定义屏幕；bad=崩溃后被自动禁用
-  | { type: "appErr"; status: string; msg: string }; // app 运行 trap 或加载失败，设备已回默认屏
+  | { type: "appErr"; status: string; msg: string } // app 运行 trap 或加载失败，设备已回默认屏
+  | { type: "appData"; status: string; seq?: number; last: boolean; data?: string; missing?: boolean }; // app dump 的读回分片（base64）；missing=设备上没有该状态的程序
 
 export interface DeviceTransport {
   readonly kind: "mock" | "ble" | "serial";

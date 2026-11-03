@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Code2, Copy, Eraser, FileUp, Image, LayoutTemplate, Play, ShieldCheck, Upload, Cpu, TriangleAlert, RotateCcw, Moon, BellRing, HardDrive } from "lucide-react";
 import { HOST_API, WAT_TEMPLATES } from "../domain/watTemplates";
-import { APP_H, APP_MAX_BYTES, APP_W, clearApp, deployedHashes, drawDefaultScreen, hashBytes, previewScreen, screenBytes, sendApp, setDeployedHash, u8ToB64, type DefaultScreen, type ScreenPreview } from "../device/app";
+import { APP_H, APP_MAX_BYTES, APP_W, clearApp, deployedHashes, drawDefaultScreen, hashBytes, pendingClears, previewScreen, screenBytes, sendApp, setDeployedHash, setPendingClears, u8ToB64, validateApp, type DefaultScreen, type ScreenPreview } from "../device/app";
 import { getTransport, toOutbound, useStore } from "../store/AppStore";
 import { STATUSES, STATUS_ORDER } from "../domain/statuses";
 import type { DeviceApp, ScreenDef, ScreenLayout, StatusId } from "../domain/types";
 import { hhmm } from "../domain/time";
-import { Banner, Card, CardHeader, RowItem, Segmented, StatusChip, Tile } from "../ui/Primitives";
+import { Banner, Card, CardHeader, RowItem, Segmented, SettingRow, StatusChip, Tile } from "../ui/Primitives";
 import { useToast } from "../ui/Toast";
 
 const LAYOUTS: { value: ScreenLayout; label: string }[] = [
@@ -126,6 +126,8 @@ export function StatusScreens() {
     setSent(0);
     try {
       const bytes = await screenBytes(def);
+      const bad = await validateApp(bytes, STATUS_ORDER.indexOf(id)); // 先在本机完整跑约 10 帧，有错不写进设备
+      if (bad) { setError(bad); toast({ message: `代码运行出错，没有上传：${bad}`, seconds: 8 }); return; }
       await sendApp(t, id, bytes, setSent);
       setDeployedHash(id, hashBytes(bytes)); setDeployed(deployedHashes());
       toast({ message: `已写入设备「${STATUSES[id].label}」屏幕：进入该状态自动运行，断电不丢`, seconds: 8 });
@@ -144,8 +146,13 @@ export function StatusScreens() {
   const restore = async () => {
     setDef(undefined);
     const t = getTransport();
-    if (t && connected) { await clearApp(t, id).catch(() => {}); setDeployedHash(id); setDeployed(deployedHashes()); }
-    toast({ message: `「${STATUSES[id].label}」已恢复默认屏幕${connected ? "" : "；设备上的程序会在下次连接后再清除"}`, seconds: 6 });
+    if (t && connected) {
+      await clearApp(t, id).catch(() => {});
+    } else {
+      setPendingClears([...new Set([...pendingClears(), id])]); // 记住这次清除，连上设备后真正发 clear
+    }
+    setDeployedHash(id); setDeployed(deployedHashes());
+    toast({ message: `「${STATUSES[id].label}」已恢复默认屏幕${connected ? "" : "；设备上的程序会在下次连接时一并清除"}`, seconds: 6 });
   };
 
   const copyForAgent = async () => {
@@ -170,8 +177,7 @@ export function StatusScreens() {
   return (
     <>
       <Card style={{ marginBottom: 20 }}>
-        <CardHeader icon={<Tile color="violet" size={30}><Image /></Tile>} title="各状态屏幕" count={customCount || undefined}
-          extra={<Segmented value={s.settings.screenLayout} options={LAYOUTS} onChange={(v) => actions.updateSettings({ screenLayout: v })} />} />
+        <CardHeader icon={<Tile color="violet" size={30}><Image /></Tile>} title="各状态屏幕" count={customCount || undefined} />
         <div className="card-b">
           <div className="scr-grid">
             {STATUS_ORDER.map((x) => {
@@ -195,8 +201,8 @@ export function StatusScreens() {
             })}
           </div>
           <p className="hint" style={{ margin: "16px 0 0" }}>
-            布局只影响默认屏幕，会存进设备。自定义屏幕的画面完全由程序决定；待办提醒和休息提醒会临时盖住任何屏幕。
-            {!connected && " 设备未连接：标记是本机记录，连接后以设备上报为准。"}
+            点任意一格可在下方编辑。自定义屏幕的画面完全由程序决定；待办提醒和休息提醒会临时盖住任何屏幕。
+            {!connected && " 设备未连接：标记是本机记录，连接后以设备上报为准，设备上独有的程序会自动取回来显示。"}
             {connected && device.apps === undefined && " 设备没有上报安装清单，固件需要升级到 0.5 以上才能核对。"}
           </p>
         </div>
@@ -215,6 +221,11 @@ export function StatusScreens() {
               <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()}><FileUp />导入 .wasm</button>
               <input ref={fileRef} type="file" accept=".wasm" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickFile(f); e.target.value = ""; }} />
             </>} />
+          <div className="card-b" style={{ paddingBottom: 0 }}>
+            <SettingRow title="快捷设定 · 默认屏布局" desc="只影响显示默认屏幕的状态，会存进设备；装了程序的状态由程序自己决定画面">
+              <Segmented value={s.settings.screenLayout} options={LAYOUTS} onChange={(v) => actions.updateSettings({ screenLayout: v })} />
+            </SettingRow>
+          </div>
           <div className="card-b scr-edit">
             <div className="scr-side">
               <OledCanvas def={def} status={id} screen={screenFor(id)} keyboard nonce={nonce} onReady={setPreview} onError={setError} style={{ maxWidth: 360 }} />
@@ -312,7 +323,10 @@ export function StatusScreens() {
                 {HOST_API.map((a) => <tr key={a.sig}><td><code>{a.sig}</code></td><td>{a.desc}</td></tr>)}
               </tbody>
             </table>
-            <p className="hint" style={{ margin: "12px 0 0" }}>程序导出 <code>run()</code>，设备约每 33ms 调用一次。完整规范见 <code>doc/display-app-spec.md</code>；用 C 写的话本地编译成 .wasm 再导入。</p>
+            <p className="hint" style={{ margin: "12px 0 0" }}>
+              不用自己学这些接口——点「复制给 Agent」，把它和你想要的画面一起发给 Agent，让它写好代码贴回编辑器；上传前会先在这里完整跑一遍，确认没问题才写进设备。
+              想自己写：程序只要导出 <code>run()</code>，设备每秒调用约 30 次；也可以把本地编译好的 .wasm 直接导入（接口规范见 <code>doc/display-app-spec.md</code>）。
+            </p>
           </div>
         </Card>
         <Card>

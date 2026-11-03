@@ -12,6 +12,7 @@ import type { DeviceTransport, InboundMessage, OutboundMessage } from "../device
 import { MockTransport } from "../device/mockTransport";
 import { BleTransport } from "../device/bleTransport";
 import { SerialTransport } from "../device/serialTransport";
+import { b64ToU8, hashBytes, pendingClears, setDeployedHash, setPendingClears } from "../device/app";
 
 const STORAGE_KEY = "shougongpai.v1";
 /** 本机保留的历史天数（含今天），超出的在跨天时清理 */
@@ -26,6 +27,8 @@ export const getTransport = () => activeTransport;
 let breakPending: { minutes?: number; enabled?: boolean; offToday?: boolean } | undefined;
 /** 设备逐行推送的今日状态区间：begin 清空、seg 累积、end 一次性替换 */
 let pendingSegs: { status: StatusId; start: number; end?: number }[] = [];
+/** app dump 读回分片累积器 */
+let appDumpAcc: { status: string; parts: string[] } = { status: "", parts: [] };
 const sendBreak = (patch: { minutes?: number; enabled?: boolean; offToday?: boolean; accumMs?: number }, s: AppState) => {
   const { accumMs, ...persistent } = patch;
   if (Object.keys(persistent).length) breakPending = { ...breakPending, ...persistent };
@@ -583,9 +586,33 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         case "hello":
           setDevice((d) => ({ ...d, name: m.name }));
           break;
-        case "apps":
+        case "apps": {
           setDevice((d) => ({ ...d, apps: Object.fromEntries(m.list.map((a) => [a.status, { size: a.size, bad: a.bad }])) }));
+          // 断连时点的"恢复默认"：连上后真正清掉设备上的程序
+          const pending = pendingClears();
+          for (const st of pending) deviceSend?.({ type: "app", op: "clear", status: st });
+          if (pending.length) setPendingClears([]);
+          // 设备上有程序但本机没有源码：取回二进制，页面渲染设备上的真实画面
+          const cs = stateRef.current.settings.customScreens;
+          for (const a of m.list) if (!a.bad && !cs[a.status]) deviceSend?.({ type: "app", op: "dump", status: a.status });
           break;
+        }
+        case "appData": {
+          if (m.seq === 0 || appDumpAcc.status !== m.status) appDumpAcc = { status: m.status, parts: [] };
+          if (m.data) appDumpAcc.parts.push(m.data);
+          if (m.last && appDumpAcc.parts.length) {
+            const b64 = appDumpAcc.parts.join("");
+            appDumpAcc = { status: "", parts: [] };
+            // 采纳设备上的真实程序为本机草稿：缩略图/编辑器跑的就是设备二进制本身
+            if (!stateRef.current.settings.customScreens[m.status]) {
+              setDeployedHash(m.status, hashBytes(b64ToU8(b64)));
+              set((x) => ({ ...x, settings: { ...x.settings, customScreens: { ...x.settings.customScreens, [m.status]: { kind: "wasm" as const, b64, name: `app_${m.status}.wasm` } } } }));
+            }
+          } else if (m.last) {
+            appDumpAcc = { status: "", parts: [] };
+          }
+          break;
+        }
         case "appErr":
           setDevice((d) => ({ ...d, appErr: { status: m.status, msg: m.msg, at: Date.now() } }));
           break;
