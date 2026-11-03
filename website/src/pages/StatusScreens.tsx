@@ -4,17 +4,12 @@ import { HOST_API, WAT_TEMPLATES } from "../domain/watTemplates";
 import { APP_H, APP_MAX_BYTES, APP_W, clearApp, deployedHashes, drawDefaultScreen, hashBytes, pendingClears, previewScreen, screenBytes, sendApp, setDeployedHash, setPendingClears, u8ToB64, validateApp, type DefaultScreen, type ScreenPreview } from "../device/app";
 import { getTransport, toOutbound, useStore } from "../store/AppStore";
 import { STATUSES, STATUS_ORDER } from "../domain/statuses";
-import type { DeviceApp, ScreenDef, ScreenLayout, StatusId } from "../domain/types";
+import type { DeviceApp, ScreenDef, StatusId } from "../domain/types";
 import { atToday, hhmm } from "../domain/time";
 import { nextNode, scheduleForDay } from "../domain/schedule";
 import { Banner, Card, CardHeader, RowItem, StatusChip, Tile } from "../ui/Primitives";
 import { useToast } from "../ui/Toast";
 
-const LAYOUTS: { value: ScreenLayout; label: string }[] = [
-  { value: "full", label: "状态 + 时间 + 说明" },
-  { value: "clock", label: "状态 + 时间" },
-  { value: "status", label: "仅状态" },
-];
 
 const fmtSize = (n: number) => (n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`);
 const hasCode = (d?: ScreenDef) => !!d && (d.kind === "wasm" || !!d.src.trim());
@@ -300,17 +295,12 @@ export function StatusScreens() {
                 <div className="scr-empty">
                   <Tile color="violet" size={48}><LayoutTemplate /></Tile>
                   <b>「{STATUSES[id].label}」还在用默认屏幕</b>
-                  <p>先挑个默认屏样式，或选模板写自定义程序（也可导入本地 .wasm）。程序装进设备后，每次进入「{STATUSES[id].label}」都会自动运行，网页关掉也照常显示。</p>
+                  <p>点「默认屏幕」能看到这份画面的等效代码、直接改；或选其他模板写自定义程序（也可导入本地 .wasm）。程序装进设备后，每次进入「{STATUSES[id].label}」都会自动运行，网页关掉也照常显示。</p>
                   <div className="scr-tpls">
-                    {LAYOUTS.map((l) => (
-                      <button key={l.value} type="button" className={`scr-tpl scr-def ${s.settings.screenLayout === l.value ? "on" : ""}`}
-                        onClick={() => actions.updateSettings({ screenLayout: l.value })}>
-                        <b>{l.label}</b><span>默认屏样式{s.settings.screenLayout === l.value ? " · 使用中" : ""}</span>
-                      </button>
-                    ))}
                     {WAT_TEMPLATES.map((t) => (
-                      <button key={t.id} type="button" className="scr-tpl" onClick={() => setDef({ kind: "wat", src: t.code })}>
-                        <b>{t.name}</b><span>{t.desc}</span>
+                      <button key={t.id} type="button" className={`scr-tpl ${t.id === "default" ? "scr-def on" : ""}`}
+                        onClick={() => setDef({ kind: "wat", src: t.code })}>
+                        <b>{t.name}</b><span>{t.desc}{t.id === "default" ? " · 使用中" : ""}</span>
                       </button>
                     ))}
                   </div>

@@ -22,6 +22,49 @@ ${HOST_API.map((a) => `;;   ${a.sig.padEnd(20)} ${a.desc}`).join("\n")}
 
 export const WAT_TEMPLATES: WatTemplate[] = [
   {
+    id: "default",
+    name: "默认屏幕",
+    desc: "状态名 + 时钟 + 说明行：设备默认屏的程序版，可改文字和排版；演示 status() + clock()",
+    code: `${COMMON}
+(module
+  (import "env" "clear"  (func $clear))
+  (import "env" "show"   (func $show))
+  (import "env" "text"   (func $text (param i32 i32 i32 i32)))
+  (import "env" "clock"  (func $clock (result i32)))
+  (import "env" "status" (func $status (result i32)))
+  (memory (export "memory") 1)
+  ;; 时钟缓冲 HH:MM（未校时显示 --:--）
+  (data (i32.const 16) "--:--")
+  ;; 状态名表：每 8 字节一个 ASCII 名（补空格对齐），status() 下标 ×8 取地址
+  (data (i32.const 32) "WORKING BUSY    FOCUS   MEETING REST    OFF DUTY")
+  ;; 说明行表：每 16 字节一条，与名表同下标顺序
+  (data (i32.const 80) "COME FIND ME    DO NOT DISTURB  FOCUSING        IN A MEETING    BE RIGHT BACK   SEE YOU TOMORROW")
+  (func $digit (param $v i32) (result i32) (i32.add (i32.const 48) (i32.rem_u (local.get $v) (i32.const 10))))
+  (func $run (export "run")
+    (local $s i32) (local $m i32) (local $c i32)
+    call $clear
+    ;; 右上角时钟 HH:MM（clock()=-1 时缓冲保持 --:--）
+    (local.set $c (call $clock))
+    (if (i32.ge_s (local.get $c) (i32.const 0))
+      (then
+        (local.set $m (i32.div_u (local.get $c) (i32.const 60)))
+        (local.set $s (i32.rem_u (local.get $c) (i32.const 60)))
+        (i32.store8 (i32.const 16) (call $digit (i32.div_u (local.get $m) (i32.const 10))))
+        (i32.store8 (i32.const 17) (call $digit (local.get $m)))
+        (i32.store8 (i32.const 19) (call $digit (i32.div_u (local.get $s) (i32.const 10))))
+        (i32.store8 (i32.const 20) (call $digit (local.get $s)))))
+    (call $text (i32.const 92) (i32.const 14) (i32.const 16) (i32.const 5))
+    ;; 状态名（text 只有 6x10 ASCII：固件默认屏的中文大字这里用英文名近似，想画中文要用位图）
+    (call $text (i32.const 30) (i32.const 40)
+      (i32.add (i32.const 32) (i32.mul (call $status) (i32.const 8)))
+      (i32.const 8))
+    ;; 说明行（下标 ×16）
+    (call $text (i32.const 22) (i32.const 56)
+      (i32.add (i32.const 80) (i32.mul (call $status) (i32.const 16)))
+      (i32.const 16))
+    call $show))`,
+  },
+  {
     id: "ball",
     name: "弹跳小球",
     desc: "实心小球斜向往复弹跳；演示 px + millis 动画",
