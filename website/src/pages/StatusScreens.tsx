@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { Code2, Copy, Eraser, FileUp, Image, LayoutTemplate, Play, ShieldCheck, Upload, Cpu, TriangleAlert, RotateCcw, Moon, BellRing, HardDrive } from "lucide-react";
-import { HOST_API, WAT_TEMPLATES } from "../domain/watTemplates";
+import { Code2, Copy, Eraser, FileUp, Image, LayoutTemplate, Play, ShieldCheck, Upload, Cpu, TriangleAlert, HardDrive } from "lucide-react";
+import { WAT_TEMPLATES } from "../domain/watTemplates";
 import { APP_H, APP_MAX_BYTES, APP_W, clearApp, deployedHashes, drawDefaultScreen, hashBytes, pendingClears, previewScreen, screenBytes, sendApp, setDeployedHash, setPendingClears, u8ToB64, validateApp, type DefaultScreen, type ScreenPreview } from "../device/app";
 import { getTransport, toOutbound, useStore } from "../store/AppStore";
 import { STATUSES, STATUS_ORDER } from "../domain/statuses";
 import type { DeviceApp, ScreenDef, StatusId } from "../domain/types";
 import { atToday, hhmm } from "../domain/time";
 import { nextNode, scheduleForDay } from "../domain/schedule";
-import { Banner, Card, CardHeader, RowItem, StatusChip, Tile } from "../ui/Primitives";
+import { Banner, Card, CardHeader, StatusChip, Tile } from "../ui/Primitives";
 import { useToast } from "../ui/Toast";
 
 
@@ -270,6 +270,7 @@ export function StatusScreens() {
           <CardHeader icon={<Tile color="blue" size={30}><Code2 /></Tile>} title={<>编辑屏幕 · {STATUSES[id].label}</>}
             extra={<>
               <span className={TONE_CLASS[src.tone]}>{src.label}</span>
+              <button className="btn btn-secondary btn-sm" onClick={() => void copyForAgent()}><Copy />复制给 Agent</button>
               <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()}><FileUp />导入 .wasm</button>
               <input ref={fileRef} type="file" accept=".wasm" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickFile(f); e.target.value = ""; }} />
             </>} />
@@ -358,31 +359,15 @@ export function StatusScreens() {
               )}
             </div>
           </div>
-        </Card>
-      </div>
 
-      <div className="grid g-cards">
-        <Card>
-          <CardHeader icon={<Tile color="blue" size={30}><Code2 /></Tile>} title="宿主 API 速查"
-            extra={<button className="btn btn-secondary btn-sm" onClick={() => void copyForAgent()}><Copy />复制给 Agent</button>} />
-          <div className="card-b" style={{ paddingTop: 8 }}>
-            <table className="scr-api">
-              <tbody>
-                {HOST_API.map((a) => <tr key={a.sig}><td><code>{a.sig}</code></td><td>{a.desc}</td></tr>)}
-              </tbody>
-            </table>
-            <p className="hint" style={{ margin: "12px 0 0" }}>
-              不用自己学这些接口——点「复制给 Agent」，把它和你想要的画面一起发给 Agent，让它写好代码贴回编辑器；上传前会先在这里完整跑一遍，确认没问题才写进设备。
+          <div className="scr-notes">
+            <p className="hint" style={{ margin: 0 }}>
+              不会写代码？点右上角「复制给 Agent」，把它和你想要的画面一起发给 Agent，让它写好代码贴回编辑器——上传前会先在这里完整跑一遍，确认没问题才写进设备。
+            </p>
+            <p className="hint" style={{ margin: 0 }}>
+              程序存进设备 flash（每状态一个，最大 {APP_MAX_BYTES / 1024} KB），断电、断连照常运行；出错自动回默认屏，卡死自动禁用、改好重传即恢复；待办和休息提醒会临时盖住屏幕；OLED 长时间同一画面会老化，最好多留黑或有移动。
             </p>
           </div>
-        </Card>
-        <Card>
-          <CardHeader icon={<Tile color="teal" size={30}><ShieldCheck /></Tile>} title="在设备上怎么运行" />
-          <RowItem lead={<Tile color="violet"><HardDrive /></Tile>} title="存在设备里，离线照常运行" desc={`每个状态一个程序，最大 ${APP_MAX_BYTES / 1024} KB，断电重启不丢`} />
-          <RowItem lead={<Tile color="orange"><RotateCcw /></Tile>} title="出错自动回默认屏" desc="越界、除零等错误会停掉程序，网页会收到提示" />
-          <RowItem lead={<Tile color="orange"><TriangleAlert /></Tile>} title="卡死会被自动禁用" desc="程序让设备重启后不会再加载，重新上传即可恢复" />
-          <RowItem lead={<Tile color="green"><BellRing /></Tile>} title="提醒优先" desc="待办和休息提醒临时盖住屏幕，按任意键关闭" />
-          <RowItem lead={<Tile color="teal"><Moon /></Tile>} title="留意烧屏" desc="OLED 长时间显示同一画面会老化，画面最好有移动或多留黑" />
         </Card>
       </div>
     </>

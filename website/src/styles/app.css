@@ -230,6 +230,7 @@ input[type="range"] { accent-color: var(--primary); width: 180px; }
 .scr-api tr:last-child td { border-bottom: 0; }
 .scr-api td:first-child { padding-right: 14px; white-space: nowrap; }
 .scr-api code, .hint code { font: 12px var(--font-num); color: var(--ink); }
+.scr-notes { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
 
 /* Mobile */
 @media (max-width: 1100px) {
