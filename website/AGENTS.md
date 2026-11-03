@@ -9,4 +9,4 @@
 - 待办清单 → [doc/roadmap.md](doc/roadmap.md)
 - 设计规范 v1.0（已确认）→ [design-research/DESIGN_SPEC.md](design-research/DESIGN_SPEC.md)
 - 框架无关的样式资产 → `styles/tokens.css`、`styles/components.css`、`scripts/hold-button.js`（`design-research/preview.html` 在用）
-- PRD、硬件接线/采购 → 仓库外的 `../PRD.md`、`../HARDWARE.md`（本仓库只含 website/）
+- PRD、硬件接线/采购 → `../doc/PRD.md`、`../doc/HARDWARE.md`（索引见 `../doc/MAP.md`）
