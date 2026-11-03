@@ -49,7 +49,7 @@
 
 | 功能 | GPIO | 说明 |
 | --- | --- | --- |
-| OLED SDA | GPIO8 | I2C 数据；模块原理图标注从机地址 0x78（8 位），即 7 位地址 0x3C；D/C# 接 VCC 时为 0x3D |
+| OLED SDA | GPIO3 | I2C 数据；模块原理图标注从机地址 0x78（8 位），即 7 位地址 0x3C；D/C# 接 VCC 时为 0x3D。GPIO3 为 strapping 脚（选 JTAG 来源），被模块上拉拉高仅使片内 USB-JTAG 不可用，烧录/日志走 CH343 串口不受影响 |
 | OLED SCL | GPIO9 | I2C 时钟 |
 | 收工键 / 触摸 SIG | GPIO4 | 按键另一端接 GND，固件启用内部上拉，按下为低电平；改用 TTP223 触摸时 SIG 接此脚并拔掉按键线（二者互斥），极性相反由固件处理 |
 | 自定义键 | GPIO5 | 同上，也可作按住说话键 |
@@ -66,7 +66,7 @@
 **避免使用的引脚：**
 
 - GPIO0：BOOT 和自动下载。
-- GPIO3、GPIO45、GPIO46：启动策略引脚。
+- GPIO45、GPIO46：启动策略引脚（GPIO45 决定 Flash 电压、GPIO46 纯输入且参与启动模式，外接上拉会导致无法启动或根本无输出能力）。GPIO3 同为 strapping 脚但仅选择 JTAG 来源——本项目已用作 OLED SDA（2026-11-03 定），代价仅是片内 USB-JTAG 不可用，烧录日志走 CH343 串口不受影响。
 - GPIO19、GPIO20：原生 USB。
 - GPIO43、GPIO44（板上丝印 TX/RX）：串口烧录与日志。
 - GPIO35–37：N16R8 的八线 PSRAM 占用，虽然被引出，但不可用。
@@ -83,7 +83,7 @@
 | GND | GND |
 | VCC | 3V3 |
 | SCL | GPIO9 |
-| SDA | GPIO8 |
+| SDA | GPIO3（2026-11-03 由 GPIO8 改） |
 
 ## 6. 麦克风接线
 
