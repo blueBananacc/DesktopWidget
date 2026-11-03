@@ -38,12 +38,19 @@
 |---|---|---|
 | `clear` | `()` | 清整个帧缓冲（每帧开头调用） |
 | `show` | `()` | 帧缓冲刷上 OLED（每帧结尾调用） |
-| `px` | `(i32 x, i32 y)` | 置一个像素为亮（越界自动裁剪，无"灭"——先 clear 再画） |
+| `px` | `(i32 x, i32 y)` | 置一个像素（受 color 模式影响；越界自动裁剪） |
+| `color` | `(i32 m)` | 绘制模式：0=灭(擦除) 1=亮 2=反色XOR；对之后所有绘制函数生效（含文字/位图），app 加载时复位为 1。反白高亮：`color(2)` + 实心形状 |
 | `rect` | `(i32 x, i32 y, i32 w, i32 h, i32 fill)` | 矩形；fill≠0 实心，=0 描边 |
+| `line` | `(i32 x1, i32 y1, i32 x2, i32 y2)` | 直线（Bresenham） |
+| `circle` | `(i32 cx, i32 cy, i32 r, i32 fill)` | 圆；fill≠0 实心 |
+| `ellipse` | `(i32 cx, i32 cy, i32 rx, i32 ry, i32 fill)` | 椭圆；rx/ry 两轴半径 |
+| `rrect` | `(i32 x, i32 y, i32 w, i32 h, i32 r, i32 fill)` | 圆角矩形；r 圆角半径 |
+| `bitmap` | `(i32 x, i32 y, i32 w, i32 h, i32 ptr)` | 1bpp 位图：ptr 指向线性内存，行主序、每行 ⌈w/8⌉ 字节、bit 低位先（XBM 格式）；任意图标/非标字形用它 |
 | `text` | `(i32 x, i32 y, i32 ptr, i32 len)` | 6×10 ASCII 字体；从线性内存 ptr 读 len 字节；y 是基线（约+8 可视） |
 | `textC` | `(i32 x, i32 y, i32 ptr, i32 len)` | wqy12 UTF-8 中文小字（同默认屏说明行字体）；ptr 指向 UTF-8 字节 |
 | `bigText` | `(i32 x, i32 y, i32 ptr, i32 len)` | wqy16 UTF-8 中文大字（同默认屏状态名字体） |
 | `textW` | `(i32 ptr, i32 len, i32 font) -> i32` | 文字像素宽：font 0=6x10 1=wqy12 2=wqy16；居中/右对齐用 |
+| `textA` | `(i32 x, i32 y, i32 ptr, i32 len, i32 font, i32 align)` | 锚点文本：font 同上；align 0–8 九宫格（0左上 1上中 2右上 3左中 4正中 5右中 6左下 7下中 8右下），(x,y) 即锚点——居中文字直接 align=4 x=64 y=32 |
 | `millis` | `() -> i32` | 设备毫秒计数（动画时钟） |
 | `buttons` | `() -> i32` | K1-K4 按下位掩码：bit0=K1(收工键) bit1=K2 bit2=K3 bit3=K4 |
 | `status` | `() -> i32` | 当前状态下标：0=work 1=busy 2=focus 3=meet 4=rest 5=off |
@@ -80,7 +87,18 @@
   (then ;; …))
 ```
 
-更多完整示例见「屏幕内容」页模板下拉：弹跳小球 / 滚动字幕 / 像素爱心 / 按键测试 / 自定义骨架。
+### 反色高亮 + 九宫格文本（color + textA）
+
+```wat
+(call $textA (i32.const 64) (i32.const 32) (i32.const 16) (i32.const 6)
+            (i32.const 1) (i32.const 4))   ;; wqy12、"正中"锚点
+(call $color (i32.const 2))                ;; 之后画啥都反色
+(call $rrect (i32.const 10) (i32.const 50) (i32.const 108) (i32.const 12)
+            (i32.const 3) (i32.const 1))   ;; 实心圆角条：覆盖到的像素全部反白
+(call $color (i32.const 1))                ;; 画完记得调回
+```
+
+更多完整示例见「屏幕内容」页模板：默认屏幕 / 弹跳小球 / 滚动字幕 / 像素爱心 / 按键测试 / 状态计时 / 图形工具箱 / 自定义骨架。
 
 ## 用 C 写（可选，本地编译）
 
@@ -91,11 +109,18 @@
 __attribute__((import_module("env"), import_name("clear")))   void clear(void);
 __attribute__((import_module("env"), import_name("show")))    void show(void);
 __attribute__((import_module("env"), import_name("px")))      void px(int x, int y);
+__attribute__((import_module("env"), import_name("color")))   void color(int m);
 __attribute__((import_module("env"), import_name("rect")))    void rect(int x,int y,int w,int h,int fill);
+__attribute__((import_module("env"), import_name("line")))    void line(int x1,int y1,int x2,int y2);
+__attribute__((import_module("env"), import_name("circle")))  void circle(int cx,int cy,int r,int fill);
+__attribute__((import_module("env"), import_name("ellipse"))) void ellipse(int cx,int cy,int rx,int ry,int fill);
+__attribute__((import_module("env"), import_name("rrect")))   void rrect(int x,int y,int w,int h,int r,int fill);
+__attribute__((import_module("env"), import_name("bitmap")))  void bitmap(int x,int y,int w,int h,const void* bits);
 __attribute__((import_module("env"), import_name("text")))    void text(int x,int y,const char* s,int len);
 __attribute__((import_module("env"), import_name("textC")))   void textC(int x,int y,const char* s,int len);
 __attribute__((import_module("env"), import_name("bigText"))) void bigText(int x,int y,const char* s,int len);
 __attribute__((import_module("env"), import_name("textW")))   int  textW(const char* s,int len,int font);
+__attribute__((import_module("env"), import_name("textA")))   void textA(int x,int y,const char* s,int len,int font,int align);
 __attribute__((import_module("env"), import_name("millis")))  int  millis(void);
 __attribute__((import_module("env"), import_name("buttons"))) int  buttons(void);
 __attribute__((import_module("env"), import_name("status")))  int  status(void);

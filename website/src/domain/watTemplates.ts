@@ -6,11 +6,18 @@ export const HOST_API: { sig: string; desc: string }[] = [
   { sig: "clear()", desc: "清帧缓冲（每帧开头调用）" },
   { sig: "show()", desc: "帧缓冲刷上屏（每帧结尾调用）" },
   { sig: "px(x, y)", desc: "置像素（越界自动裁剪）" },
+  { sig: "color(m)", desc: "绘制模式：0=灭(擦除) 1=亮 2=反色XOR；对之后所有绘制生效，每帧默认 1" },
   { sig: "rect(x, y, w, h, f)", desc: "矩形（f=1 实心，0 描边）" },
+  { sig: "line(x1,y1,x2,y2)", desc: "直线（Bresenham）" },
+  { sig: "circle(cx,cy,r,f)", desc: "圆（f=1 实心，0 描边）" },
+  { sig: "ellipse(cx,cy,rx,ry,f)", desc: "椭圆（rx/ry 两轴半径）" },
+  { sig: "rrect(x,y,w,h,r,f)", desc: "圆角矩形（r 圆角半径）" },
+  { sig: "bitmap(x,y,w,h,ptr)", desc: "1bpp 位图：行主序、每行 (w+7)/8 字节、LSB 先（XBM）；画任意图标/图案" },
   { sig: "text(x, y, ptr, len)", desc: "ASCII 文本（6x10 字体，y 为基线；ptr/len 指线性内存里的字节，len≤64）" },
   { sig: "textC(x,y,ptr,len)", desc: "UTF-8 中文小字（wqy12，与默认屏说明行同字体）" },
   { sig: "bigText(x,y,ptr,len)", desc: "UTF-8 中文大字（wqy16，与默认屏状态名同字体）" },
   { sig: "textW(ptr,len,font)", desc: "文字像素宽：font 0=6x10 1=wqy12 2=wqy16；居中/右对齐用" },
+  { sig: "textA(x,y,ptr,len,font,align)", desc: "锚点文本一步到齐：font 0/1/2，align 0-8 九宫格（0左上…4正中…8右下），x,y 即锚点" },
   { sig: "millis() -> i32", desc: "设备毫秒计数（动画的时钟来源）" },
   { sig: "buttons() -> i32", desc: "K1-K4 按下位掩码（bit0=K1 … bit3=K4）" },
   { sig: "status() -> i32", desc: "当前状态下标（0 工作中 1 勿扰 2 专注 3 会议 4 休息 5 已下班）" },
@@ -252,6 +259,46 @@ export const WAT_TEMPLATES: WatTemplate[] = [
     call $show))`,
   },
   {
+    id: "shapes",
+    name: "图形工具箱",
+    desc: "圆角框/圆/线/位图/锚点文本/反色一锅端；演示新版绘图函数",
+    code: `${COMMON}
+(module
+  (import "env" "clear"  (func $clear))
+  (import "env" "show"   (func $show))
+  (import "env" "color"  (func $color (param i32)))
+  (import "env" "line"   (func $line (param i32 i32 i32 i32)))
+  (import "env" "circle" (func $circle (param i32 i32 i32 i32)))
+  (import "env" "ellipse"(func $ellipse (param i32 i32 i32 i32 i32)))
+  (import "env" "rrect"  (func $rrect (param i32 i32 i32 i32 i32 i32)))
+  (import "env" "bitmap" (func $bitmap (param i32 i32 i32 i32 i32)))
+  (import "env" "textA"  (func $textA (param i32 i32 i32 i32 i32 i32)))
+  (import "env" "millis" (func $millis (result i32)))
+  (memory (export "memory") 1)
+  ;; 12x12 星星位图（XBM：行主序 LSB 先，每行 2 字节 = 24B）
+  (data (i32.const 16) "\\08\\00\\1c\\00\\3e\\00\\7f\\80\\ff\\c0\\7f\\80\\3e\\00\\1c\\00\\36\\00\\63\\00\\41\\00\\00\\00")
+  (data (i32.const 48) "SHAPES")
+  (func $run (export "run")
+    (local $rx i32)
+    call $clear
+    ;; 标题：textA 一步到齐——anchor 上中(1)，x=64 是水平中点，y=4 是顶边
+    (call $textA (i32.const 64) (i32.const 4) (i32.const 48) (i32.const 6) (i32.const 0) (i32.const 1))
+    (call $line (i32.const 4) (i32.const 17) (i32.const 123) (i32.const 17))
+    ;; 左：圆角边框 + 实心圆
+    (call $rrect (i32.const 6) (i32.const 24) (i32.const 40) (i32.const 30) (i32.const 5) (i32.const 0))
+    (call $circle (i32.const 26) (i32.const 39) (i32.const 8) (i32.const 1))
+    ;; 中：星星位图 + 反色实心圆叠上去（重叠处反白——color(2) XOR 效果）
+    (call $bitmap (i32.const 52) (i32.const 26) (i32.const 12) (i32.const 12) (i32.const 16))
+    (call $color (i32.const 2))
+    (call $circle (i32.const 66) (i32.const 42) (i32.const 9) (i32.const 1))
+    (call $color (i32.const 1))
+    ;; 右：会呼吸的椭圆（rx 随时间 6..16 摆动）
+    (local.set $rx (i32.add (i32.const 6)
+      (i32.rem_u (i32.div_u (call $millis) (i32.const 200)) (i32.const 11))))
+    (call $ellipse (i32.const 106) (i32.const 39) (local.get $rx) (i32.const 11) (i32.const 0))
+    call $show))`,
+  },
+  {
     id: "custom",
     name: "自定义代码",
     desc: "空白骨架：全部宿主 API 已 import，直接在 run() 里画",
@@ -260,11 +307,18 @@ export const WAT_TEMPLATES: WatTemplate[] = [
   (import "env" "clear"   (func $clear))
   (import "env" "show"    (func $show))
   (import "env" "px"      (func $px (param i32 i32)))
+  (import "env" "color"   (func $color (param i32)))
   (import "env" "rect"    (func $rect (param i32 i32 i32 i32 i32)))
+  (import "env" "line"    (func $line (param i32 i32 i32 i32)))
+  (import "env" "circle"  (func $circle (param i32 i32 i32 i32)))
+  (import "env" "ellipse" (func $ellipse (param i32 i32 i32 i32 i32)))
+  (import "env" "rrect"   (func $rrect (param i32 i32 i32 i32 i32 i32)))
+  (import "env" "bitmap"  (func $bitmap (param i32 i32 i32 i32 i32)))
   (import "env" "text"    (func $text (param i32 i32 i32 i32)))
   (import "env" "textC"   (func $textC (param i32 i32 i32 i32)))
   (import "env" "bigText" (func $bigText (param i32 i32 i32 i32)))
   (import "env" "textW"   (func $textW (param i32 i32 i32) (result i32)))
+  (import "env" "textA"   (func $textA (param i32 i32 i32 i32 i32 i32)))
   (import "env" "millis"  (func $millis (result i32)))
   (import "env" "buttons" (func $buttons (result i32)))
   (import "env" "status"  (func $status (result i32)))

@@ -658,17 +658,66 @@ void pollKeys() {
 // 先 clear() 再逐笔画 px/rect/text，最后 show() 上屏；帧率由固件节流（~30fps）。
 // px/rect/text 直接写 u8g2 页序帧缓冲；text 从 wasm 线性内存读 ASCII。
 
+static uint8_t appColor = 1; // 绘制模式：0=灭(擦除) 1=亮 2=反色XOR；color() 设置后对所有绘制函数生效
+
 m3ApiRawFunction(m3_px) {
   m3ApiGetArg(int32_t, x); m3ApiGetArg(int32_t, y);
-  if (x >= 0 && x < 128 && y >= 0 && y < 64)
-    oled.getBufferPtr()[(y >> 3) * 128 + x] |= (uint8_t)(1 << (y & 7));
+  if (x >= 0 && x < 128 && y >= 0 && y < 64) {
+    uint8_t* p = &oled.getBufferPtr()[(y >> 3) * 128 + x];
+    const uint8_t m = (uint8_t)(1 << (y & 7));
+    if (appColor == 0) *p &= ~m; else if (appColor == 2) *p ^= m; else *p |= m;
+  }
+  m3ApiSuccess();
+}
+m3ApiRawFunction(m3_color) { // (mode) — 0灭 1亮 2反色XOR
+  m3ApiGetArg(int32_t, m);
+  if (m >= 0 && m <= 2) appColor = (uint8_t)m;
   m3ApiSuccess();
 }
 m3ApiRawFunction(m3_rect) { // (x, y, w, h, fill)
   m3ApiGetArg(int32_t, x); m3ApiGetArg(int32_t, y); m3ApiGetArg(int32_t, w);
   m3ApiGetArg(int32_t, h); m3ApiGetArg(int32_t, fill);
-  oled.setDrawColor(1);
+  oled.setDrawColor(appColor);
   if (fill) oled.drawBox(x, y, w, h); else oled.drawFrame(x, y, w, h);
+  m3ApiSuccess();
+}
+m3ApiRawFunction(m3_line) { // (x1, y1, x2, y2)
+  m3ApiGetArg(int32_t, x1); m3ApiGetArg(int32_t, y1);
+  m3ApiGetArg(int32_t, x2); m3ApiGetArg(int32_t, y2);
+  oled.setDrawColor(appColor);
+  oled.drawLine(x1, y1, x2, y2);
+  m3ApiSuccess();
+}
+m3ApiRawFunction(m3_circle) { // (cx, cy, r, fill)
+  m3ApiGetArg(int32_t, cx); m3ApiGetArg(int32_t, cy);
+  m3ApiGetArg(int32_t, r);  m3ApiGetArg(int32_t, fill);
+  oled.setDrawColor(appColor);
+  if (fill) oled.drawDisc(cx, cy, r); else oled.drawCircle(cx, cy, r);
+  m3ApiSuccess();
+}
+m3ApiRawFunction(m3_ellipse) { // (cx, cy, rx, ry, fill)
+  m3ApiGetArg(int32_t, cx); m3ApiGetArg(int32_t, cy);
+  m3ApiGetArg(int32_t, rx); m3ApiGetArg(int32_t, ry); m3ApiGetArg(int32_t, fill);
+  oled.setDrawColor(appColor);
+  if (fill) oled.drawFilledEllipse(cx, cy, rx, ry); else oled.drawEllipse(cx, cy, rx, ry);
+  m3ApiSuccess();
+}
+m3ApiRawFunction(m3_rrect) { // (x, y, w, h, r, fill) — 圆角矩形
+  m3ApiGetArg(int32_t, x); m3ApiGetArg(int32_t, y); m3ApiGetArg(int32_t, w);
+  m3ApiGetArg(int32_t, h); m3ApiGetArg(int32_t, r); m3ApiGetArg(int32_t, fill);
+  oled.setDrawColor(appColor);
+  if (fill) oled.drawRBox(x, y, w, h, r); else oled.drawRFrame(x, y, w, h, r);
+  m3ApiSuccess();
+}
+m3ApiRawFunction(m3_bitmap) { // (x, y, w, h, ptr) — 1bpp 位图，行主序、每行 (w+7)/8 字节、LSB 先（XBM）
+  m3ApiGetArg(int32_t, x); m3ApiGetArg(int32_t, y);
+  m3ApiGetArg(int32_t, w); m3ApiGetArg(int32_t, h);
+  m3ApiGetArgMem(uint8_t*, bits);
+  if (w > 0 && h > 0 && w <= 128 && h <= 64) {
+    m3ApiCheckMem(bits, ((size_t)w * h + 7) / 8);
+    oled.setDrawColor(appColor);
+    oled.drawXBMP(x, y, w, h, bits);
+  }
   m3ApiSuccess();
 }
 m3ApiRawFunction(m3_text) { // (x, y, ptr, len) — 从 wasm 线性内存读 ASCII
@@ -677,7 +726,7 @@ m3ApiRawFunction(m3_text) { // (x, y, ptr, len) — 从 wasm 线性内存读 ASC
   if (len > 0 && len <= 64) {
     m3ApiCheckMem(s, len);                               // 越界 → wasm trap，不会读野内存
     char buf[65]; memcpy(buf, s, len); buf[len] = 0;
-    oled.setDrawColor(1);
+    oled.setDrawColor(appColor);
     oled.setFont(u8g2_font_6x10_tf); oled.drawStr(x, y, buf);
     oled.setFont(u8g2_font_unifont_t_chinese1);            // 恢复默认字体避免串色到状态屏
   }
@@ -692,7 +741,7 @@ m3ApiRawFunction(m3_textC) {  // (x, y, ptr, len) — UTF-8 中文小字（wqy12
   if (len > 0 && len <= 64) {
     m3ApiCheckMem(s, len);
     char buf[65]; memcpy(buf, s, len); buf[len] = 0;
-    oled.setDrawColor(1);
+    oled.setDrawColor(appColor);
     oled.setFont(u8g2_font_wqy12_t_gb2312); oled.drawUTF8(x, y, buf);
     oled.setFont(u8g2_font_unifont_t_chinese1);
   }
@@ -704,7 +753,7 @@ m3ApiRawFunction(m3_bigText) { // (x, y, ptr, len) — UTF-8 中文大字（wqy1
   if (len > 0 && len <= 64) {
     m3ApiCheckMem(s, len);
     char buf[65]; memcpy(buf, s, len); buf[len] = 0;
-    oled.setDrawColor(1);
+    oled.setDrawColor(appColor);
     oled.setFont(u8g2_font_wqy16_t_gb2312); oled.drawUTF8(x, y, buf);
     oled.setFont(u8g2_font_unifont_t_chinese1);
   }
@@ -718,6 +767,26 @@ m3ApiRawFunction(m3_textW) { // (ptr, len, font) -> i32 像素宽：给居中/�
   char buf[65]; memcpy(buf, s, len); buf[len] = 0;
   oled.setFont(appFont(f));
   m3ApiReturn((int32_t)oled.getUTF8Width(buf));
+}
+m3ApiRawFunction(m3_textA) { // (x, y, ptr, len, font, align) — 锚点文本：align 0..8 九宫格
+  // align: 0左上 1上中 2右上 3左中 4正中 5右中 6左下 7下中 8右下；(x,y) 即该锚点位置
+  m3ApiGetArg(int32_t, x); m3ApiGetArg(int32_t, y);
+  m3ApiGetArgMem(char*, s); m3ApiGetArg(uint32_t, len);
+  m3ApiGetArg(int32_t, f); m3ApiGetArg(int32_t, align);
+  if (len > 0 && len <= 64 && align >= 0 && align <= 8) {
+    m3ApiCheckMem(s, len);
+    char buf[65]; memcpy(buf, s, len); buf[len] = 0;
+    oled.setFont(appFont(f));
+    const int w = oled.getUTF8Width(buf);
+    const int asc = oled.getAscent(), desc = oled.getDescent(); // desc 为负值
+    const int h = align % 3, v = align / 3;
+    const int dx = h == 0 ? x : h == 1 ? x - w / 2 : x - w;
+    const int dy = v == 0 ? y + asc : v == 1 ? y + (asc + desc) / 2 : y + desc;
+    oled.setDrawColor(appColor);
+    oled.drawUTF8(dx, dy, buf);
+    oled.setFont(u8g2_font_unifont_t_chinese1);
+  }
+  m3ApiSuccess();
 }
 m3ApiRawFunction(m3_clear)   { oled.clearBuffer(); m3ApiSuccess(); }
 m3ApiRawFunction(m3_show)    { oled.sendBuffer();  m3ApiSuccess(); }
@@ -768,6 +837,7 @@ void appUnload() {
 // 按状态加载 /app_<id>.wasm；成功进入 appPlaying，失败回默认屏
 void appLoad(const String& statusId) {
   appUnload();
+  appColor = 1; // 绘制模式复位，不跨 app 泄漏
   File f = LittleFS.open("/app_" + statusId + ".wasm", "r");
   if (!f) return;
   size_t n = f.size();
@@ -786,11 +856,18 @@ void appLoad(const String& statusId) {
     m3_LinkRawFunction(mod, "env", "clear",   "v()",     &m3_clear);
     m3_LinkRawFunction(mod, "env", "show",    "v()",     &m3_show);
     m3_LinkRawFunction(mod, "env", "px",      "v(ii)",   &m3_px);
+    m3_LinkRawFunction(mod, "env", "color",   "v(i)",    &m3_color);
     m3_LinkRawFunction(mod, "env", "rect",    "v(iiiii)",&m3_rect);
+    m3_LinkRawFunction(mod, "env", "line",    "v(iiii)", &m3_line);
+    m3_LinkRawFunction(mod, "env", "circle",  "v(iiii)", &m3_circle);
+    m3_LinkRawFunction(mod, "env", "ellipse", "v(iiiii)",&m3_ellipse);
+    m3_LinkRawFunction(mod, "env", "rrect",   "v(iiiiii)", &m3_rrect);
+    m3_LinkRawFunction(mod, "env", "bitmap",  "v(iiiii)",&m3_bitmap);
     m3_LinkRawFunction(mod, "env", "text",    "v(iiii)", &m3_text);
     m3_LinkRawFunction(mod, "env", "textC",   "v(iiii)", &m3_textC);
     m3_LinkRawFunction(mod, "env", "bigText", "v(iiii)", &m3_bigText);
     m3_LinkRawFunction(mod, "env", "textW",   "i(iii)",  &m3_textW);
+    m3_LinkRawFunction(mod, "env", "textA",   "v(iiiiii)", &m3_textA);
     m3_LinkRawFunction(mod, "env", "millis",  "i()",     &m3_millis);
     m3_LinkRawFunction(mod, "env", "buttons", "i()",     &m3_buttons);
     m3_LinkRawFunction(mod, "env", "status",  "i()",     &m3_status);
