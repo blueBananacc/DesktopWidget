@@ -8,6 +8,9 @@ export const HOST_API: { sig: string; desc: string }[] = [
   { sig: "px(x, y)", desc: "置像素（越界自动裁剪）" },
   { sig: "rect(x, y, w, h, f)", desc: "矩形（f=1 实心，0 描边）" },
   { sig: "text(x, y, ptr, len)", desc: "ASCII 文本（6x10 字体，y 为基线；ptr/len 指线性内存里的字节，len≤64）" },
+  { sig: "textC(x,y,ptr,len)", desc: "UTF-8 中文小字（wqy12，与默认屏说明行同字体）" },
+  { sig: "bigText(x,y,ptr,len)", desc: "UTF-8 中文大字（wqy16，与默认屏状态名同字体）" },
+  { sig: "textW(ptr,len,font)", desc: "文字像素宽：font 0=6x10 1=wqy12 2=wqy16；居中/右对齐用" },
   { sig: "millis() -> i32", desc: "设备毫秒计数（动画的时钟来源）" },
   { sig: "buttons() -> i32", desc: "K1-K4 按下位掩码（bit0=K1 … bit3=K4）" },
   { sig: "status() -> i32", desc: "当前状态下标（0 工作中 1 勿扰 2 专注 3 会议 4 休息 5 已下班）" },
@@ -24,26 +27,28 @@ export const WAT_TEMPLATES: WatTemplate[] = [
   {
     id: "default",
     name: "默认屏幕",
-    desc: "状态名 + 时钟 + 说明行：设备默认屏的程序版，可改文字和排版；演示 status() + clock()",
+    desc: "状态名 + 时钟 + 说明行：设备默认屏的程序版（同款中文字体），可改文字和排版；演示 status() + clock() + bigText()",
     code: `${COMMON}
 (module
-  (import "env" "clear"  (func $clear))
-  (import "env" "show"   (func $show))
-  (import "env" "text"   (func $text (param i32 i32 i32 i32)))
-  (import "env" "clock"  (func $clock (result i32)))
-  (import "env" "status" (func $status (result i32)))
+  (import "env" "clear"   (func $clear))
+  (import "env" "show"    (func $show))
+  (import "env" "textC"   (func $textC (param i32 i32 i32 i32)))
+  (import "env" "bigText" (func $bigText (param i32 i32 i32 i32)))
+  (import "env" "textW"   (func $textW (param i32 i32 i32) (result i32)))
+  (import "env" "clock"   (func $clock (result i32)))
+  (import "env" "status"  (func $status (result i32)))
   (memory (export "memory") 1)
-  ;; 时钟缓冲 HH:MM（未校时显示 --:--）
+  ;; 时钟缓冲 HH:MM（未校时保持 --:--）
   (data (i32.const 16) "--:--")
-  ;; 状态名表：每 8 字节一个 ASCII 名（补空格对齐），status() 下标 ×8 取地址
-  (data (i32.const 32) "WORKING BUSY    FOCUS   MEETING REST    OFF DUTY")
-  ;; 说明行表：每 16 字节一条，与名表同下标顺序
-  (data (i32.const 80) "COME FIND ME    DO NOT DISTURB  FOCUSING        IN A MEETING    BE RIGHT BACK   SEE YOU TOMORROW")
+  ;; 状态名表：每条 12 字节（UTF-8 + \\00 补齐），status() 下标 ×12 取地址；换文案注意对齐槽宽
+  (data (i32.const 32) "工作中\\00\\00\\00请勿打扰专注中\\00\\00\\00会议中\\00\\00\\00休息一下已收工\\00\\00\\00")
+  ;; 说明行表：每条 24 字节（最长"非紧急请稍后"18B），同下标顺序 ×24 取址
+  (data (i32.const 128) "可以找我\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00非紧急请稍后\\00\\00\\00\\00\\00\\00专注计时中\\00\\00\\00\\00\\00\\00\\00\\00\\00正在开会\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00稍后回来\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00明天见\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00")
   (func $digit (param $v i32) (result i32) (i32.add (i32.const 48) (i32.rem_u (local.get $v) (i32.const 10))))
   (func $run (export "run")
-    (local $s i32) (local $m i32) (local $c i32)
+    (local $s i32) (local $m i32) (local $c i32) (local $w i32)
     call $clear
-    ;; 右上角时钟 HH:MM（clock()=-1 时缓冲保持 --:--）
+    ;; 右上角时钟 HH:MM（textW 量宽做右对齐，与默认屏一致）
     (local.set $c (call $clock))
     (if (i32.ge_s (local.get $c) (i32.const 0))
       (then
@@ -53,15 +58,27 @@ export const WAT_TEMPLATES: WatTemplate[] = [
         (i32.store8 (i32.const 17) (call $digit (local.get $m)))
         (i32.store8 (i32.const 19) (call $digit (i32.div_u (local.get $s) (i32.const 10))))
         (i32.store8 (i32.const 20) (call $digit (local.get $s)))))
-    (call $text (i32.const 92) (i32.const 14) (i32.const 16) (i32.const 5))
-    ;; 状态名（text 只有 6x10 ASCII：固件默认屏的中文大字这里用英文名近似，想画中文要用位图）
-    (call $text (i32.const 30) (i32.const 40)
-      (i32.add (i32.const 32) (i32.mul (call $status) (i32.const 8)))
-      (i32.const 8))
-    ;; 说明行（下标 ×16）
-    (call $text (i32.const 22) (i32.const 56)
-      (i32.add (i32.const 80) (i32.mul (call $status) (i32.const 16)))
-      (i32.const 16))
+    (call $textC
+      (i32.sub (i32.const 128) (call $textW (i32.const 16) (i32.const 5) (i32.const 1)))
+      (i32.const 12) (i32.const 16) (i32.const 5))
+    ;; 状态名：wqy16 中文大字居中，y=36（与固件默认屏同位）
+    (local.set $w (call $textW
+      (i32.add (i32.const 32) (i32.mul (call $status) (i32.const 12)))
+      (i32.const 12) (i32.const 2)))
+    (call $bigText
+      (i32.div_s (i32.sub (i32.const 128) (local.get $w)) (i32.const 2))
+      (i32.const 36)
+      (i32.add (i32.const 32) (i32.mul (call $status) (i32.const 12)))
+      (i32.const 12))
+    ;; 说明行：wqy12 中文小字居中，y=56
+    (local.set $w (call $textW
+      (i32.add (i32.const 128) (i32.mul (call $status) (i32.const 24)))
+      (i32.const 24) (i32.const 1)))
+    (call $textC
+      (i32.div_s (i32.sub (i32.const 128) (local.get $w)) (i32.const 2))
+      (i32.const 56)
+      (i32.add (i32.const 128) (i32.mul (call $status) (i32.const 24)))
+      (i32.const 24))
     call $show))`,
   },
   {
@@ -245,6 +262,9 @@ export const WAT_TEMPLATES: WatTemplate[] = [
   (import "env" "px"      (func $px (param i32 i32)))
   (import "env" "rect"    (func $rect (param i32 i32 i32 i32 i32)))
   (import "env" "text"    (func $text (param i32 i32 i32 i32)))
+  (import "env" "textC"   (func $textC (param i32 i32 i32 i32)))
+  (import "env" "bigText" (func $bigText (param i32 i32 i32 i32)))
+  (import "env" "textW"   (func $textW (param i32 i32 i32) (result i32)))
   (import "env" "millis"  (func $millis (result i32)))
   (import "env" "buttons" (func $buttons (result i32)))
   (import "env" "status"  (func $status (result i32)))

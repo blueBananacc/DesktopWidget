@@ -30,6 +30,7 @@
 - `run()` 里**不要写长循环**——它每帧都被调用，超时由设备任务看门狗兜底（复位后该 app 被禁用）
 - 需要内存（字符串、位图、数组）就 `(memory (export "memory") 1)` + `(data (i32.const N) "...")`；最多 64KB
 - **内存必须导出为 `memory`**：设备不要求，但网页预览要靠它读 `text()` 的字符串；没导出时预览会报错提示
+- **import 声明的签名必须与下表完全一致**：有返回值的函数要写 `(result i32)`（例如 `(import "env" "textW" (func $textW (param i32 i32 i32) (result i32)))`）。漏写会让模块变成"能编译但无效"——设备链接时报 `missing imported function` 拒绝加载
 
 ## 宿主 API（import "env.*"）
 
@@ -40,6 +41,9 @@
 | `px` | `(i32 x, i32 y)` | 置一个像素为亮（越界自动裁剪，无"灭"——先 clear 再画） |
 | `rect` | `(i32 x, i32 y, i32 w, i32 h, i32 fill)` | 矩形；fill≠0 实心，=0 描边 |
 | `text` | `(i32 x, i32 y, i32 ptr, i32 len)` | 6×10 ASCII 字体；从线性内存 ptr 读 len 字节；y 是基线（约+8 可视） |
+| `textC` | `(i32 x, i32 y, i32 ptr, i32 len)` | wqy12 UTF-8 中文小字（同默认屏说明行字体）；ptr 指向 UTF-8 字节 |
+| `bigText` | `(i32 x, i32 y, i32 ptr, i32 len)` | wqy16 UTF-8 中文大字（同默认屏状态名字体） |
+| `textW` | `(i32 ptr, i32 len, i32 font) -> i32` | 文字像素宽：font 0=6x10 1=wqy12 2=wqy16；居中/右对齐用 |
 | `millis` | `() -> i32` | 设备毫秒计数（动画时钟） |
 | `buttons` | `() -> i32` | K1-K4 按下位掩码：bit0=K1(收工键) bit1=K2 bit2=K3 bit3=K4 |
 | `status` | `() -> i32` | 当前状态下标：0=work 1=busy 2=focus 3=meet 4=rest 5=off |
@@ -89,6 +93,9 @@ __attribute__((import_module("env"), import_name("show")))    void show(void);
 __attribute__((import_module("env"), import_name("px")))      void px(int x, int y);
 __attribute__((import_module("env"), import_name("rect")))    void rect(int x,int y,int w,int h,int fill);
 __attribute__((import_module("env"), import_name("text")))    void text(int x,int y,const char* s,int len);
+__attribute__((import_module("env"), import_name("textC")))   void textC(int x,int y,const char* s,int len);
+__attribute__((import_module("env"), import_name("bigText"))) void bigText(int x,int y,const char* s,int len);
+__attribute__((import_module("env"), import_name("textW")))   int  textW(const char* s,int len,int font);
 __attribute__((import_module("env"), import_name("millis")))  int  millis(void);
 __attribute__((import_module("env"), import_name("buttons"))) int  buttons(void);
 __attribute__((import_module("env"), import_name("status")))  int  status(void);

@@ -39,6 +39,9 @@ export async function compileWat(src: string): Promise<Uint8Array> {
     // 必须传 UTF-8 字节：wabt 对 string 走 writeAsciiToMemory，中文注释会被截成单字节乱码（低字节恰为 \n 时直接断行报错）
     const utf8 = new TextEncoder().encode(src).slice(); // slice 保证底层 buffer 恰好等长（wabt 按 buffer.byteLength 拷贝）
     const { buffer } = w.parseWat("screen.wat", utf8).toBinary({ write_debug_names: false });
+    // wabt 的 toBinary 不校验类型：比如 import 声明漏写 (result i32) 会产出"能编不能用"的模块，
+    // 设备端 ValidateSignature 会拒绝链接并报 missing imported function。这里先过一遍原生校验把错误前置。
+    new WebAssembly.Module(buffer);
     return new Uint8Array(buffer);
   } catch (e) {
     throw new Error(e instanceof Error ? e.message : String(e));
@@ -70,6 +73,18 @@ export async function previewScreen(bytes: Uint8Array, canvas: HTMLCanvasElement
   let mask = 0;
   const segStart = opts.segStart ?? Date.now(); // segSec 语义：当前状态已持续秒数；未知起点时按"刚进入状态"预览
   const px = (x: number, y: number) => { x |= 0; y |= 0; if (x >= 0 && x < APP_W && y >= 0 && y < APP_H) fb[(y >> 3) * APP_W + x] |= 1 << (y & 7); };
+  // 文字绘制：先把累计的像素缓冲落成画面，画字后再打包回页序缓冲（与 u8g2 的基线语义近似）
+  const drawTextAt = (x: number, y: number, s: string, font: string) => {
+    drawFrameTo(ctx, fb);
+    ctx.font = font; ctx.fillStyle = "#fff"; ctx.textBaseline = "alphabetic";
+    ctx.fillText(s, x, y);
+    const d = ctx.getImageData(0, 0, APP_W, APP_H).data;
+    for (let p = 0; p < 8; p++) for (let xx = 0; xx < APP_W; xx++) {
+      let b = 0;
+      for (let bit = 0; bit < 8; bit++) if (d[((p * 8 + bit) * APP_W + xx) * 4] > 127) b |= 1 << bit;
+      fb[p * APP_W + xx] = b;
+    }
+  };
   const env = {
     clear: () => fb.fill(0),
     show: () => drawFrameTo(ctx, fb),
@@ -80,16 +95,22 @@ export async function previewScreen(bytes: Uint8Array, canvas: HTMLCanvasElement
     text: (x: number, y: number, ptr: number, len: number) => {
       if (!mem) throw new Error("text() 需要模块导出线性内存：把 (memory 1) 改成 (memory (export \"memory\") 1)");
       if (len <= 0 || len > 64) return;
-      const s = new TextDecoder().decode(new Uint8Array(mem.buffer, ptr, len));
-      drawFrameTo(ctx, fb);                                        // 先落当前缓冲（px/rect 的累计内容）
-      ctx.font = "10px monospace"; ctx.fillStyle = "#fff"; ctx.textBaseline = "alphabetic";
-      ctx.fillText(s, x, y);                                       // 近似固件 6x10 字体的基线语义
-      const d = ctx.getImageData(0, 0, APP_W, APP_H).data;         // 合成结果重新打包回页序缓冲
-      for (let p = 0; p < 8; p++) for (let xx = 0; xx < APP_W; xx++) {
-        let b = 0;
-        for (let bit = 0; bit < 8; bit++) if (d[((p * 8 + bit) * APP_W + xx) * 4] > 127) b |= 1 << bit;
-        fb[p * APP_W + xx] = b;
-      }
+      drawTextAt(x, y, readStr(ptr, len), "10px monospace");                       // 近似固件 6x10 字体的基线语义
+    },
+    textC: (x: number, y: number, ptr: number, len: number) => {   // UTF-8 中文小字（wqy12）
+      if (!mem) throw new Error("textC() 需要模块导出线性内存");
+      if (len <= 0 || len > 64) return;
+      drawTextAt(x, y, readStr(ptr, len), "12px sans-serif");
+    },
+    bigText: (x: number, y: number, ptr: number, len: number) => { // UTF-8 中文大字（wqy16）
+      if (!mem) throw new Error("bigText() 需要模块导出线性内存");
+      if (len <= 0 || len > 64) return;
+      drawTextAt(x, y, readStr(ptr, len), "bold 17px sans-serif");
+    },
+    textW: (ptr: number, len: number, f: number) => {              // 像素宽：居中/右对齐用
+      if (!mem || len <= 0 || len > 64) return 0;
+      ctx.font = f === 2 ? "bold 17px sans-serif" : f === 1 ? "12px sans-serif" : "10px monospace";
+      return ctx.measureText(readStr(ptr, len)).width | 0;
     },
     millis: () => performance.now() | 0,
     buttons: () => mask,
@@ -98,6 +119,9 @@ export async function previewScreen(bytes: Uint8Array, canvas: HTMLCanvasElement
     segSec: () => Math.max(0, ((Date.now() - segStart) / 1000) | 0),
     nodeMin: () => opts.nodeMin?.() ?? -1,
   };
+  // 读线性内存里的 C 风格字符串：到首个 \0 为止（固件 drawUTF8 遇 \0 即停；不截断会把补齐的 NUL 画成豆腐块、量宽也会偏大）
+  const readStr = (ptr: number, len: number) =>
+    new TextDecoder().decode(new Uint8Array(mem!.buffer, ptr, len)).split("\0")[0];
   let mem: WebAssembly.Memory | null = null;
   const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes.slice().buffer), { env });
   mem = (instance.exports.memory as WebAssembly.Memory | undefined) ?? null;

@@ -683,6 +683,42 @@ m3ApiRawFunction(m3_text) { // (x, y, ptr, len) — 从 wasm 线性内存读 ASC
   }
   m3ApiSuccess();
 }
+static const uint8_t* appFont(int f) { // 0=6x10 ASCII  1=wqy12 中文小字  2=wqy16 中文大字（与默认屏同款）
+  return f == 2 ? u8g2_font_wqy16_t_gb2312 : f == 1 ? u8g2_font_wqy12_t_gb2312 : u8g2_font_6x10_tf;
+}
+m3ApiRawFunction(m3_textC) {  // (x, y, ptr, len) — UTF-8 中文小字（wqy12，同默认屏说明行字体）
+  m3ApiGetArg(int32_t, x); m3ApiGetArg(int32_t, y);
+  m3ApiGetArgMem(char*, s); m3ApiGetArg(uint32_t, len);
+  if (len > 0 && len <= 64) {
+    m3ApiCheckMem(s, len);
+    char buf[65]; memcpy(buf, s, len); buf[len] = 0;
+    oled.setDrawColor(1);
+    oled.setFont(u8g2_font_wqy12_t_gb2312); oled.drawUTF8(x, y, buf);
+    oled.setFont(u8g2_font_unifont_t_chinese1);
+  }
+  m3ApiSuccess();
+}
+m3ApiRawFunction(m3_bigText) { // (x, y, ptr, len) — UTF-8 中文大字（wqy16，同默认屏状态名字体）
+  m3ApiGetArg(int32_t, x); m3ApiGetArg(int32_t, y);
+  m3ApiGetArgMem(char*, s); m3ApiGetArg(uint32_t, len);
+  if (len > 0 && len <= 64) {
+    m3ApiCheckMem(s, len);
+    char buf[65]; memcpy(buf, s, len); buf[len] = 0;
+    oled.setDrawColor(1);
+    oled.setFont(u8g2_font_wqy16_t_gb2312); oled.drawUTF8(x, y, buf);
+    oled.setFont(u8g2_font_unifont_t_chinese1);
+  }
+  m3ApiSuccess();
+}
+m3ApiRawFunction(m3_textW) { // (ptr, len, font) -> i32 像素宽：给居中/右对齐用（程序自己测不了字宽）
+  m3ApiGetArgMem(char*, s); m3ApiGetArg(uint32_t, len); m3ApiGetArg(int32_t, f);
+  m3ApiReturnType(int32_t);
+  if (len <= 0 || len > 64) { m3ApiReturn(0); }
+  m3ApiCheckMem(s, len);
+  char buf[65]; memcpy(buf, s, len); buf[len] = 0;
+  oled.setFont(appFont(f));
+  m3ApiReturn((int32_t)oled.getUTF8Width(buf));
+}
 m3ApiRawFunction(m3_clear)   { oled.clearBuffer(); m3ApiSuccess(); }
 m3ApiRawFunction(m3_show)    { oled.sendBuffer();  m3ApiSuccess(); }
 m3ApiRawFunction(m3_millis)  { m3ApiReturnType(uint32_t); m3ApiReturn((uint32_t)millis()); }
@@ -752,6 +788,9 @@ void appLoad(const String& statusId) {
     m3_LinkRawFunction(mod, "env", "px",      "v(ii)",   &m3_px);
     m3_LinkRawFunction(mod, "env", "rect",    "v(iiiii)",&m3_rect);
     m3_LinkRawFunction(mod, "env", "text",    "v(iiii)", &m3_text);
+    m3_LinkRawFunction(mod, "env", "textC",   "v(iiii)", &m3_textC);
+    m3_LinkRawFunction(mod, "env", "bigText", "v(iiii)", &m3_bigText);
+    m3_LinkRawFunction(mod, "env", "textW",   "i(iii)",  &m3_textW);
     m3_LinkRawFunction(mod, "env", "millis",  "i()",     &m3_millis);
     m3_LinkRawFunction(mod, "env", "buttons", "i()",     &m3_buttons);
     m3_LinkRawFunction(mod, "env", "status",  "i()",     &m3_status);
