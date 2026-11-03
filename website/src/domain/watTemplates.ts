@@ -161,47 +161,6 @@ export const WAT_TEMPLATES: WatTemplate[] = [
     call $show))`,
   },
   {
-    id: "segTimer",
-    name: "状态计时",
-    desc: "大字显示进入当前状态以来过了多久",
-    code: `${COMMON}
-(module
-  (import "env" "clear"  (func $clear))
-  (import "env" "show"   (func $show))
-  (import "env" "text"   (func $text (param i32 i32 i32 i32)))
-  (import "env" "segSec" (func $segSec (result i32)))
-  (import "env" "clock"  (func $clock (result i32)))
-  (memory (export "memory") 1)
-  ;; 数字缓冲区在内存 16..20：手动把数值拆成 ASCII 数字写进去；clock()=-1（未校时）时保持 "--:--"
-  (data (i32.const 16) "--:--")
-  (func $digit (param $v i32) (result i32) (i32.add (i32.const 48) (i32.rem_u (local.get $v) (i32.const 10))))
-  (func $run (export "run")
-    (local $s i32) (local $m i32) (local $c i32)
-    call $clear
-    ;; 顶部居中：当前时钟 HH:MM（clock() 返回分钟数；-1 时显示 --:--）
-    (local.set $c (call $clock))
-    (if (i32.ge_s (local.get $c) (i32.const 0))
-      (then
-        (local.set $m (i32.div_u (local.get $c) (i32.const 60)))  ;; 小时
-        (local.set $s (i32.rem_u (local.get $c) (i32.const 60)))  ;; 分钟
-        (i32.store8 (i32.const 16) (call $digit (i32.div_u (local.get $m) (i32.const 10))))
-        (i32.store8 (i32.const 17) (call $digit (local.get $m)))
-        (i32.store8 (i32.const 18) (i32.const 58))                ;; ':'
-        (i32.store8 (i32.const 19) (call $digit (i32.div_u (local.get $s) (i32.const 10))))
-        (i32.store8 (i32.const 20) (call $digit (local.get $s)))))
-    (call $text (i32.const 50) (i32.const 20) (i32.const 16) (i32.const 5))
-    ;; 中部大字：本状态已持续 MM:SS（segSec()；分钟数超 99 取模防溢出）
-    (local.set $s (call $segSec))
-    (local.set $m (i32.rem_u (i32.div_u (local.get $s) (i32.const 60)) (i32.const 100)))
-    (local.set $s (i32.rem_u (local.get $s) (i32.const 60)))
-    (i32.store8 (i32.const 16) (call $digit (i32.div_u (local.get $m) (i32.const 10))))
-    (i32.store8 (i32.const 17) (call $digit (local.get $m)))
-    (i32.store8 (i32.const 19) (call $digit (i32.div_u (local.get $s) (i32.const 10))))
-    (i32.store8 (i32.const 20) (call $digit (local.get $s)))
-    (call $text (i32.const 44) (i32.const 46) (i32.const 16) (i32.const 5))
-    call $show))`,
-  },
-  {
     id: "shapes",
     name: "图形工具箱",
     desc: "圆角框、星星、会呼吸的椭圆等图形组合",

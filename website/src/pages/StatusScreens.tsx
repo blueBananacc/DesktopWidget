@@ -366,11 +366,12 @@ export function StatusScreens() {
               ) : (
                 <>
                   <div className="scr-meta">
-                    <input className="input scr-mn" value={def!.name ?? ""} maxLength={20} placeholder="给这块屏幕起个名字" aria-label="屏幕块名字"
-                      onChange={(e) => setDef({ ...def!, name: e.target.value })} />
-                    <input className="input" value={def!.desc ?? ""} maxLength={40} placeholder="一句话描述画面（可选）" aria-label="屏幕块描述"
-                      onChange={(e) => setDef({ ...def!, desc: e.target.value })} />
+                    <label className="scr-mn">块名字<input className="input" value={def!.name ?? ""} maxLength={20} placeholder="例如：我的专注屏"
+                      onChange={(e) => setDef({ ...def!, name: e.target.value })} /></label>
+                    <label>块描述<input className="input" value={def!.desc ?? ""} maxLength={40} placeholder="一句话说明这块屏幕显示什么（可选）"
+                      onChange={(e) => setDef({ ...def!, desc: e.target.value })} /></label>
                   </div>
+                  <p className="hint" style={{ margin: 0 }}>名字和描述会显示在选项卡上。写完代码点「保存」，这块屏幕会存成一张可复用的块，之后在任何状态的模板区都能选它。</p>
                   <textarea className="input scr-code" value={def!.src} spellCheck={false} aria-label="WAT 源码"
                     onChange={(e) => setDef({ ...def!, src: e.target.value })} />
                 </>
@@ -399,7 +400,7 @@ export function StatusScreens() {
                 <div className="row" style={{ gap: 8 }}>
                   {hasCode(def) && <button className="btn btn-primary btn-sm" disabled={!connected || uploading || !!error || !size} onClick={() => void upload()}><Upload />{app && !app.bad ? "更新设备上的程序" : "上传到设备"}</button>}
                   {hasCode(def) && <button className="btn btn-secondary btn-sm" disabled={uploading} onClick={() => setNonce((n) => n + 1)}><Play />重新运行预览</button>}
-                  {def?.kind === "wat" && hasCode(def) && <button className="btn btn-secondary btn-sm" disabled={uploading} onClick={savePreset}><BookmarkPlus />存为新的块</button>}
+                  {def?.kind === "wat" && hasCode(def) && <button className="btn btn-secondary btn-sm" disabled={uploading} onClick={savePreset}><BookmarkPlus />保存</button>}
                   <button className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }} disabled={uploading} onClick={() => void restore()}><Eraser />恢复默认</button>
                 </div>
               )}

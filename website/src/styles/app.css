@@ -223,9 +223,10 @@ input[type="range"] { accent-color: var(--primary); width: 180px; }
 .scr-mine { border-style: dashed; }
 .scr-tpl-del { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; display: grid; place-items: center; border: 0; border-radius: var(--r-xs); background: transparent; color: var(--ink-3); cursor: pointer; }
 .scr-tpl-del:hover { background: var(--st-busy-soft); color: var(--st-busy); }
-.scr-meta { display: flex; gap: 8px; }
+.scr-meta { display: flex; gap: 10px; }
+.scr-meta label { display: grid; gap: 4px; flex: 1; min-width: 0; font-size: 12px; color: var(--ink-3); }
 .scr-meta .input { font-size: 13px; padding: 7px 10px; }
-.scr-mn { flex: 0 0 150px; }
+.scr-mn { flex: 0 0 170px; }
 .scr-tpl b { font-size: 13.5px; font-weight: 600; }
 .scr-tpl span { font-size: 12px; color: var(--ink-2); }
 .scr-tpl.on { border-color: var(--primary); background: var(--primary-soft); }
