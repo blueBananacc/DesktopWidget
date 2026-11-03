@@ -26,6 +26,7 @@
 #include <ArduinoJson.h>
 #include <mbedtls/base64.h>
 #include <LittleFS.h>
+#include <wasm3.h>
 
 // ===================== 配置 =====================
 
@@ -127,21 +128,25 @@ uint32_t remindUntil = 0;
 char     remindText[48] = "";
 int      remindCount = 0;
 
-// 按状态自定义屏幕：anim 消息把 1bpp 帧序列写入 LittleFS /anim_<status>.bin（断电不丢）。
-// 每次状态切换自动加载该状态的动画；没有则显示默认状态屏。任意按键或 anim stop 退出播放。
-constexpr int ANIM_MAX_FRAMES = 16;
-uint8_t  animBuf[ANIM_MAX_FRAMES][1024];  // u8g2 页序 1bpp，当前加载中的动画
-uint8_t  animN = 0;
-uint32_t animMs = 200;
-bool     animLoop = true, animPlaying = false;
-uint8_t  animIdx = 0;
-uint32_t animNext = 0;
-char     animFor[12] = "";                // animBuf 当前装着哪个状态（用于检测状态切换）
-// 上传中（写文件阶段；与播放缓冲互不干扰——上传不中断当前播放）
-File     animFile;
-char     animUpStatus[12] = "";
-uint8_t  animUpN = 0, animUpGot = 0;
-uint8_t  rxFrame[1024];
+// 按状态自定义屏幕（WASM app）：app 消息把 .wasm 写入 LittleFS /app_<status>.wasm（断电不丢）。
+// 每次状态切换自动加载执行（wasm3 沙箱，宿主 API：clear/show/px/rect/text/millis/buttons/status）；
+// 没有该文件则显示默认状态屏。trap → 卸载回默认屏；死循环 → 任务看门狗复位后禁用该 app。
+constexpr size_t APP_MAX_SIZE = 48 * 1024;
+IM3Environment wasmEnv = nullptr;
+IM3Runtime     wasmRt  = nullptr;
+IM3Function    wasmRun = nullptr;
+bool     appPlaying = false;
+uint32_t appNext = 0;
+uint16_t appOkFrames = 0;                 // 稳定帧计数：跑满即解除崩溃标记
+char     appFor[12] = "";                 // 当前已加载 app 对应的状态
+uint8_t* wasmBytes = nullptr;
+size_t   wasmLen = 0;
+// 上传中（写文件阶段；与运行中 app 互不干扰——上传不中断当前屏幕）
+File     appFile;
+char     appUpStatus[12] = "";
+uint32_t appUpSize = 0, appUpGot = 0;
+uint8_t  rxChunk[1408];                   // base64 解码缓冲（>1024B 数据）
+RTC_DATA_ATTR char crashedApp[12] = "";   // 崩溃防护：复位前正在运行的 app 状态名
 
 // 按键映射（网页 keys 消息下发；设备离线时按此执行。cycleL/cycleR 为出厂默认，网页不下发这两个值）
 char keyAct[4][12] = { "offwork", "busy", "cycleL", "cycleR" };  // K1 K2 K3 K4
@@ -428,42 +433,40 @@ void handleLine(const String& line) {
       if (strlen(a) && strlen(a) < sizeof(keyAct[0])) { strncpy(keyAct[i], a, sizeof(keyAct[0]) - 1); keyAct[i][sizeof(keyAct[0]) - 1] = 0; }
     }
     Serial.printf("[KEYS] %s %s %s %s\n", keyAct[0], keyAct[1], keyAct[2], keyAct[3]);
-  } else if (!strcmp(type, "anim")) {
-    // 按状态自定义屏幕：begin{status,frames,fps,loop} 开文件 → frame 追加 1bpp → play 收尾
-    // （当前状态则触发重载立即播放）→ stop 退出播放 / clear{status} 删除恢复默认
+  } else if (!strcmp(type, "app")) {
+    // 按状态自定义屏幕（WASM）：begin{status,size} 开文件 → chunk{base64}×N → run 收尾
+    // （收齐且目标是当前状态则立即重载执行）/ stop 停掉当前 app / clear{status} 删除恢复默认
     const char* op = doc["op"] | "";
     if (!strcmp(op, "begin")) {
       const char* st = doc["status"] | "";
-      strncpy(animUpStatus, st, sizeof(animUpStatus) - 1); animUpStatus[sizeof(animUpStatus) - 1] = 0;
-      animUpN = min((int)(doc["frames"] | 1), ANIM_MAX_FRAMES);
-      animUpGot = 0;
-      if (animFile) animFile.close();
-      animFile = LittleFS.open("/anim_" + String(animUpStatus) + ".bin", "w");
-      uint8_t hdr[4] = { animUpN, (uint8_t)(doc["fps"] | 5), (uint8_t)((doc["loop"] | true) ? 1 : 0), 0 };
-      if (animFile) animFile.write(hdr, 4);
-      Serial.printf("[ANIM] begin %s N=%d\n", animUpStatus, animUpN);
-    } else if (!strcmp(op, "frame")) {
+      strncpy(appUpStatus, st, sizeof(appUpStatus) - 1); appUpStatus[sizeof(appUpStatus) - 1] = 0;
+      appUpSize = doc["size"] | 0; appUpGot = 0;
+      if (appFile) appFile.close();
+      appFile = (appUpSize > 0 && appUpSize <= APP_MAX_SIZE)
+                ? LittleFS.open("/app_" + String(appUpStatus) + ".wasm", "w") : File();
+      Serial.printf("[APP] begin %s size=%u\n", appUpStatus, appUpSize);
+    } else if (!strcmp(op, "chunk")) {
       const char* d = doc["data"] | "";
       size_t olen = 0;
-      if (animFile && mbedtls_base64_decode(rxFrame, sizeof rxFrame, &olen, (const uint8_t*)d, strlen(d)) == 0 && olen == sizeof rxFrame) {
-        animFile.write(rxFrame, sizeof rxFrame); animUpGot++;
+      if (appFile && mbedtls_base64_decode(rxChunk, sizeof rxChunk, &olen, (const uint8_t*)d, strlen(d)) == 0 && olen) {
+        appFile.write(rxChunk, olen); appUpGot += olen;
       }
-    } else if (!strcmp(op, "play")) {
-      if (animFile) animFile.close();
-      if (animUpGot >= animUpN && animUpN > 0) {
-        if (!strcmp(animUpStatus, curStatusId.c_str())) animFor[0] = 0; // 上传的是当前状态 → 强制重载立即播放
-        Serial.printf("[ANIM] saved %s (%d)\n", animUpStatus, animUpGot);
-      } else Serial.printf("[ANIM] incomplete %d/%d\n", animUpGot, animUpN);
+    } else if (!strcmp(op, "run")) {
+      if (appFile) appFile.close();
+      if (appUpSize && appUpGot == appUpSize) {
+        if (!strcmp(appUpStatus, curStatusId.c_str())) appFor[0] = 0; // 上传的是当前状态 → 强制重载立即执行
+        Serial.printf("[APP] saved %s (%u)\n", appUpStatus, appUpGot);
+      } else Serial.printf("[APP] incomplete %u/%u\n", appUpGot, appUpSize);
     } else if (!strcmp(op, "stop")) {
-      animPlaying = false;
+      if (appPlaying) appUnload();
       oledDirty = true;
-      Serial.println("[ANIM] stop");
+      Serial.println("[APP] stop");
     } else if (!strcmp(op, "clear")) {
       const char* st = doc["status"] | "";
-      if (animFile && !strcmp(st, animUpStatus)) { animFile.close(); animUpGot = 0; } // 上传中清除：先关句柄否则 remove 失败
-      LittleFS.remove("/anim_" + String(st) + ".bin");
-      if (!strcmp(st, animFor)) { animPlaying = false; animFor[0] = 0; oledDirty = true; }
-      Serial.printf("[ANIM] clear %s\n", st);
+      if (appFile && !strcmp(st, appUpStatus)) { appFile.close(); appUpGot = 0; appUpSize = 0; } // 上传中清除：先关句柄否则 remove 失败
+      LittleFS.remove("/app_" + String(st) + ".wasm");
+      if (!strcmp(st, appFor)) { appUnload(); appFor[0] = 0; oledDirty = true; }
+      Serial.printf("[APP] clear %s\n", st);
     }
   } else if (!strcmp(type, "sync")) {
     wantHello = true;                        // 网页握手 → 回 hello
@@ -554,16 +557,16 @@ void pollKeys() {
     bool pressed = !k.last;
     if (k.pin == KEY_SHORTCUT) {
       if (pressed && !k.longSent && now - k.t0 > LONG_MS) {
-        sendLine(F("{\"type\":\"shortcut\",\"press\":\"long\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0; animPlaying = false;
+        sendLine(F("{\"type\":\"shortcut\",\"press\":\"long\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0;
         if (!bleConnected) { setLocalStatus("focus"); registerManualOverride("focus"); }   // 离线：长按固定 = 专注中
       } else if (!pressed && !k.longSent && k.sawPress && now - k.t0 > DEBOUNCE_MS) {
-        sendLine(F("{\"type\":\"shortcut\",\"press\":\"single\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0; animPlaying = false;
+        sendLine(F("{\"type\":\"shortcut\",\"press\":\"single\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0;
         if (!bleConnected) applyKeyAction(keyAct[1]);    // 离线：短按按网页下发的 K2 映射执行
       }
     } else if (k.pin == KEY_OFFWORK) {
       // K1：按住 1.5s 才触发收工动作（与网页按住收工一致，防误触）；松早了取消
       if (pressed && !k.longSent && now - k.t0 > OFFWORK_HOLD_MS) {
-        k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0; animPlaying = false;
+        k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0;
         sendLine(F("{\"type\":\"offworkKey\"}"));
         if (!bleConnected) applyKeyAction(keyAct[0]);
       } else if (!pressed) {
@@ -571,12 +574,105 @@ void pollKeys() {
       }
     } else if (pressed && now - k.t0 > DEBOUNCE_MS && !k.longSent) {
       k.longSent = true;
-      breakNoticeUntil = 0; remindUntil = 0; animPlaying = false;  // 任意按键提前关闭提醒画面
+      breakNoticeUntil = 0; remindUntil = 0;  // 任意按键提前关闭提醒画面
       if (!strcmp(k.ev1, "touchL")) sendLine(F("{\"type\":\"touch\",\"zone\":\"left\"}"));
       else if (!strcmp(k.ev1, "touchR")) sendLine(F("{\"type\":\"touch\",\"zone\":\"right\"}"));
       // 离线：K3/K4 按网页下发的映射执行（出厂默认 = 上一个/下一个状态循环）
       if (!bleConnected) applyKeyAction(k.pin == KEY_TOUCH_L ? keyAct[2] : keyAct[3]);
     }
+  }
+}
+
+// ===================== WASM 自定义屏幕 =====================
+// 宿主 API（wasm 模块 import "env.*"）。帧模型：app 的 run() 每帧被调一次，
+// 先 clear() 再逐笔画 px/rect/text，最后 show() 上屏；帧率由固件节流（~30fps）。
+// px/rect/text 直接写 u8g2 页序帧缓冲；text 从 wasm 线性内存读 ASCII。
+
+m3ApiRawFunction(m3_px) {
+  m3ApiGetArg(int32_t, x); m3ApiGetArg(int32_t, y);
+  if (x >= 0 && x < 128 && y >= 0 && y < 64)
+    oled.getBufferPtr()[(y >> 3) * 128 + x] |= (uint8_t)(1 << (y & 7));
+  m3ApiSuccess();
+}
+m3ApiRawFunction(m3_rect) { // (x, y, w, h, fill)
+  m3ApiGetArg(int32_t, x); m3ApiGetArg(int32_t, y); m3ApiGetArg(int32_t, w);
+  m3ApiGetArg(int32_t, h); m3ApiGetArg(int32_t, fill);
+  oled.setDrawColor(1);
+  if (fill) oled.drawBox(x, y, w, h); else oled.drawFrame(x, y, w, h);
+  m3ApiSuccess();
+}
+m3ApiRawFunction(m3_text) { // (x, y, ptr, len) — 从 wasm 线性内存读 ASCII
+  m3ApiGetArg(int32_t, x); m3ApiGetArg(int32_t, y);
+  m3ApiGetArgMem(char*, s); m3ApiGetArg(uint32_t, len);
+  if (len > 0 && len <= 64) {
+    m3ApiCheckMem(s, len);                               // 越界 → wasm trap，不会读野内存
+    char buf[65]; memcpy(buf, s, len); buf[len] = 0;
+    oled.setDrawColor(1);
+    oled.setFont(u8g2_font_6x10_tf); oled.drawStr(x, y, buf);
+    oled.setFont(u8g2_font_unifont_t_chinese1);            // 恢复默认字体避免串色到状态屏
+  }
+  m3ApiSuccess();
+}
+m3ApiRawFunction(m3_clear)   { oled.clearBuffer(); m3ApiSuccess(); }
+m3ApiRawFunction(m3_show)    { oled.sendBuffer();  m3ApiSuccess(); }
+m3ApiRawFunction(m3_millis)  { m3ApiReturnType(uint32_t); m3ApiReturn((uint32_t)millis()); }
+m3ApiRawFunction(m3_buttons) { // 按键位掩码：bit0..3 = K1..K4（低电平=按下），app 可做交互
+  m3ApiReturnType(uint32_t);
+  uint32_t m = 0;
+  for (int i = 0; i < 4; i++) if (keys[i].last == LOW) m |= (1u << i);
+  m3ApiReturn(m);
+}
+m3ApiRawFunction(m3_status) { // 当前状态在 STATUSES 里的下标
+  m3ApiReturnType(uint32_t);
+  const int n = sizeof(STATUSES) / sizeof(STATUSES[0]);
+  int idx = 0;
+  for (int i = 0; i < n; i++) if (!strcmp(STATUSES[i].id, curStatusId.c_str())) idx = i;
+  m3ApiReturn((uint32_t)idx);
+}
+
+void appUnload() {
+  if (wasmRun) wasmRun = nullptr;
+  if (wasmRt) { m3_FreeRuntime(wasmRt); wasmRt = nullptr; }
+  free(wasmBytes); wasmBytes = nullptr; wasmLen = 0;   // 模块字节码在 runtime 释放后才能 free
+  appPlaying = false;
+}
+
+// 按状态加载 /app_<id>.wasm；成功进入 appPlaying，失败回默认屏
+void appLoad(const String& statusId) {
+  appUnload();
+  File f = LittleFS.open("/app_" + statusId + ".wasm", "r");
+  if (!f) return;
+  size_t n = f.size();
+  uint8_t* bytes = (n > 0 && n <= APP_MAX_SIZE) ? (uint8_t*)malloc(n) : nullptr;
+  if (bytes) { f.read(bytes, n); f.close(); } else f.close();
+  if (!bytes) return;
+  if (!wasmEnv) wasmEnv = m3_NewEnvironment();
+  wasmRt = m3_NewRuntime(wasmEnv, 16 * 1024, NULL);
+  IM3Module mod = nullptr;
+  M3Result r = nullptr;
+  if (wasmRt) {
+    r = m3_ParseModule(wasmEnv, &mod, bytes, n);
+    if (!r) r = m3_LoadModule(wasmRt, mod);
+  }
+  if (!r) {
+    m3_LinkRawFunction(mod, "env", "clear",   "v()",     &m3_clear);
+    m3_LinkRawFunction(mod, "env", "show",    "v()",     &m3_show);
+    m3_LinkRawFunction(mod, "env", "px",      "v(ii)",   &m3_px);
+    m3_LinkRawFunction(mod, "env", "rect",    "v(iiiii)",&m3_rect);
+    m3_LinkRawFunction(mod, "env", "text",    "v(iiii)", &m3_text);
+    m3_LinkRawFunction(mod, "env", "millis",  "i()",     &m3_millis);
+    m3_LinkRawFunction(mod, "env", "buttons", "i()",     &m3_buttons);
+    m3_LinkRawFunction(mod, "env", "status",  "i()",     &m3_status);
+    r = m3_FindFunction(&wasmRun, wasmRt, "run");
+  }
+  if (!r) {
+    wasmBytes = bytes; wasmLen = n;
+    appPlaying = true; appOkFrames = 0;
+    strncpy(crashedApp, statusId.c_str(), sizeof(crashedApp) - 1); // 看门狗复位后据此禁用该 app
+    Serial.printf("[APP] loaded %s (%u)\n", statusId.c_str(), n);
+  } else {
+    Serial.printf("[APP] load failed %s (%s)\n", statusId.c_str(), r ? r : "no mem");
+    appUnload(); free(bytes);
   }
 }
 
@@ -696,7 +792,15 @@ void setup() {
   oled.begin();
   oled.enableUTF8Print();
   rgb.begin(); rgb.clear(); rgb.show();
-  LittleFS.begin(true);               // 自定义屏幕动画存储（失败则格式化）
+  LittleFS.begin(true);               // 自定义屏幕 wasm 存储（失败则格式化）
+  // 崩溃防护：上次运行中的 app 导致看门狗/异常复位 → 禁用该文件（改名 .bad，避免重启死循环）
+  esp_reset_reason_t rr = esp_reset_reason();
+  if ((rr == ESP_RST_PANIC || rr == ESP_RST_TASK_WDT || rr == ESP_RST_INT_WDT || rr == ESP_RST_WDT) && crashedApp[0]) {
+    String bad = "/app_" + String(crashedApp) + ".wasm";
+    LittleFS.rename(bad, bad + ".bad");
+    Serial.printf("[APP] disabled %s after crash\n", bad.c_str());
+    crashedApp[0] = 0;
+  }
 
 #if ENABLE_CAPSENSE
   long sl = 0, sr = 0;
@@ -729,35 +833,24 @@ void loop() {
     else if (c != '\r') serBuf += c;
   }
   updateLed();
-  // 状态切换 → 加载该状态的自定义动画（LittleFS 持久）；没有则回到默认状态屏
-  if (strcmp(animFor, curStatusId.c_str())) {
-    strncpy(animFor, curStatusId.c_str(), sizeof(animFor) - 1);
-    animPlaying = false;
-    File f = LittleFS.open("/anim_" + curStatusId + ".bin", "r");
-    if (f && f.size() >= 4) {
-      uint8_t hdr[4];
-      f.read(hdr, 4);
-      int n = min((int)hdr[0], ANIM_MAX_FRAMES);
-      if (f.size() >= (size_t)(4 + n * 1024)) {
-        for (int i = 0; i < n; i++) f.read(animBuf[i], 1024);
-        animN = n;
-        animMs = (uint32_t)max(40, 1000 / max(1, (int)hdr[1]));
-        animLoop = hdr[2] != 0;
-        animPlaying = true; animIdx = 0; animNext = millis();
-        Serial.printf("[ANIM] loaded %s N=%d\n", animFor, animN);
-      }
-      f.close();
-    }
+  // 状态切换 → 加载该状态的 WASM 屏幕 app（LittleFS 持久）；没有则回到默认状态屏
+  if (strcmp(appFor, curStatusId.c_str())) {
+    strncpy(appFor, curStatusId.c_str(), sizeof(appFor) - 1);
+    appLoad(curStatusId);
   }
-  // OLED：动画播放中由播放器接管（提醒/休息通知仍临时覆盖）；否则状态变化立即重绘 + 每秒刷时钟
+  // OLED：app 播放中由 wasm run() 接管（提醒/休息通知仍临时覆盖）；否则状态变化立即重绘 + 每秒刷时钟
   static uint32_t lastDraw = 0;
   const bool notice = millis() < remindUntil || millis() < breakNoticeUntil;
-  if (animPlaying && !notice) {
-    if ((int32_t)(millis() - animNext) >= 0) {
-      memcpy(oled.getBufferPtr(), animBuf[animIdx], 1024);
-      oled.sendBuffer();
-      animNext += animMs;
-      if (++animIdx >= animN) { animIdx = 0; if (!animLoop) { animPlaying = false; oledDirty = true; } }
+  if (appPlaying && !notice) {
+    if ((int32_t)(millis() - appNext) >= 0) {
+      appNext = millis() + 33;                                     // ~30fps 节流
+      M3Result r = m3_CallV(wasmRun);
+      if (r) {
+        Serial.printf("[APP] trap in %s: %s\n", appFor, r);
+        appUnload(); crashedApp[0] = 0; oledDirty = true;          // trap 只禁用本次运行，文件保留可修代码重传
+      } else if (appOkFrames < 200 && ++appOkFrames == 200) {
+        crashedApp[0] = 0;                                         // 稳定运行 ~6s 后解除崩溃标记
+      }
     }
   } else if (oledDirty || millis() - lastDraw > 1000) {
     drawOled(); oledDirty = false; lastDraw = millis();

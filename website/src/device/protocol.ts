@@ -11,11 +11,11 @@ export type OutboundMessage =
   | { type: "break"; minutes: number; enabled: boolean; offToday: boolean; accumMs?: number } // 休息提醒设置；accumMs 仅在明确要求重置时携带，设备保持计时权威
   | { type: "keys"; k1: KeyAction; k2: KeyAction; k3: KeyAction; k4: KeyAction; ts: number } // 按键映射下发；设备离线时按此执行（K1 仍需按住 1.5s）
   | { type: "reminder"; text?: string; count?: number; ts: number } // 提醒触发：text 仅当用户允许上屏时携带；设备 OLED 显示 + RGB 闪烁，任意按键确认
-  | { type: "anim"; op: "begin"; status: string; frames: number; fps: number; loop: boolean } // 按状态上传自定义屏幕：写入 LittleFS /anim_<status>.bin（持久，断电不丢）
-  | { type: "anim"; op: "frame"; i: number; data: string } // 单帧 base64（u8g2 页序 1bpp，1024B）；按序追加到文件
-  | { type: "anim"; op: "play" } // 收尾：若是当前状态立即重载播放；设备在每次状态切换时自动加载该状态的动画文件
-  | { type: "anim"; op: "stop" } // 退出播放回状态显示（任意按键同效）
-  | { type: "anim"; op: "clear"; status: string } // 删除某状态的自定义屏幕，恢复默认显示
+  | { type: "app"; op: "begin"; status: string; size: number } // 按状态上传自定义屏幕：.wasm 写入 LittleFS /app_<status>.wasm（持久，断电不丢）
+  | { type: "app"; op: "chunk"; data: string } // wasm 二进制 base64 分片（≤~1KB 解码数据/条），按序追加
+  | { type: "app"; op: "run" } // 收尾：收齐落盘；上传的是当前状态则立即重载执行（wasm3 沙箱）
+  | { type: "app"; op: "stop" } // 停掉当前 app 回默认屏
+  | { type: "app"; op: "clear"; status: string } // 删除某状态的自定义屏幕，恢复默认显示
   | { type: "sync" }; // 握手：固件回 hello
 
 export type InboundMessage =

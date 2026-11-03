@@ -1,7 +1,7 @@
-# 设备端自定义屏幕（路径 B）：C → WebAssembly → wasm3
+# 设备端自定义屏幕（路径 B）：C/WAT → WebAssembly → wasm3
 
-> 状态：**可行性已验证**（2026-11-03，ESP32-S3 真机实测）
-> 结论：**可以立项**。成本远低于 Busy Bar 的 JerryScript 方案；flash 紧张但不需换芯片。
+> 状态：**已实现**（2026-11-03；可行性验证 + 完整落地，替代原"JS→帧上传"方案）
+> 结论：wasm3 沙箱按状态执行 .wasm 屏幕 app，成本远低于 Busy Bar 的 JerryScript 方案。
 
 ## 方案
 
@@ -41,13 +41,14 @@ Agent/用户按宿主 API 规范写的 C 代码
 测试草图：`code/firmware/wasmtest/`（wasm 以 C 数组内嵌；后续走 LittleFS）。
 测试 wat 源与构建脚本：`ball.wat` → `wabt` 编译（228B）。
 
-## 后续要做成产品还缺什么
+## 落地实现（v2，已替代帧方案）
 
-1. **宿主 API 规范**：绘图（线段/矩形/文字/位图）、`on_button`/`on_knob` 事件、状态上下文（当前状态 id、待办数）——即给 Agent 的 C 头文件 + 文档
-2. **编译通道**：云端 C→wasm 服务，或本地 Agent 调 clang（`--target=wasm32 -nostdlib`）；网页端"上传 .wasm"
-3. **协议**：`app` 消息族（begin/status/size → chunk → run），与 anim 帧协议同构
-4. **生命周期**：进入状态加载、切状态停止、运行时销毁、trap 自动恢复默认屏、看门狗超时
-5. **分区表调整**（可选）：给 app 存储和固件升级留余量
+- **宿主 API v1**：`clear / show / px / rect / text / millis / buttons / status`（见 `code/website/doc/display-app-spec.md`）
+- **协议**：`app` 消息族 `begin{status,size} → chunk{base64}×N → run / stop / clear{status}`（`doc/device-protocol.md`）
+- **存储**：LittleFS `/app_<status>.wasm`，≤48KB，断电不丢；状态切换自动加载
+- **安全**：trap→卸载回默认屏；死循环→TWDT 复位→文件改名 `.bad` 防 bootloop
+- **网页端**：WAT 编辑器（wabt 客户端编译）+ WebAssembly 实例化预览（按键 1-4 模拟 K1-K4）+ .wasm 文件上传
+- **固件占用**：编译后 97% flash（1,277,349/1,310,720）、12% RAM——紧但装得下；后续扩容需调分区表
 
 ## 对比参照
 

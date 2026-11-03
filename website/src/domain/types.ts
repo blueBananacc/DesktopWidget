@@ -83,6 +83,11 @@ export interface KeyMap {
   k4: KeyAction; // 触摸区·右
 }
 
+/** 自定义屏幕来源：wat = 页面里编辑的 WAT 源码（wabt 编译上传）；wasm = 直接上传的预编译二进制（base64） */
+export type ScreenDef =
+  | { kind: "wat"; src: string }
+  | { kind: "wasm"; b64: string; name?: string };
+
 export interface Settings {
   overrideMode: OverrideMode;
   breakEnabled: boolean;
@@ -101,8 +106,8 @@ export interface Settings {
   phoneDnd: Partial<Record<StatusId, boolean>>;
   staleMinutes: number;
   screenLayout: "large" | "withTime" | "minimal";
-  /** 按状态自定义屏幕：statusId -> 动效 JS 源码（display-app-spec.md）；上传后设备按状态存 flash，进入状态自动播放 */
-  customScreens: Record<string, string>;
+  /** 按状态自定义屏幕：statusId -> WAT 源码或预编译 wasm；上传后设备按状态存 LittleFS，进入状态自动执行 */
+  customScreens: Record<string, ScreenDef>;
 }
 
 export type AgentState = "idle" | "running" | "needsInput" | "done" | "error";

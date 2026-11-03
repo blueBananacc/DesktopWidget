@@ -118,7 +118,9 @@ const load = (now: number): AppState => {
       // 旧版本只存了每日汇总，没有区间：换成可查看详情的演示历史
       const past = saved.historySegments ? undefined : seedPast(now);
       return {
-        ...createInitial(now), ...saved, breakSyncedAt: 0, settings: { ...defaultSettings, ...saved.settings, keys },
+        ...createInitial(now), ...saved, breakSyncedAt: 0, settings: { ...defaultSettings, ...saved.settings, keys,
+          // customScreens 迁移：旧的 JS 帧动画源码（string）已废弃，只保留 ScreenDef 对象
+          customScreens: Object.fromEntries(Object.entries(saved.settings?.customScreens ?? {}).filter(([, v]) => v && typeof v === "object" && ("src" in v || "b64" in v))) },
         // 旧版本提醒没有归属日字段：按今天迁移；并一次性注入两条"昨天遗留"演示数据（标记持久化在状态里，幂等、删除后不再注入）
         reminders: [
           ...(saved.seededLeftover2
