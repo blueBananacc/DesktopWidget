@@ -20,7 +20,7 @@ export const defaultSettings: Settings = {
   agentEnabled: true,
   phoneDnd: { busy: true, focus: true, meet: true },
   staleMinutes: 15,
-  screenLayout: "withTime",
+  screenLayout: "full",
   customScreens: {},
 };
 

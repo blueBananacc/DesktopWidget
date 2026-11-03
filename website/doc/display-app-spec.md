@@ -17,7 +17,7 @@
   ;; 需要哪个宿主函数就 import 哪个
   (import "env" "clear" (func $clear))
   (import "env" "show"  (func $show))
-  (memory 1)
+  (memory (export "memory") 1)
   (func $run (export "run")
     call $clear
     ;; …本帧的绘制…
@@ -28,7 +28,8 @@
 - 每帧自己 `clear()` → 绘制 → `show()`；不画的东西不会残留，但也不保证残留
 - **没有帧号参数**：动画节奏用 `millis()` 自取（比如 `millis()/125` 当 tick）
 - `run()` 里**不要写长循环**——它每帧都被调用，超时由设备任务看门狗兜底（复位后该 app 被禁用）
-- 需要内存（字符串、位图、数组）就 `(memory 1)` + `(data (i32.const N) "...")`；最多 64KB
+- 需要内存（字符串、位图、数组）就 `(memory (export "memory") 1)` + `(data (i32.const N) "...")`；最多 64KB
+- **内存必须导出为 `memory`**：设备不要求，但网页预览要靠它读 `text()` 的字符串；没导出时预览会报错提示
 
 ## 宿主 API（import "env.*"）
 
@@ -53,7 +54,7 @@
   (import "env" "show"   (func $show))
   (import "env" "text"   (func $text (param i32 i32 i32 i32)))
   (import "env" "millis" (func $millis (result i32)))
-  (memory 1)
+  (memory (export "memory") 1)
   (data (i32.const 16) "GET OFF WORK!")          ;; 13 字节
   (func $run (export "run")
     (local $x i32)
@@ -76,7 +77,7 @@
 
 ## 用 C 写（可选，本地编译）
 
-网页编辑器只接受 WAT；C 需在本地用 clang 编成 .wasm 再点「上传 .wasm」：
+网页编辑器只接受 WAT；C 需在本地用 clang 编成 .wasm 再点「导入 .wasm」：
 
 ```c
 // 宿主 API 声明（复制这段即可）
@@ -110,5 +111,7 @@ clang --target=wasm32 -nostdlib -Wl,--no-entry -Wl,--export=run \
 - 状态切换即换 app；没有文件的状态显示默认屏
 - 待办/休息提醒画面会**临时覆盖** app，通知结束自动恢复执行
 - **trap**（越界内存、除零等）→ 卸载回默认屏，文件保留可修代码重传
-- **死循环** → 任务看门狗复位设备 → 重启后该 app 文件改名 `.bad` 禁用（不会再死循环）
-- 「恢复默认」删除该状态的 app 文件
+- **死循环** → 任务看门狗复位设备 → 重启后该 app 文件改名 `.bad` 禁用（不会再死循环）；重新上传自动解除
+- trap / 加载失败会上报 `appErr`，网页「屏幕内容」显示错误原因；安装情况以设备上报的 `apps` 清单为准
+- 「恢复默认」删除该状态的 app 文件（含 `.bad`）
+- 默认屏布局（状态+时间+说明 / 状态+时间 / 仅状态）只影响没有 app 的状态

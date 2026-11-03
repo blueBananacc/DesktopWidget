@@ -1,11 +1,11 @@
-import type { KeyAction, LedMode, StatusId } from "../domain/types";
+import type { KeyAction, LedMode, ScreenLayout, StatusId } from "../domain/types";
 
 /**
  * 网页 ⇄ 收工牌 通信协议草案（JSON，UTF-8）。
  * 字段需与固件对齐后再定稿；BLE 下单条消息过长时由传输层分包。
  */
 export type OutboundMessage =
-  | { type: "state"; status: StatusId; screen: string; sub: string; until?: number; led: LedMode; brightness: number; ts: number }
+  | { type: "state"; status: StatusId; screen: string; sub: string; until?: number; led: LedMode; brightness: number; layout: ScreenLayout; ts: number } // layout 只作用于默认屏，设备持久保存
   | { type: "schedule"; kind: "repeat" | "date"; weekdays?: number[]; date?: string; nodes: { time: string; status: StatusId }[]; override?: { date: string; nodes: { time: string; status: StatusId }[] }; paused: boolean; mode: "next" | "today"; ts: number } // 设备自治执行：repeat 按 weekdays，date 按单日；override=当日单日计划（优先于主表，跨天自动失效）；mode=手动干预后何时恢复
   | { type: "time"; epoch: number; tzOffsetMin: number }
   | { type: "break"; minutes: number; enabled: boolean; offToday: boolean; accumMs?: number } // 休息提醒设置；accumMs 仅在明确要求重置时携带，设备保持计时权威
@@ -15,7 +15,8 @@ export type OutboundMessage =
   | { type: "app"; op: "chunk"; data: string } // wasm 二进制 base64 分片（≤~1KB 解码数据/条），按序追加
   | { type: "app"; op: "run" } // 收尾：收齐落盘；上传的是当前状态则立即重载执行（wasm3 沙箱）
   | { type: "app"; op: "stop" } // 停掉当前 app 回默认屏
-  | { type: "app"; op: "clear"; status: string } // 删除某状态的自定义屏幕，恢复默认显示
+  | { type: "app"; op: "clear"; status: string } // 删除某状态的自定义屏幕（含被禁用的 .bad），恢复默认显示
+  | { type: "app"; op: "list" } // 请求设备回 apps 清单（hello / run / clear 后设备也会主动上报）
   | { type: "sync" }; // 握手：固件回 hello
 
 export type InboundMessage =
@@ -27,7 +28,9 @@ export type InboundMessage =
   | { type: "wantTime" } // 设备未校时（如中途重启）主动请求 time
   | { type: "segments"; phase: "begin" | "end" } // 今日状态区间全量推送的起止帧
   | { type: "seg"; status: StatusId; start: number; end?: number } // 单个区间；end 缺省 = 进行中
-  | { type: "hello"; name: string; firmware: string };
+  | { type: "hello"; name: string; firmware: string }
+  | { type: "apps"; list: { status: string; size: number; bad?: boolean }[] } // 设备上实际安装的自定义屏幕；bad=崩溃后被自动禁用
+  | { type: "appErr"; status: string; msg: string }; // app 运行 trap 或加载失败，设备已回默认屏
 
 export interface DeviceTransport {
   readonly kind: "mock" | "ble" | "serial";

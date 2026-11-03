@@ -69,7 +69,17 @@ export interface DeviceInfo {
   state: ConnectionState;
   lastSyncAt?: number;
   pending: number;
+  /** 设备上报的已安装自定义屏幕（apps 消息）；undefined = 还没收到清单（未连接或旧固件） */
+  apps?: Record<string, DeviceApp>;
+  /** 最近一次设备端 app 运行失败（trap / 加载失败） */
+  appErr?: { status: string; msg: string; at: number };
 }
+
+/** 设备 LittleFS 里某状态的 wasm：bad = 曾导致设备复位，已被自动禁用 */
+export interface DeviceApp { size: number; bad?: boolean }
+
+/** 默认屏布局（固件真实支持的三种）：完整 = 状态+时间+说明；clock = 状态+时间；status = 仅状态 */
+export type ScreenLayout = "full" | "clock" | "status";
 
 export type LedMode = "solid" | "breath" | "off";
 
@@ -105,7 +115,7 @@ export interface Settings {
   agentEnabled: boolean;
   phoneDnd: Partial<Record<StatusId, boolean>>;
   staleMinutes: number;
-  screenLayout: "large" | "withTime" | "minimal";
+  screenLayout: ScreenLayout;
   /** 按状态自定义屏幕：statusId -> WAT 源码或预编译 wasm；上传后设备按状态存 LittleFS，进入状态自动执行 */
   customScreens: Record<string, ScreenDef>;
 }

@@ -119,6 +119,8 @@ const load = (now: number): AppState => {
       const past = saved.historySegments ? undefined : seedPast(now);
       return {
         ...createInitial(now), ...saved, breakSyncedAt: 0, settings: { ...defaultSettings, ...saved.settings, keys,
+          // 旧布局取值（large/withTime/minimal）固件从未实现：统一迁回固件真实支持的"完整"
+          screenLayout: (["full", "clock", "status"] as const).find((v) => v === saved.settings?.screenLayout) ?? "full",
           // customScreens 迁移：旧的 JS 帧动画源码（string）已废弃，只保留 ScreenDef 对象
           customScreens: Object.fromEntries(Object.entries(saved.settings?.customScreens ?? {}).filter(([, v]) => v && typeof v === "object" && ("src" in v || "b64" in v))) },
         // 旧版本提醒没有归属日字段：按今天迁移；并一次性注入两条"昨天遗留"演示数据（标记持久化在状态里，幂等、删除后不再注入）
@@ -418,7 +420,7 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
   },
 });
 
-export const toOutbound = (s: AppState): OutboundMessage => {
+export const toOutbound = (s: AppState): Extract<OutboundMessage, { type: "state" }> => {
   const meta = STATUSES[s.current.id];
   const until = s.current.until;
   return {
@@ -429,6 +431,7 @@ export const toOutbound = (s: AppState): OutboundMessage => {
     until,
     led: s.settings.led[s.current.id],
     brightness: s.settings.ledBrightness,
+    layout: s.settings.screenLayout,
     ts: s.current.since,
   };
 };
@@ -498,7 +501,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       return;
     }
     sendSnapshot().catch(() => setDevice((d) => ({ ...d, pending: d.pending + 1 })));
-  }, [s.current, s.settings.led, s.settings.ledBrightness, s.settings.overrideMode, s.settings.keys, s.schedules, s.activeScheduleId, s.pausedToday]);
+  }, [s.current, s.settings.led, s.settings.ledBrightness, s.settings.screenLayout, s.settings.overrideMode, s.settings.keys, s.schedules, s.activeScheduleId, s.pausedToday]);
 
   const handleInbound = useCallback(
     (m: InboundMessage) => {
@@ -580,6 +583,12 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         case "hello":
           setDevice((d) => ({ ...d, name: m.name }));
           break;
+        case "apps":
+          setDevice((d) => ({ ...d, apps: Object.fromEntries(m.list.map((a) => [a.status, { size: a.size, bad: a.bad }])) }));
+          break;
+        case "appErr":
+          setDevice((d) => ({ ...d, appErr: { status: m.status, msg: m.msg, at: Date.now() } }));
+          break;
       }
     },
     [actions],
@@ -588,7 +597,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const connect = useCallback(
     async (kind: "mock" | "ble" | "serial") => {
       const t: DeviceTransport = kind === "mock" ? new MockTransport() : kind === "ble" ? new BleTransport() : new SerialTransport();
-      setDevice((d) => ({ ...d, kind, state: "connecting" }));
+      setDevice((d) => ({ ...d, kind, state: "connecting", apps: undefined, appErr: undefined })); // 安装清单以新连接的设备上报为准
       try {
         // 真机：等设备推送区间并采纳后才恢复下发 state（模拟设备无此流程，立即下发）
         awaitAdoptionRef.current = kind !== "mock";

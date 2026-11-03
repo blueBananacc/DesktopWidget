@@ -30,7 +30,7 @@
 
 // ===================== 配置 =====================
 
-#define FIRMWARE_VER   "0.4.0"
+#define FIRMWARE_VER   "0.5.0"
 #define DEVICE_NAME    "Shougong-A1"
 #define ENABLE_CAPSENSE 0   // 有铜箔电极接 GPIO13/14 后改为 1
 
@@ -53,10 +53,10 @@ static const char* TX_UUID  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // 设备�
 struct StatusDef { const char* id; uint8_t r, g, b; const char* zh; const char* hint; };
 const StatusDef STATUSES[] = {
   { "work",  34, 160, 107, "工作中",   "可以找我" },
-  { "busy", 229,  72,  77, "请勿打扰", "先别打扰" },
-  { "focus",180,  35,  44, "专注中",   "深度专注" },
-  { "meet", 124,  92, 250, "会议中",   "请稍等" },
-  { "rest",  14, 165, 183, "休息一下", "马上回来" },
+  { "busy", 229,  72,  77, "请勿打扰", "非紧急请稍后" },
+  { "focus",180,  35,  44, "专注中",   "专注计时中" },
+  { "meet", 124,  92, 250, "会议中",   "正在开会" },
+  { "rest",  14, 165, 183, "休息一下", "稍后回来" },
   { "off",   59,  66,  82, "已收工",   "明天见" },
 };
 const StatusDef* findStatus(const char* id) {
@@ -85,6 +85,7 @@ String  scrMain = "工作中", scrSub = "可以找我";
 String  ledMode = "solid";        // solid / breath / off
 uint8_t ledBrightness = 40;       // 网页下发 0–100
 bool    oledDirty = true;
+uint8_t scrLayout = 0;            // 默认屏布局：0=状态+时间+说明 1=状态+时间 2=仅状态（LittleFS /layout 持久）
 
 // 时间同步（网页发 time 消息）
 int64_t epochBase = -1;           // 同步时刻的 epoch(ms)；-1 = 未校时
@@ -257,6 +258,36 @@ void sendLine(const String& json) {
   Serial.printf("[TX] %s\n", json.c_str());
 }
 
+void removeIfExists(const String& path) { if (LittleFS.exists(path)) LittleFS.remove(path); }
+
+// 上报设备上实际安装的自定义屏幕：网页据此显示"已安装/未上传/已禁用"，不靠本地猜测
+void sendApps() {
+  String out = F("{\"type\":\"apps\",\"list\":[");
+  bool first = true;
+  File root = LittleFS.open("/");
+  for (File f = root.openNextFile(); f; f = root.openNextFile()) {
+    String n = f.name();
+    if (n.startsWith("/")) n.remove(0, 1);
+    const bool bad = n.endsWith(".wasm.bad");
+    if (n.startsWith("app_") && (bad || n.endsWith(".wasm"))) {
+      out += first ? "" : ","; first = false;
+      out += "{\"status\":\"" + n.substring(4, n.indexOf('.')) + "\",\"size\":" + String((unsigned)f.size()) + (bad ? ",\"bad\":true}" : "}");
+    }
+    f.close();
+  }
+  out += "]}";
+  sendLine(out);
+}
+
+// app 运行失败（trap / 加载失败）上报给网页提示用户修代码
+void sendAppErr(const char* st, const char* msg) {
+  char m[101], buf[180];
+  strncpy(m, msg, 100); m[100] = 0;
+  for (char* p = m; *p; p++) if (*p == '"' || *p == '\\') *p = '\'';   // 防御：引号/反斜杠会破坏 JSON
+  snprintf(buf, sizeof buf, "{\"type\":\"appErr\",\"status\":\"%s\",\"msg\":\"%s\"}", st, m);
+  sendLine(buf);
+}
+
 // 上报休息提醒计时：网页据此镜像进度环
 void sendBreakState(bool due) {
   char buf[160];
@@ -278,26 +309,32 @@ void drawOled() {
   const char* sub = remind
     ? (remindText[0] ? remindText : (snprintf(subBuf, sizeof subBuf, "有 %d 条待办", remindCount), subBuf))
     : notice ? "下一轮计时已开始" : scrSub.c_str();
+  // 布局只作用于常规状态屏；提醒/休息画面始终完整显示
+  const uint8_t lay = (remind || notice) ? 0 : scrLayout;
   oled.clearBuffer();
-  // 左上角连接状态点
-  if (bleConnected) oled.drawDisc(6, 6, 3); else oled.drawCircle(6, 6, 3);
-  // 右上角时间
-  oled.setFont(u8g2_font_wqy12_t_gb2312);
-  char clockBuf[8];
-  if (epochBase >= 0) {
-    int64_t now = epochBase + (int64_t)millis() - epochBaseMs;
-    int mins = (int)((now / 60000 + tzOffsetMin) % 1440);
-    snprintf(clockBuf, sizeof clockBuf, "%02d:%02d", mins / 60, mins % 60);
-  } else {
-    strcpy(clockBuf, "--:--");
+  if (lay < 2) {
+    // 左上角连接状态点
+    if (bleConnected) oled.drawDisc(6, 6, 3); else oled.drawCircle(6, 6, 3);
+    // 右上角时间
+    oled.setFont(u8g2_font_wqy12_t_gb2312);
+    char clockBuf[8];
+    if (epochBase >= 0) {
+      int64_t now = epochBase + (int64_t)millis() - epochBaseMs;
+      int mins = (int)((now / 60000 + tzOffsetMin) % 1440);
+      snprintf(clockBuf, sizeof clockBuf, "%02d:%02d", mins / 60, mins % 60);
+    } else {
+      strcpy(clockBuf, "--:--");
+    }
+    oled.drawUTF8(128 - oled.getUTF8Width(clockBuf), 12, clockBuf);
   }
-  oled.drawUTF8(128 - oled.getUTF8Width(clockBuf), 12, clockBuf);
-  // 状态大字（中文 16px，最多 4 字=64px 宽，居中）
+  // 状态大字（中文 16px，最多 4 字=64px 宽，居中）；无说明行时下移到视觉中心
   oled.setFont(u8g2_font_wqy16_t_gb2312);
-  oled.drawUTF8((128 - oled.getUTF8Width(main)) / 2, 36, main);
+  oled.drawUTF8((128 - oled.getUTF8Width(main)) / 2, lay == 0 ? 36 : 40, main);
   // 副标题 12px 居中
-  oled.setFont(u8g2_font_wqy12_t_gb2312);
-  oled.drawUTF8((128 - oled.getUTF8Width(sub)) / 2, 56, sub);
+  if (lay == 0) {
+    oled.setFont(u8g2_font_wqy12_t_gb2312);
+    oled.drawUTF8((128 - oled.getUTF8Width(sub)) / 2, 56, sub);
+  }
   oled.sendBuffer();
 }
 
@@ -335,6 +372,12 @@ void handleLine(const String& line) {
     String ns = doc["sub"] | "";
     String lm = doc["led"] | "solid";
     uint8_t br = doc["brightness"] | 40;
+    const char* ly = doc["layout"] | "";
+    const int8_t nl = !strcmp(ly, "full") ? 0 : !strcmp(ly, "clock") ? 1 : !strcmp(ly, "status") ? 2 : -1;
+    if (nl >= 0 && nl != scrLayout) {
+      scrLayout = nl; oledDirty = true;
+      File lf = LittleFS.open("/layout", "w"); if (lf) { lf.write(scrLayout); lf.close(); }
+    }
     // 与当前完全一致时跳过：避免同状态重按导致 OLED 闪屏
     if (nId != curStatusId || nm != scrMain || ns != scrSub || lm != ledMode || br != ledBrightness) {
       if (nId != curStatusId) { markStatus(st); registerManualOverride(st); }
@@ -442,6 +485,7 @@ void handleLine(const String& line) {
       strncpy(appUpStatus, st, sizeof(appUpStatus) - 1); appUpStatus[sizeof(appUpStatus) - 1] = 0;
       appUpSize = doc["size"] | 0; appUpGot = 0;
       if (appFile) appFile.close();
+      removeIfExists("/app_" + String(appUpStatus) + ".wasm.bad");   // 重新上传 = 用户已修复，解除崩溃禁用
       appFile = (appUpSize > 0 && appUpSize <= APP_MAX_SIZE)
                 ? LittleFS.open("/app_" + String(appUpStatus) + ".wasm", "w") : File();
       Serial.printf("[APP] begin %s size=%u\n", appUpStatus, appUpSize);
@@ -456,7 +500,11 @@ void handleLine(const String& line) {
       if (appUpSize && appUpGot == appUpSize) {
         if (!strcmp(appUpStatus, curStatusId.c_str())) appFor[0] = 0; // 上传的是当前状态 → 强制重载立即执行
         Serial.printf("[APP] saved %s (%u)\n", appUpStatus, appUpGot);
-      } else Serial.printf("[APP] incomplete %u/%u\n", appUpGot, appUpSize);
+      } else {
+        Serial.printf("[APP] incomplete %u/%u\n", appUpGot, appUpSize);
+        removeIfExists("/app_" + String(appUpStatus) + ".wasm");      // 半截文件不留：避免加载失败或误报"已安装"
+      }
+      sendApps();
     } else if (!strcmp(op, "stop")) {
       if (appPlaying) appUnload();
       oledDirty = true;
@@ -464,9 +512,13 @@ void handleLine(const String& line) {
     } else if (!strcmp(op, "clear")) {
       const char* st = doc["status"] | "";
       if (appFile && !strcmp(st, appUpStatus)) { appFile.close(); appUpGot = 0; appUpSize = 0; } // 上传中清除：先关句柄否则 remove 失败
-      LittleFS.remove("/app_" + String(st) + ".wasm");
+      removeIfExists("/app_" + String(st) + ".wasm");
+      removeIfExists("/app_" + String(st) + ".wasm.bad");
       if (!strcmp(st, appFor)) { appUnload(); appFor[0] = 0; oledDirty = true; }
       Serial.printf("[APP] clear %s\n", st);
+      sendApps();
+    } else if (!strcmp(op, "list")) {
+      sendApps();
     }
   } else if (!strcmp(type, "sync")) {
     wantHello = true;                        // 网页握手 → 回 hello
@@ -672,6 +724,7 @@ void appLoad(const String& statusId) {
     Serial.printf("[APP] loaded %s (%u)\n", statusId.c_str(), n);
   } else {
     Serial.printf("[APP] load failed %s (%s)\n", statusId.c_str(), r ? r : "no mem");
+    sendAppErr(statusId.c_str(), r ? r : "no mem");
     appUnload(); free(bytes);
   }
 }
@@ -801,6 +854,7 @@ void setup() {
     Serial.printf("[APP] disabled %s after crash\n", bad.c_str());
     crashedApp[0] = 0;
   }
+  if (File lf = LittleFS.open("/layout", "r")) { const int v = lf.read(); if (v >= 0 && v <= 2) scrLayout = v; lf.close(); }
 
 #if ENABLE_CAPSENSE
   long sl = 0, sr = 0;
@@ -819,6 +873,7 @@ void loop() {
     wantHello = false;
     sendLine(F("{\"type\":\"hello\",\"name\":\"收工牌 A1\",\"firmware\":\"" FIRMWARE_VER "\"}"));
     sendBreakState(false);                 // 连接后立刻同步计时
+    sendApps();                            // 设备上实际安装的自定义屏幕
     segDirty = true;                       // 随后推送今日状态区间
   }
   pollKeys();
@@ -847,6 +902,7 @@ void loop() {
       M3Result r = m3_CallV(wasmRun);
       if (r) {
         Serial.printf("[APP] trap in %s: %s\n", appFor, r);
+        sendAppErr(appFor, r);
         appUnload(); crashedApp[0] = 0; oledDirty = true;          // trap 只禁用本次运行，文件保留可修代码重传
       } else if (appOkFrames < 200 && ++appOkFrames == 200) {
         crashedApp[0] = 0;                                         // 稳定运行 ~6s 后解除崩溃标记

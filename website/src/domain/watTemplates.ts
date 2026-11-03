@@ -1,15 +1,20 @@
 /** 自定义屏幕的 WAT 模板。WAT 由网页端 wabt 编译成 wasm 上传；设备 wasm3 按状态执行。 */
 export interface WatTemplate { id: string; name: string; desc: string; code: string }
 
+/** 宿主 API v1（与固件 m3_LinkRawFunction 列表一致）：页面速查表与模板注释共用这一份 */
+export const HOST_API: { sig: string; desc: string }[] = [
+  { sig: "clear()", desc: "清帧缓冲（每帧开头调用）" },
+  { sig: "show()", desc: "帧缓冲刷上屏（每帧结尾调用）" },
+  { sig: "px(x, y)", desc: "置像素（越界自动裁剪）" },
+  { sig: "rect(x, y, w, h, f)", desc: "矩形（f=1 实心，0 描边）" },
+  { sig: "text(x, y, ptr, len)", desc: "ASCII 文本（6x10 字体，y 为基线；ptr/len 指线性内存里的字节，len≤64）" },
+  { sig: "millis() -> i32", desc: "设备毫秒计数（动画的时钟来源）" },
+  { sig: "buttons() -> i32", desc: "K1-K4 按下位掩码（bit0=K1 … bit3=K4）" },
+  { sig: "status() -> i32", desc: "当前状态下标（0 工作中 1 勿扰 2 专注 3 会议 4 休息 5 已下班）" },
+];
+
 const COMMON = `;; 宿主 API（doc/display-app-spec.md）：
-;;   clear()              清帧缓冲（每帧开头调用）
-;;   show()               帧缓冲刷上屏（每帧结尾调用）
-;;   px(x, y)             置像素（越界自动裁剪）
-;;   rect(x, y, w, h, f)  矩形（f=1 实心，0 描边）
-;;   text(x, y, ptr, len) ASCII 文本（6x10 字体；ptr/len 指线性内存里的字节）
-;;   millis() -> i32      设备毫秒计数（动画的时钟来源）
-;;   buttons() -> i32     K1-K4 按下位掩码（bit0=K1 … bit3=K4）
-;;   status() -> i32      当前状态下标（0..5）
+${HOST_API.map((a) => `;;   ${a.sig.padEnd(20)} ${a.desc}`).join("\n")}
 `;
 
 export const WAT_TEMPLATES: WatTemplate[] = [
@@ -23,7 +28,7 @@ export const WAT_TEMPLATES: WatTemplate[] = [
   (import "env" "show"   (func $show))
   (import "env" "px"     (func $px (param i32 i32)))
   (import "env" "millis" (func $millis (result i32)))
-  (memory 1)
+  (memory (export "memory") 1)
   (func $run (export "run")
     (local $t i32) (local $cx i32) (local $cy i32)
     (local $dx i32) (local $dy i32) (local $p i32)
@@ -70,7 +75,7 @@ export const WAT_TEMPLATES: WatTemplate[] = [
   (import "env" "show"   (func $show))
   (import "env" "text"   (func $text (param i32 i32 i32 i32)))
   (import "env" "millis" (func $millis (result i32)))
-  (memory 1)
+  (memory (export "memory") 1)
   ;; 文字内容放在线性内存 16 号偏移，共 13 字节（改内容要同步改 text 的 len 和滚动总宽）
   (data (i32.const 16) "GET OFF WORK!")
   (func $run (export "run")
@@ -92,7 +97,7 @@ export const WAT_TEMPLATES: WatTemplate[] = [
   (import "env" "show"   (func $show))
   (import "env" "px"     (func $px (param i32 i32)))
   (import "env" "millis" (func $millis (result i32)))
-  (memory 1)
+  (memory (export "memory") 1)
   ;; 9x8 爱心位图：'X'=亮 '.'=灭，按行拼接共 72 字节
   (data (i32.const 16) ".XX...XX.XXXX.XXXXXXXXXXXXXXXXX.XXXXXXX...XXXXX.....XXX.......X....")
   (func $run (export "run")
@@ -123,7 +128,7 @@ export const WAT_TEMPLATES: WatTemplate[] = [
   (import "env" "rect"    (func $rect (param i32 i32 i32 i32 i32)))
   (import "env" "text"    (func $text (param i32 i32 i32 i32)))
   (import "env" "buttons" (func $buttons (result i32)))
-  (memory 1)
+  (memory (export "memory") 1)
   (data (i32.const 16) "PRESS K1-K4")
   (func $run (export "run")
     (local $b i32) (local $i i32)
@@ -156,7 +161,7 @@ export const WAT_TEMPLATES: WatTemplate[] = [
   (import "env" "millis"  (func $millis (result i32)))
   (import "env" "buttons" (func $buttons (result i32)))
   (import "env" "status"  (func $status (result i32)))
-  (memory 1)
+  (memory (export "memory") 1)
   (func $run (export "run")
     call $clear
     ;; 你的绘制代码……（每帧调用一次，~30fps）

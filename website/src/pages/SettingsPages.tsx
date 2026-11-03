@@ -1,13 +1,12 @@
 import { Link } from "react-router-dom";
 import {
-  Fingerprint, Keyboard, Gauge, Image, Palette, Sparkles, ShieldCheck, Moon, BarChart3, Monitor, ChevronRight, RotateCcw, Sunset, Info,
+  Fingerprint, Keyboard, Gauge, Image, Palette, Sparkles, ShieldCheck, Moon, BarChart3, Monitor, ChevronRight, RotateCcw, Sunset,
 } from "lucide-react";
 import { useStore } from "../store/AppStore";
 import { STATUSES, STATUS_ORDER } from "../domain/statuses";
 import type { AgentState, KeyAction, LedMode, Settings, StatusId } from "../domain/types";
 import { ago } from "../domain/time";
-import { Banner, Card, CardHeader, PageHeader, RowItem, Segmented, SettingRow, StatusChip, Tile, Toggle } from "../ui/Primitives";
-import { Oled } from "../ui/DeviceMirror";
+import { Banner, Card, CardHeader, PageHeader, RowItem, Segmented, SettingRow, Tile, Toggle } from "../ui/Primitives";
 import { StatusScreens } from "./StatusScreens";
 import { useToast } from "../ui/Toast";
 
@@ -59,28 +58,11 @@ export function ControlsPage() {
   );
 }
 
-const LAYOUTS: { value: Settings["screenLayout"]; label: string }[] = [
-  { value: "large", label: "大字状态" },
-  { value: "withTime", label: "状态 + 时间" },
-  { value: "minimal", label: "极简" },
-];
-
 export function ScreenPage() {
-  const { s, actions } = useStore();
-  const sub = (id: StatusId) => (s.settings.screenLayout === "large" ? "" : s.settings.screenLayout === "withTime" ? "11:30 后有空" : STATUSES[id].hint);
   return (
     <>
-      <PageHeader title="屏幕内容" desc="选择屏幕的布局，或为某个状态写一段自定义动效。状态名称始终是默认屏幕上最大的内容。" />
-      <Card style={{ marginBottom: 20 }}>
-        <CardHeader icon={<Tile color="violet" size={30}><Image /></Tile>} title="布局" extra={<Segmented value={s.settings.screenLayout} options={LAYOUTS} onChange={(v) => actions.updateSettings({ screenLayout: v })} />} />
-        <div className="card-b grid g-oled">
-          {STATUS_ORDER.map((id) => (
-            <div key={id} className="oled-cell"><Oled status={id} sub={sub(id)} ledOn={s.settings.led[id] !== "off"} /><StatusChip id={id} /></div>
-          ))}
-        </div>
-      </Card>
+      <PageHeader title="屏幕内容" desc="桌牌屏幕默认显示状态名、时间和一句说明。也可以给任意状态换成自己写的屏幕程序，装进设备后网页关掉也照常运行。" />
       <StatusScreens />
-      <Banner tone="info" icon={<Info className="i" />}>自定义动效存在设备 flash 里，进入该状态自动播放、断电不丢。OLED 长时间播放动画会加速烧屏，建议动画只用于短时间醒目的状态（如收工、会议）。</Banner>
     </>
   );
 }
