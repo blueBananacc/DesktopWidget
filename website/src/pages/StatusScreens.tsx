@@ -366,12 +366,12 @@ export function StatusScreens() {
               ) : (
                 <>
                   <div className="scr-meta">
-                    <label className="scr-mn">块名字<input className="input" value={def!.name ?? ""} maxLength={20} placeholder="例如：我的专注屏"
+                    <label className="scr-mn">名称<input className="input" value={def!.name ?? ""} maxLength={20} placeholder="例如：我的专注屏"
                       onChange={(e) => setDef({ ...def!, name: e.target.value })} /></label>
-                    <label>块描述<input className="input" value={def!.desc ?? ""} maxLength={40} placeholder="一句话说明这块屏幕显示什么（可选）"
+                    <label>简介<input className="input" value={def!.desc ?? ""} maxLength={40} placeholder="一句话说明这块屏幕显示什么（可选）"
                       onChange={(e) => setDef({ ...def!, desc: e.target.value })} /></label>
                   </div>
-                  <p className="hint" style={{ margin: 0 }}>名字和描述会显示在选项卡上。写完代码点「保存」，这块屏幕会存成一张可复用的块，之后在任何状态的模板区都能选它。</p>
+                  <p className="hint" style={{ margin: 0 }}>名称和简介会显示在选项卡上。写完代码点「保存」，这块屏幕会存成一张可复用的块，之后在任何状态的模板区都能选它。</p>
                   <textarea className="input scr-code" value={def!.src} spellCheck={false} aria-label="WAT 源码"
                     onChange={(e) => setDef({ ...def!, src: e.target.value })} />
                 </>
