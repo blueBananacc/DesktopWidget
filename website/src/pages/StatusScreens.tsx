@@ -6,7 +6,7 @@ import { getTransport, toOutbound, useStore } from "../store/AppStore";
 import { STATUSES, STATUS_ORDER } from "../domain/statuses";
 import type { DeviceApp, ScreenDef, ScreenLayout, StatusId } from "../domain/types";
 import { hhmm } from "../domain/time";
-import { Banner, Card, CardHeader, RowItem, Segmented, SettingRow, StatusChip, Tile } from "../ui/Primitives";
+import { Banner, Card, CardHeader, RowItem, SettingRow, StatusChip, Tile } from "../ui/Primitives";
 import { useToast } from "../ui/Toast";
 
 const LAYOUTS: { value: ScreenLayout; label: string }[] = [
@@ -157,12 +157,50 @@ export function StatusScreens() {
 
   const copyForAgent = async () => {
     const text = [
-      "请为「收工牌」桌牌写一个自定义屏幕程序，输出 WebAssembly 文本格式（WAT）。",
-      "屏幕：128×64 单色 OLED，坐标原点左上角。程序必须导出 run()，设备约每 33ms 调用一次（~30fps）。",
-      "每帧先 clear()，画完再 show()。线性内存 1 页即可，二进制不超过 48 KB。",
-      "可用宿主函数（全部从 \"env\" 导入，参数/返回值均为 i32）：",
-      ...HOST_API.map((a) => `- ${a.sig}：${a.desc}`),
-      "约束：只能画 ASCII 文本；不要死循环（run 必须很快返回）；避免长时间全屏常亮以减少烧屏。",
+      "请为一块 ESP32 桌牌（收工牌）写一个小屏幕程序。我会把产出的代码贴进配套网页，由网页编译并上传到设备执行。你不需要了解这个项目的其他背景，下面就是全部契约。",
+      "",
+      "【屏幕】",
+      "128×64 单色 OLED：每像素只有亮/灭，没有灰度和颜色。坐标原点左上角，x 向右 0–127，y 向下 0–63。小屏建议：文字 ≥10px，元素间隙 ≥2px，避免大面积常亮（OLED 烧屏）。",
+      "",
+      "【交付物】",
+      "首选：WebAssembly 文本格式（WAT）源码，可以直接粘贴进网页编辑器。",
+      "或：给出 C 源码 + clang 编译命令，产物为 .wasm 二进制（上限 48 KB），由我在网页里「导入 .wasm」。",
+      "",
+      "【程序模型】",
+      "- 必须导出 run()（无参、无返回）。设备进入对应状态后约每 33ms 调一次（≈30fps）——循环是设备做的，不要在 run() 里写长循环或死循环，否则设备看门狗会复位并禁用该程序。",
+      "- 每一帧自己负责：clear() 清帧缓冲 → 绘制 → show() 刷上屏。没有帧号参数；动画节奏用 millis() 自取（比如 millis()/125 当 tick）。",
+      "- 需要存字符串/位图/数组时：(memory (export \"memory\") 1) 加 (data (i32.const N) \"...\") 数据段；线性内存最多 64KB。memory 必须以 \"memory\" 名字导出——网页预览靠它读 text() 的字节，不导出则预览报错。",
+      "",
+      "【宿主 API】（全部 import \"env\" \"<名字>\"，参数和返回值均为 i32）",
+      "clear()                   清整个帧缓冲（每帧开头调用）",
+      "show()                    帧缓冲刷上 OLED（每帧结尾调用）",
+      "px(x, y)                  置一个像素为亮；越界自动裁剪；没有\"灭\"操作——先 clear 再画",
+      "rect(x, y, w, h, fill)    矩形；fill≠0 实心，fill=0 描边",
+      "text(x, y, ptr, len)      6×10 ASCII 字体；从线性内存 ptr 处读 len 字节（len≤64）；y 是文字基线，想让文字贴着顶部就传 y≈8–10",
+      "millis() -> i32           设备毫秒计数（动画的时钟来源）",
+      "buttons() -> i32          K1–K4 按键位掩码：bit0=K1，bit1=K2，bit2=K3，bit3=K4；按下为 1，可做交互",
+      "status() -> i32           当前状态下标：0=工作中 1=勿扰 2=专注 3=会议 4=休息 5=已下班",
+      "",
+      "【WAT 骨架】",
+      "(module",
+      "  (import \"env\" \"clear\" (func $clear))",
+      "  (import \"env\" \"show\" (func $show))",
+      "  (import \"env\" \"text\" (func $text (param i32 i32 i32 i32)))",
+      "  (import \"env\" \"millis\" (func $millis (result i32)))",
+      "  (memory (export \"memory\") 1)",
+      "  (data (i32.const 16) \"HELLO\")",
+      "  (func $run (export \"run\")",
+      "    call $clear",
+      "    (call $text (i32.const 30) (i32.const 36) (i32.const 16) (i32.const 5))",
+      "    call $show))",
+      "",
+      "【限制】",
+      "- 字体只有 ASCII：要显示中文请转成英文/拼音，或画成像素位图。",
+      "- run() 必须很快返回；每帧做完整重绘，不要增量累积。",
+      "- 上传前网页会先把二进制完整跑约 10 帧做校验，跑不通的代码不会写入设备。",
+      "",
+      "【我想要的画面】",
+      "（在这里向 Agent 描述你想要的画面或动画，例如：“已下班”时一行英文字从右往左滚动）",
     ].join("\n");
     await navigator.clipboard.writeText(text).then(() => toast({ message: "已复制给 Agent 的说明，粘贴给它即可" }), () => toast({ message: "复制失败，请手动查看 doc/display-app-spec.md" }));
   };
@@ -223,7 +261,10 @@ export function StatusScreens() {
             </>} />
           <div className="card-b" style={{ paddingBottom: 0 }}>
             <SettingRow title="快捷设定 · 默认屏布局" desc="只影响显示默认屏幕的状态，会存进设备；装了程序的状态由程序自己决定画面">
-              <Segmented value={s.settings.screenLayout} options={LAYOUTS} onChange={(v) => actions.updateSettings({ screenLayout: v })} />
+              <select className="input input-sm" value={s.settings.screenLayout} aria-label="默认屏布局"
+                onChange={(e) => actions.updateSettings({ screenLayout: e.target.value as ScreenLayout })}>
+                {LAYOUTS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+              </select>
             </SettingRow>
           </div>
           <div className="card-b scr-edit">
@@ -325,7 +366,6 @@ export function StatusScreens() {
             </table>
             <p className="hint" style={{ margin: "12px 0 0" }}>
               不用自己学这些接口——点「复制给 Agent」，把它和你想要的画面一起发给 Agent，让它写好代码贴回编辑器；上传前会先在这里完整跑一遍，确认没问题才写进设备。
-              想自己写：程序只要导出 <code>run()</code>，设备每秒调用约 30 次；也可以把本地编译好的 .wasm 直接导入（接口规范见 <code>doc/display-app-spec.md</code>）。
             </p>
           </div>
         </Card>
