@@ -32,77 +32,9 @@ ${HOST_API.map((a) => `;;   ${a.sig.padEnd(20)} ${a.desc}`).join("\n")}
 
 export const WAT_TEMPLATES: WatTemplate[] = [
   {
-    id: "default",
-    name: "默认屏幕",
-    desc: "状态名 + 时钟 + 动态说明行（有节点显示\"HH:MM 后有空\"）：设备默认屏的程序版，可改文字和排版；演示 status() + clock() + nodeMin()",
-    code: `${COMMON}
-(module
-  (import "env" "clear"   (func $clear))
-  (import "env" "show"    (func $show))
-  (import "env" "textC"   (func $textC (param i32 i32 i32 i32)))
-  (import "env" "bigText" (func $bigText (param i32 i32 i32 i32)))
-  (import "env" "textW"   (func $textW (param i32 i32 i32) (result i32)))
-  (import "env" "clock"   (func $clock (result i32)))
-  (import "env" "nodeMin" (func $nodeMin (result i32)))
-  (import "env" "status"  (func $status (result i32)))
-  (memory (export "memory") 1)
-  ;; 时钟缓冲 HH:MM（未校时保持 --:--）
-  (data (i32.const 16) "--:--")
-  ;; 说明行动态缓冲：有下个节点时写入 "HH:MM 后有空"（与网页下发的默认文案同规则）
-  (data (i32.const 24) "--:-- 后有空\\00")
-  ;; 状态名表：每条 12 字节（UTF-8 + \\00 补齐），status() 下标 ×12 取地址；换文案注意对齐槽宽
-  (data (i32.const 48) "工作中\\00\\00\\00请勿打扰专注中\\00\\00\\00会议中\\00\\00\\00休息一下已收工\\00\\00\\00")
-  ;; 说明行兜底表（无节点时用）：每条 24 字节，同下标顺序 ×24 取址
-  (data (i32.const 128) "可以找我\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00非紧急请稍后\\00\\00\\00\\00\\00\\00专注计时中\\00\\00\\00\\00\\00\\00\\00\\00\\00正在开会\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00稍后回来\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00明天见\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00\\00")
-  (func $digit (param $v i32) (result i32) (i32.add (i32.const 48) (i32.rem_u (local.get $v) (i32.const 10))))
-  ;; 把分钟数写成 HH:MM 到 ptr 处
-  (func $hhmm (param $ptr i32) (param $min i32)
-    (local $h i32) (local $m i32)
-    (local.set $h (i32.div_u (local.get $min) (i32.const 60)))
-    (local.set $m (i32.rem_u (local.get $min) (i32.const 60)))
-    (i32.store8 (local.get $ptr)       (call $digit (i32.div_u (local.get $h) (i32.const 10))))
-    (i32.store8 (i32.add (local.get $ptr) (i32.const 1)) (call $digit (local.get $h)))
-    (i32.store8 (i32.add (local.get $ptr) (i32.const 2)) (i32.const 58))
-    (i32.store8 (i32.add (local.get $ptr) (i32.const 3)) (call $digit (i32.div_u (local.get $m) (i32.const 10))))
-    (i32.store8 (i32.add (local.get $ptr) (i32.const 4)) (call $digit (local.get $m))))
-  (func $run (export "run")
-    (local $c i32) (local $n i32) (local $w i32) (local $sp i32) (local $sl i32)
-    call $clear
-    ;; 右上角时钟 HH:MM（textW 量宽做右对齐，与默认屏一致）
-    (local.set $c (call $clock))
-    (if (i32.ge_s (local.get $c) (i32.const 0))
-      (then (call $hhmm (i32.const 16) (local.get $c))))
-    (call $textC
-      (i32.sub (i32.const 128) (call $textW (i32.const 16) (i32.const 5) (i32.const 1)))
-      (i32.const 12) (i32.const 16) (i32.const 5))
-    ;; 状态名：wqy16 中文大字居中，y=36（与固件默认屏同位）
-    (local.set $w (call $textW
-      (i32.add (i32.const 48) (i32.mul (call $status) (i32.const 12)))
-      (i32.const 12) (i32.const 2)))
-    (call $bigText
-      (i32.div_s (i32.sub (i32.const 128) (local.get $w)) (i32.const 2))
-      (i32.const 36)
-      (i32.add (i32.const 48) (i32.mul (call $status) (i32.const 12)))
-      (i32.const 12))
-    ;; 说明行：有下个计划节点 → "HH:MM 后有空"（=clock+nodeMin），否则状态固定提示语
-    (local.set $n (call $nodeMin))
-    (if (i32.and (i32.ge_s (local.get $n) (i32.const 0)) (i32.ge_s (local.get $c) (i32.const 0)))
-      (then
-        (call $hhmm (i32.const 24) (i32.add (local.get $c) (local.get $n)))
-        (local.set $sp (i32.const 24)) (local.set $sl (i32.const 15)))
-      (else
-        (local.set $sp (i32.add (i32.const 128) (i32.mul (call $status) (i32.const 24))))
-        (local.set $sl (i32.const 24))))
-    (local.set $w (call $textW (local.get $sp) (local.get $sl) (i32.const 1)))
-    (call $textC
-      (i32.div_s (i32.sub (i32.const 128) (local.get $w)) (i32.const 2))
-      (i32.const 56) (local.get $sp) (local.get $sl))
-    call $show))`,
-  },
-  {
     id: "ball",
     name: "弹跳小球",
-    desc: "实心小球斜向往复弹跳；演示 px + millis 动画",
+    desc: "一颗实心小球在屏里斜向往复弹跳",
     code: `${COMMON}
 (module
   (import "env" "clear"  (func $clear))
@@ -149,7 +81,7 @@ export const WAT_TEMPLATES: WatTemplate[] = [
   {
     id: "marquee",
     name: "滚动字幕",
-    desc: "一行文字从右向左滚动；演示 text + 内存数据段",
+    desc: "一行英文字从右向左滚动",
     code: `${COMMON}
 (module
   (import "env" "clear"  (func $clear))
@@ -171,7 +103,7 @@ export const WAT_TEMPLATES: WatTemplate[] = [
   {
     id: "heart",
     name: "像素爱心",
-    desc: "位图数据段 + 心跳位移；演示内存位图扫描",
+    desc: "一颗像素爱心随心跳上下跳动",
     code: `${COMMON}
 (module
   (import "env" "clear"  (func $clear))
@@ -201,7 +133,7 @@ export const WAT_TEMPLATES: WatTemplate[] = [
   {
     id: "keys",
     name: "按键测试",
-    desc: "按下 K1-K4 对应方格填实；演示 buttons() 交互",
+    desc: "按下 K1–K4，对应方格会填实",
     code: `${COMMON}
 (module
   (import "env" "clear"   (func $clear))
@@ -231,7 +163,7 @@ export const WAT_TEMPLATES: WatTemplate[] = [
   {
     id: "segTimer",
     name: "状态计时",
-    desc: "大字显示进入当前状态以来的 MM:SS；演示 segSec() + 内存写数字",
+    desc: "大字显示进入当前状态以来过了多久",
     code: `${COMMON}
 (module
   (import "env" "clear"  (func $clear))
@@ -272,7 +204,7 @@ export const WAT_TEMPLATES: WatTemplate[] = [
   {
     id: "shapes",
     name: "图形工具箱",
-    desc: "圆角框/圆/线/位图/锚点文本/反色一锅端；演示新版绘图函数",
+    desc: "圆角框、星星、会呼吸的椭圆等图形组合",
     code: `${COMMON}
 (module
   (import "env" "clear"  (func $clear))
@@ -312,7 +244,7 @@ export const WAT_TEMPLATES: WatTemplate[] = [
   {
     id: "custom",
     name: "自定义代码",
-    desc: "空白骨架：全部宿主 API 已 import，直接在 run() 里画",
+    desc: "空白代码页，从零写你想要的画面",
     code: `${COMMON}
 (module
   (import "env" "clear"   (func $clear))

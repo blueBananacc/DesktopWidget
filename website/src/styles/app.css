@@ -223,6 +223,7 @@ input[type="range"] { accent-color: var(--primary); width: 180px; }
 .scr-tpl b { font-size: 13.5px; font-weight: 600; }
 .scr-tpl span { font-size: 12px; color: var(--ink-2); }
 .scr-tpl.on { border-color: var(--primary); background: var(--primary-soft); }
+.scr-tpl.cur, .scr-tpl.cur:hover { cursor: default; }
 .scr-def { background: var(--canvas); }
 .scr-def.on { background: var(--primary-soft); }
 .scr-api { width: 100%; border-collapse: collapse; font-size: 12.5px; }

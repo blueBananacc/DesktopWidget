@@ -310,12 +310,21 @@ export function StatusScreens() {
                 <div className="scr-empty">
                   <Tile color="violet" size={48}><LayoutTemplate /></Tile>
                   <b>「{STATUSES[id].label}」还在用默认屏幕</b>
-                  <p>点「默认屏幕」能看到这份画面的等效代码、直接改；或选其他模板写自定义程序（也可导入本地 .wasm）。程序装进设备后，每次进入「{STATUSES[id].label}」都会自动运行，网页关掉也照常显示。</p>
+                  <p>{app ? "设备上装过这个状态的程序，但本机没有源码——重新写一个会覆盖它。" : "默认屏幕是设备自带画面，不用装程序。"}想换花样：选一个模板开始改，或导入本地 .wasm。程序装进设备后，每次进入「{STATUSES[id].label}」都会自动运行，网页关掉也照常显示。</p>
                   <div className="scr-tpls">
+                    {app ? (
+                      <button type="button" className="scr-tpl scr-def" onClick={() => void restore()}>
+                        <b>默认屏幕</b><span>设备自带画面 · 点此恢复</span>
+                      </button>
+                    ) : (
+                      <div className="scr-tpl scr-def on cur">
+                        <b>默认屏幕</b><span>设备自带画面 · 使用中</span>
+                      </div>
+                    )}
                     {WAT_TEMPLATES.map((t) => (
-                      <button key={t.id} type="button" className={`scr-tpl ${t.id === "default" ? "scr-def on" : ""}`}
+                      <button key={t.id} type="button" className="scr-tpl"
                         onClick={() => setDef({ kind: "wat", src: t.code })}>
-                        <b>{t.name}</b><span>{t.desc}{t.id === "default" ? " · 使用中" : ""}</span>
+                        <b>{t.name}</b><span>{t.desc}</span>
                       </button>
                     ))}
                   </div>
