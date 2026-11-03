@@ -259,11 +259,6 @@ export function StatusScreens() {
           <CardHeader icon={<Tile color="blue" size={30}><Code2 /></Tile>} title={<>编辑屏幕 · {STATUSES[id].label}</>}
             extra={<>
               <span className={TONE_CLASS[src.tone]}>{src.label}</span>
-              <select className="input input-sm" value="" aria-label="从模板加载"
-                onChange={(e) => { const t = WAT_TEMPLATES.find((x) => x.id === e.target.value); if (t) setDef({ kind: "wat", src: t.code }); e.target.value = ""; }}>
-                <option value="">从模板加载…</option>
-                {WAT_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
               <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()}><FileUp />导入 .wasm</button>
               <input ref={fileRef} type="file" accept=".wasm" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickFile(f); e.target.value = ""; }} />
             </>} />
