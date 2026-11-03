@@ -4,9 +4,11 @@
 
 | 模块 | 引脚 | 接开发板 |
 |---|---|---|
-| OLED | GND / VCC / SCL / SDA | 左排 GND / 左排 3V3 / GPIO9 / GPIO8 |
-| 按键（丝印 GND K4 K3 K2 K1） | GND + K1 K2 K3 K4 | 右排顶 GND + GPIO4 5 6 7 |
-| 麦克风（丝印 SCK WS L/R + SD VDD GND） | VDD/SCK/WS/SD/GND/L/R | 左排 3V3 / GPIO1 / GPIO2 / GPIO42 / GND×2 |
+| OLED | GND / VCC / SCL / SDA | GND / 3V3 / GPIO9 / GPIO5 |
+| 按键（丝印 GND K4 K3 K2 K1） | GND + K1 K2 K3 K4 | GND + GPIO17 16 15 7 |
+| 触摸 TTP223 | SIG / VCC / GND | GPIO4 / 3V3 / GND（高电平=摸到） |
+| 旋钮 EC11（丝印 GND S1 S2 KEY 5V） | S1/S2/KEY/5V/GND | GPIO1 / GPIO2 / GPIO42 / 3V3 / GND |
+| 麦克风（丝印 SCK WS L/R + SD VDD GND） | VDD/SCK/WS/SD/GND/L/R | 3V3 / GPIO47 / GPIO21 / GPIO10 / GND×2 |
 | 板载 RGB | — | 已在板上（GPIO48） |
 | 触摸电极（可选） | 铜箔×2 | GPIO13 / GPIO14 |
 

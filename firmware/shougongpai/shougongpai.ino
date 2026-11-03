@@ -35,13 +35,17 @@
 #define ENABLE_CAPSENSE 0   // 有铜箔电极接 GPIO13/14 后改为 1
 
 // 引脚分配（与 HARDWARE.md 一致）
-constexpr uint8_t PIN_SDA = 8, PIN_SCL = 9;        // OLED I2C
+constexpr uint8_t PIN_SDA = 5, PIN_SCL = 9;        // OLED I2C（SDA 2026-11-03 由 8 改 5，原 K2 脚）
 constexpr uint8_t PIN_RGB = 48;                     // 板载 WS2812
-constexpr uint8_t KEY_OFFWORK = 4;                  // K1 收工键
-constexpr uint8_t KEY_SHORTCUT = 5;                 // K2 自定义键
-constexpr uint8_t KEY_TOUCH_L = 6;                  // K3 暂代触摸区·左
+constexpr uint8_t KEY_OFFWORK = 17;                 // K1 收工键（原 4）
+constexpr uint8_t KEY_SHORTCUT = 16;                // K2 自定义键（原 5）
+constexpr uint8_t KEY_TOUCH_L = 15;                 // K3 暂代触摸区·左（原 6）
 constexpr uint8_t KEY_TOUCH_R = 7;                  // K4 暂代触摸区·右
 constexpr uint8_t TOUCH_L = 13, TOUCH_R = 14;       // 电容触摸电极（可选）
+// 面包板新模块（2026-11-03 定案）
+constexpr uint8_t PIN_TTP_SIG = 4;                  // TTP223 触摸模块 SIG：触摸=高电平（与按键低有效相反）
+constexpr uint8_t PIN_ENC_A = 1, PIN_ENC_B = 2, PIN_ENC_KEY = 42;  // EC11 旋钮 S1/S2/KEY
+constexpr uint8_t PIN_MIC_SCK = 47, PIN_MIC_WS = 21, PIN_MIC_SD = 10;  // INMP441 I2S（采集代码未实现）
 
 // BLE UUID —— 与 website/src/device/protocol.ts 保持一致
 static const char* SVC_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
@@ -989,6 +993,20 @@ void pollTouch() {
 }
 #else
 void pollTouch() {}
+
+// —— 接线验证探针（临时）：新模块只打串口日志，功能角色待正式分配 ——
+bool ttpLast; int8_t encAcc = 0; uint8_t encLast = 0; bool encKeyLast;
+void pollProbes() {
+  bool t = digitalRead(PIN_TTP_SIG);          // TTP223 主动输出：高=摸到
+  if (t != ttpLast) { ttpLast = t; Serial.printf("[PROBE] TTP223 %s\n", t ? "touch" : "release"); }
+  static const int8_t qei[16] = { 0,-1,1,0, 1,0,0,-1, -1,0,0,1, 0,1,-1,0 };
+  uint8_t s = (digitalRead(PIN_ENC_A) << 1) | digitalRead(PIN_ENC_B);
+  encAcc += qei[(encLast << 2) | s]; encLast = s;
+  if (encAcc >= 4)       { encAcc = 0; Serial.println(F("[PROBE] ENC cw ->")); }
+  else if (encAcc <= -4) { encAcc = 0; Serial.println(F("[PROBE] ENC ccw <-")); }
+  bool k = digitalRead(PIN_ENC_KEY);
+  if (k != encKeyLast) { encKeyLast = k; Serial.printf("[PROBE] ENC key %s\n", k ? "release" : "press"); }
+}
 #endif
 
 // ===================== 入口 =====================
@@ -1000,6 +1018,10 @@ void setup() {
   Serial.printf("\n[BOOT] 收工牌 %s\n", FIRMWARE_VER);
 
   for (auto& k : keys) { pinMode(k.pin, INPUT_PULLUP); delay(2); k.last = digitalRead(k.pin); }
+  // 新模块验证探针引脚：TTP223 主动输出用纯输入；旋钮编码器/按键开内部上拉
+  pinMode(PIN_TTP_SIG, INPUT); pinMode(PIN_ENC_A, INPUT_PULLUP); pinMode(PIN_ENC_B, INPUT_PULLUP); pinMode(PIN_ENC_KEY, INPUT_PULLUP);
+  ttpLast = digitalRead(PIN_TTP_SIG); encKeyLast = digitalRead(PIN_ENC_KEY);
+  encLast = (digitalRead(PIN_ENC_A) << 1) | digitalRead(PIN_ENC_B);
 
   oled.begin();
   oled.enableUTF8Print();
@@ -1037,6 +1059,7 @@ void loop() {
   }
   pollKeys();
   pollTouch();
+  pollProbes();
   pollBreak();
   pollSchedule();
   // 串口通道：与 BLE 共用同一套 JSON 行协议
