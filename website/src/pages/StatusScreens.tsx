@@ -6,7 +6,7 @@ import { getTransport, toOutbound, useStore } from "../store/AppStore";
 import { STATUSES, STATUS_ORDER } from "../domain/statuses";
 import type { DeviceApp, ScreenDef, ScreenLayout, StatusId } from "../domain/types";
 import { hhmm } from "../domain/time";
-import { Banner, Card, CardHeader, RowItem, SettingRow, StatusChip, Tile } from "../ui/Primitives";
+import { Banner, Card, CardHeader, RowItem, StatusChip, Tile } from "../ui/Primitives";
 import { useToast } from "../ui/Toast";
 
 const LAYOUTS: { value: ScreenLayout; label: string }[] = [
@@ -251,22 +251,27 @@ export function StatusScreens() {
           <CardHeader icon={<Tile color="blue" size={30}><Code2 /></Tile>} title={<>编辑屏幕 · {STATUSES[id].label}</>}
             extra={<>
               <span className={TONE_CLASS[src.tone]}>{src.label}</span>
-              <select className="input input-sm" value="" aria-label="从模板加载"
-                onChange={(e) => { const t = WAT_TEMPLATES.find((x) => x.id === e.target.value); if (t) setDef({ kind: "wat", src: t.code }); e.target.value = ""; }}>
-                <option value="">从模板加载…</option>
-                {WAT_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              <select className="input input-sm" value="" aria-label="快速选择"
+                onChange={(e) => {
+                  const t = WAT_TEMPLATES.find((x) => x.id === e.target.value);
+                  if (t) { setDef({ kind: "wat", src: t.code }); }
+                  else {
+                    const l = LAYOUTS.find((x) => x.value === e.target.value);
+                    if (l) { actions.updateSettings({ screenLayout: l.value }); toast({ message: `默认屏样式已切换为「${l.label}」，对所有用默认屏幕的状态生效`, seconds: 6 }); }
+                  }
+                  e.target.value = "";
+                }}>
+                <option value="">快速选择…</option>
+                <optgroup label="默认屏样式">
+                  {LAYOUTS.map((l) => <option key={l.value} value={l.value}>{l.label}{s.settings.screenLayout === l.value ? "（使用中）" : ""}</option>)}
+                </optgroup>
+                <optgroup label="自定义程序模板">
+                  {WAT_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </optgroup>
               </select>
               <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()}><FileUp />导入 .wasm</button>
               <input ref={fileRef} type="file" accept=".wasm" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickFile(f); e.target.value = ""; }} />
             </>} />
-          <div className="card-b" style={{ paddingBottom: 0 }}>
-            <SettingRow title="快捷设定 · 默认屏布局" desc="只影响显示默认屏幕的状态，会存进设备；装了程序的状态由程序自己决定画面">
-              <select className="input input-sm" value={s.settings.screenLayout} aria-label="默认屏布局"
-                onChange={(e) => actions.updateSettings({ screenLayout: e.target.value as ScreenLayout })}>
-                {LAYOUTS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
-              </select>
-            </SettingRow>
-          </div>
           <div className="card-b scr-edit">
             <div className="scr-side">
               <OledCanvas def={def} status={id} screen={screenFor(id)} keyboard nonce={nonce} onReady={setPreview} onError={setError} style={{ maxWidth: 360 }} />
@@ -295,8 +300,14 @@ export function StatusScreens() {
                 <div className="scr-empty">
                   <Tile color="violet" size={48}><LayoutTemplate /></Tile>
                   <b>「{STATUSES[id].label}」还在用默认屏幕</b>
-                  <p>选一个模板开始改，或导入本地编译好的 .wasm。程序装进设备后，每次进入「{STATUSES[id].label}」都会自动运行，网页关掉也照常显示。</p>
+                  <p>先挑个默认屏样式，或选模板写自定义程序（也可导入本地 .wasm）。程序装进设备后，每次进入「{STATUSES[id].label}」都会自动运行，网页关掉也照常显示。</p>
                   <div className="scr-tpls">
+                    {LAYOUTS.map((l) => (
+                      <button key={l.value} type="button" className={`scr-tpl scr-def ${s.settings.screenLayout === l.value ? "on" : ""}`}
+                        onClick={() => actions.updateSettings({ screenLayout: l.value })}>
+                        <b>{l.label}</b><span>默认屏样式{s.settings.screenLayout === l.value ? " · 使用中" : ""}</span>
+                      </button>
+                    ))}
                     {WAT_TEMPLATES.map((t) => (
                       <button key={t.id} type="button" className="scr-tpl" onClick={() => setDef({ kind: "wat", src: t.code })}>
                         <b>{t.name}</b><span>{t.desc}</span>
