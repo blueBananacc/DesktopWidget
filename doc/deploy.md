@@ -45,7 +45,7 @@ cd C:\Users\666\Desktop\shangxiabanbaijian\code\website
 powershell -File scripts\deploy.ps1
 ```
 
-脚本做的事：`npm run build` → `scp -r dist\* root@…:/opt/sgp-web/site/sgp/` → `curl -k https://127.0.0.1/sgp/` 健康检查。**纯静态替换，容器不用重启**。
+脚本做的事：`npm run build` → `scp -r dist\* root@…:/opt/sgp-web/site/sgp/` → `chmod -R a+rX`（**必需**：scp 可能落下 700 目录，容器内 nginx 非 root 读不到文件时会被 SPA fallback 顶包成 index.html——症状是白屏、js 请求返回 ~453B HTML）→ `curl -k https://127.0.0.1/sgp/` 健康检查。**纯静态替换，容器不用重启**。
 
 ## 设备连接原理（为什么 HTTPS 是必须的）
 
