@@ -5,8 +5,16 @@ export type Totals = Partial<Record<StatusId, number>>;
 
 export const DAY_MS = 86_400_000;
 
-/** 计入"有状态"时长的状态（下班不计） */
-export const TRACKED: StatusId[] = ["work", "focus", "busy", "meet", "rest"];
+/** 计入"有状态"时长的状态（下班不计）。自定义状态也算：除 off 外全部计入 */
+import { allStatusIds } from "./statuses";
+export const TRACKED_BUILTIN: StatusId[] = ["work", "focus", "busy", "meet", "rest"];
+export const TRACKED: StatusId[] = TRACKED_BUILTIN;
+/** 动态口径：内建 + 设备注册的自定义状态（排除 off）。数据里出现但注册表没有的未知状态也计入（statusMeta 兜底） */
+export const trackedIds = (t?: Totals): StatusId[] => {
+  const ids = allStatusIds().filter((id) => id !== "off");
+  if (t) for (const k of Object.keys(t)) if (k !== "off" && !ids.includes(k)) ids.push(k);
+  return ids;
+};
 
 export const totalsForSegments = (segments: StatusSegment[], now: number): Totals => {
   const t: Totals = {};
@@ -14,7 +22,7 @@ export const totalsForSegments = (segments: StatusSegment[], now: number): Total
   return t;
 };
 
-export const trackedSum = (t: Totals) => TRACKED.reduce((a, k) => a + (t[k] ?? 0), 0);
+export const trackedSum = (t: Totals) => trackedIds(t).reduce((a, k) => a + (t[k] ?? 0), 0);
 
 /** 相邻区间之间的空档 = 未记录（不推断） */
 export const unrecordedMs = (segments: StatusSegment[]) =>

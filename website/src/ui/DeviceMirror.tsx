@@ -1,8 +1,8 @@
 import type { StatusId } from "../domain/types";
-import { STATUSES } from "../domain/statuses";
+import { statusMeta } from "../domain/statuses";
 
 export function Oled({ status, sub, ledOn = true, glow, unknown }: { status: StatusId; sub: string; ledOn?: boolean; glow?: boolean; unknown?: boolean }) {
-  const meta = STATUSES[status];
+  const meta = statusMeta(status);
   if (unknown) {
     return (
       <div className="oled" aria-label="设备显示：未连接">

@@ -1,0 +1,12 @@
+# 前端构建产物
+node_modules/
+dist/
+*.local
+*.tsbuildinfo
+
+# 数据手册/参考资料（只存在于本地，不入库）
+example/
+0.96*/
+ESP32-S3*/
+INMP441*/
+EC11*/

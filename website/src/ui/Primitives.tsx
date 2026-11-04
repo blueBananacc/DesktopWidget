@@ -2,7 +2,7 @@ import { ChevronRight, Bluetooth, Radio, X } from "lucide-react";
 import type { HTMLAttributes, ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { DeviceInfo, StatusId } from "../domain/types";
-import { STATUSES } from "../domain/statuses";
+import { statusMeta } from "../domain/statuses";
 import { ago } from "../domain/time";
 
 export function Card({ children, className = "", ...rest }: { children: ReactNode; className?: string } & HTMLAttributes<HTMLElement>) {
@@ -35,10 +35,12 @@ export function CardHeader({ title, count, extra, to, toLabel = "查看全部", 
 }
 
 export function StatusChip({ id, children, dot = true }: { id: StatusId; children?: ReactNode; dot?: boolean }) {
+  const meta = statusMeta(id);
+  // 自定义状态没有固定样式类对应的设计令牌：用 --c 变量走 s-custom 样式
   return (
-    <span className={`chip ${STATUSES[id].className}`}>
+    <span className={`chip ${meta.className}`} style={meta.className === "s-custom" ? { ["--c" as string]: meta.color } : undefined}>
       {dot && <span className="d" />}
-      {children ?? STATUSES[id].label}
+      {children ?? meta.label}
     </span>
   );
 }
@@ -99,19 +101,19 @@ export function EmptyState({ icon, title, desc, action }: { icon: ReactNode; tit
   );
 }
 
-export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label?: string }) {
+export function Toggle({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label?: string; disabled?: boolean }) {
   return (
-    <button type="button" role="switch" aria-checked={checked} aria-label={label} className={`switch ${checked ? "on" : ""}`} onClick={() => onChange(!checked)}>
+    <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled} className={`switch ${checked ? "on" : ""}`} onClick={() => onChange(!checked)}>
       <span />
     </button>
   );
 }
 
-export function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
+export function Segmented<T extends string>({ value, options, onChange, disabled }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; disabled?: boolean }) {
   return (
     <div className="segmented">
       {options.map((o) => (
-        <button type="button" key={o.value} className={o.value === value ? "on" : ""} onClick={() => onChange(o.value)}>
+        <button type="button" key={o.value} className={o.value === value ? "on" : ""} disabled={disabled} onClick={() => onChange(o.value)}>
           {o.label}
         </button>
       ))}

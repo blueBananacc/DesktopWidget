@@ -178,7 +178,7 @@ export function RemindersPage() {
     <RowItem key={t.id} lead={lead(t)} title={titleOf(t)} desc={desc(t)} onClick={() => edit(t)}
       meta={
         <div className="row" style={{ gap: 4 }} onClick={stop}>
-          {t.trig !== "offwork" && t.at !== undefined && <input className="input num" type="time" value={hhmm(t.at)} onChange={(e) => e.target.value && actions.deviceTodoSet(t.id, { at: atToday(e.target.value, now) })} style={{ width: 96, padding: "5px 8px", fontSize: 12.5 }} aria-label="修改提醒时间" title="直接改提醒时间" />}
+          {t.trig !== "offwork" && t.at !== undefined && <input className="input num" type="time" value={hhmm(t.at)} disabled={!connected} onChange={(e) => e.target.value && actions.deviceTodoSet(t.id, { at: atToday(e.target.value, now) })} style={{ width: 96, padding: "5px 8px", fontSize: 12.5 }} aria-label="修改提醒时间" title={connected ? "直接改提醒时间" : "待办在设备上，连接后才能修改"} />}
           <button className="btn btn-secondary btn-sm" onClick={() => complete([t.id], `已完成“${t.text}”`)}><Check />完成</button>
           <button className="icon-btn" aria-label="删除" onClick={() => remove([t.id], `已删除“${t.text}”`)}><Trash2 className="i" /></button>
         </div>

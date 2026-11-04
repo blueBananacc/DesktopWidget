@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { CalendarX2, ChevronLeft, ChevronRight, Download, ShieldCheck, Trash2, Unplug } from "lucide-react";
 import { useStore } from "../store/AppStore";
-import { SOURCE_LABEL, STATUSES, STATUS_ORDER } from "../domain/statuses";
+import { SOURCE_LABEL, allStatusIds, statusMeta } from "../domain/statuses";
 import type { StatusId, StatusSegment } from "../domain/types";
 import { dateKey, duration, hhmm, pad, weekday } from "../domain/time";
-import { DAY_MS, TRACKED, dayBounds, keyToTs, lastDays, totalsForSegments, trackedSum, unrecordedMs, type Totals } from "../domain/review";
+import { DAY_MS, dayBounds, keyToTs, lastDays, totalsForSegments, trackedIds, trackedSum, unrecordedMs, type Totals } from "../domain/review";
 import { Banner, Card, CardHeader, EmptyState, Modal, PageHeader, Segmented, StatusChip } from "../ui/Primitives";
 import { WeekBars } from "../ui/WeekBars";
 import { useToast } from "../ui/Toast";
@@ -47,7 +47,7 @@ export function ReviewPage() {
       const dt = totalsOf(k);
       if (!trackedSum(dt)) continue;
       recorded++;
-      for (const id of TRACKED) t[id] = (t[id] ?? 0) + (dt[id] ?? 0);
+      for (const id of trackedIds(dt)) t[id] = (t[id] ?? 0) + (dt[id] ?? 0);
       if (k === todayKey) continue; // 今天还没过完，不计入平均开始/收工
       const b = dayBounds(segsOf(k));
       if (b.first !== undefined) starts.push(minOfDay(b.first));
@@ -82,7 +82,7 @@ export function ReviewPage() {
 
   const exportCsv = () => {
     const rows = [["日期", "开始", "结束", "状态", "时长(分钟)", "来源"]];
-    for (const k of keys) for (const g of segsOf(k)) rows.push([k, hhmm(g.start), g.end ? hhmm(g.end) : "进行中", STATUSES[g.status].label, String(Math.round(((g.end ?? now) - g.start) / 60_000)), SOURCE_LABEL[g.source]]);
+    for (const k of keys) for (const g of segsOf(k)) rows.push([k, hhmm(g.start), g.end ? hhmm(g.end) : "进行中", statusMeta(g.status).label, String(Math.round(((g.end ?? now) - g.start) / 60_000)), SOURCE_LABEL[g.source]]);
     const blob = new Blob(["\uFEFF" + rows.map((r) => r.join(",")).join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -121,10 +121,10 @@ export function ReviewPage() {
                 <div><span>平均收工</span><b className="num">{summary.avgOff !== undefined ? fmtMin(summary.avgOff) : "—"}</b></div>
               </div>
               <div className="share-bar" aria-hidden>
-                {TRACKED.map((id) => (summary.t[id] ? <i key={id} style={{ flex: summary.t[id], background: STATUSES[id].color }} /> : null))}
+                {trackedIds(summary.t).map((id) => (summary.t[id] ? <i key={id} style={{ flex: summary.t[id], background: statusMeta(id).color }} /> : null))}
               </div>
               <ul className="share-list">
-                {TRACKED.map((id) => (
+                {trackedIds(summary.t).map((id) => (
                   <li key={id}>
                     <StatusChip id={id} />
                     <span className="num">{duration(summary.t[id] ?? 0)}</span>
@@ -165,9 +165,9 @@ export function ReviewPage() {
             <>
               <div className="card-b day-body">
                 <div className="day-stats">
-                  {TRACKED.filter((id) => dayTotals[id]).map((id) => (
-                    <div key={id} className="day-stat" style={{ ["--c" as string]: STATUSES[id].color }}>
-                      <span>{STATUSES[id].label}</span>
+                  {trackedIds(dayTotals).filter((id) => dayTotals[id]).map((id) => (
+                    <div key={id} className="day-stat" style={{ ["--c" as string]: statusMeta(id).color }}>
+                      <span>{statusMeta(id).label}</span>
                       <b>{duration(dayTotals[id] ?? 0)}</b>
                       <small>{pct(dayTotals[id] ?? 0, dayAll)}%</small>
                     </div>
@@ -192,8 +192,8 @@ export function ReviewPage() {
                       const b = pos(lastOff(g) ? hi : endMinRaw(g, day, now));
                       if (b - a <= 0) return null;
                       return (
-                        <div key={`${g.start}-${i}`} style={{ left: `${a}%`, width: `${b - a}%`, background: STATUSES[g.status].color }} title={`${hhmm(g.start)}–${g.end ? hhmm(g.end) : "现在"} ${STATUSES[g.status].label}`}>
-                          {b - a > 7 ? STATUSES[g.status].label : ""}
+                        <div key={`${g.start}-${i}`} style={{ left: `${a}%`, width: `${b - a}%`, background: statusMeta(g.status).color }} title={`${hhmm(g.start)}–${g.end ? hhmm(g.end) : "现在"} ${statusMeta(g.status).label}`}>
+                          {b - a > 7 ? statusMeta(g.status).label : ""}
                         </div>
                       );
                     })}
@@ -227,7 +227,8 @@ export function ReviewPage() {
                           <td className="hint">{SOURCE_LABEL[g.source]}</td>
                           <td>
                             <select className="input input-sm" value={g.status} onChange={(e) => actions.editSegment(i, e.target.value as StatusId, day)} aria-label="修正状态">
-                              {STATUS_ORDER.map((id) => <option key={id} value={id}>{STATUSES[id].label}</option>)}
+                              {!allStatusIds().includes(g.status) && <option value={g.status}>{statusMeta(g.status).label}（已删除）</option>}
+                              {allStatusIds().map((id) => <option key={id} value={id}>{statusMeta(id).label}</option>)}
                             </select>
                           </td>
                         </tr>,

@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { BookmarkPlus, Code2, Copy, Eraser, FileUp, Image, LayoutTemplate, Play, ShieldCheck, Upload, Cpu, TriangleAlert, HardDrive, X } from "lucide-react";
+import { BookmarkPlus, Code2, Copy, Eraser, FileUp, Image, LayoutTemplate, Play, Plus, ShieldCheck, Trash2, Upload, Cpu, TriangleAlert, HardDrive, X } from "lucide-react";
 import { WAT_TEMPLATES } from "../domain/watTemplates";
 import { APP_H, APP_MAX_BYTES, APP_W, clearApp, deployedHashes, drawDefaultScreen, hashBytes, pendingClears, previewScreen, screenBytes, sendApp, setDeployedHash, setPendingClears, u8ToB64, validateApp, type DefaultScreen, type ScreenPreview } from "../device/app";
 import { getTransport, toOutbound, useStore } from "../store/AppStore";
-import { STATUSES, STATUS_ORDER } from "../domain/statuses";
+import { allStatusIds, statusApiIndex, statusMeta } from "../domain/statuses";
 import type { DeviceApp, ScreenDef, ScreenPreset, StatusId } from "../domain/types";
 import { atToday, hhmm } from "../domain/time";
 import { nextNode, scheduleForDay } from "../domain/schedule";
-import { Banner, Card, CardHeader, StatusChip, Tile } from "../ui/Primitives";
+import { Banner, Card, CardHeader, Modal, StatusChip, Tile, Toggle } from "../ui/Primitives";
 import { useToast } from "../ui/Toast";
 
 
@@ -43,7 +43,7 @@ function OledCanvas({ def, status, screen, keyboard, nonce = 0, onReady, onError
       try {
         const bytes = await screenBytes(def);
         if (!alive || !ref.current) return;
-        p = await previewScreen(bytes, ref.current, { status: STATUS_ORDER.indexOf(status), keyboard, onError, segStart, nodeMin });
+        p = await previewScreen(bytes, ref.current, { status: statusApiIndex(status), keyboard, onError, segStart, nodeMin });
         if (!alive) { p.stop(); return; }
         onError?.("");
         onReady?.(p);
@@ -61,6 +61,47 @@ function OledCanvas({ def, status, screen, keyboard, nonce = 0, onReady, onError
     <div className="scr-oled" style={style}>
       <canvas ref={ref} width={APP_W} height={APP_H} />
     </div>
+  );
+}
+
+/** 新状态调色板：沿用设计语言的状态色系 + 两个扩展色 */
+const CUST_COLORS = ["#22A06B", "#E5484D", "#B4232C", "#7C5CFA", "#0EA5B7", "#D97706", "#DB2777", "#4C5CF6", "#6B7280"];
+
+/** 新建自定义状态：写进设备注册表（stdef），之后每个状态的屏幕格/按键/计划表都能用它 */
+function AddStatusDialog({ onClose, onCreate }: { onClose: () => void; onCreate: (d: { id: string; zh: string; hint?: string; c: number; work: boolean }) => void }) {
+  const [name, setName] = useState("");
+  const [hint, setHint] = useState("");
+  const [color, setColor] = useState(CUST_COLORS[3]);
+  const [work, setWork] = useState(false);
+  const valid = name.trim().length > 0 && name.trim().length <= 6;
+  return (
+    <Modal title="新建自定义状态" onClose={onClose}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>取消</button>
+        <button className="btn btn-primary" disabled={!valid}
+          onClick={() => onCreate({ id: `c${Math.random().toString(36).slice(2, 6)}`, zh: name.trim(), hint: hint.trim() || undefined, c: parseInt(color.slice(1), 16), work })}>
+          创建
+        </button>
+      </>}>
+      <div className="form">
+        <label>名称（屏幕大字，建议 ≤4 个汉字）<input className="input" value={name} maxLength={6} placeholder="例如：直播中" autoFocus onChange={(e) => setName(e.target.value)} /></label>
+        <label>说明行（可选）<input className="input" value={hint} maxLength={10} placeholder="例如：下播后找我" onChange={(e) => setHint(e.target.value)} /></label>
+        <div>
+          <div className="form-label">状态颜色（网页与 RGB 灯共用）</div>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            {CUST_COLORS.map((c) => (
+              <button key={c} type="button" aria-label={c} className={`cust-swatch${color === c ? " on" : ""}`} style={{ background: c }} onClick={() => setColor(c)} />
+            ))}
+            <input type="color" className="cust-color" value={color} onChange={(e) => setColor(e.target.value)} title="自选颜色" />
+          </div>
+        </div>
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <div><b style={{ fontSize: 14 }}>计入工作时长</b><div className="hint">开着时累计“工作类”时长，到点触发休息提醒</div></div>
+          <Toggle checked={work} onChange={setWork} />
+        </div>
+        <p className="hint" style={{ margin: 0 }}>状态定义存进设备注册表（最多 8 个）。创建后可以给它写自定义屏幕、绑按键、排进计划表，断电不丢。</p>
+      </div>
+    </Modal>
   );
 }
 
@@ -91,12 +132,14 @@ export function StatusScreens() {
   const [deployed, setDeployed] = useState(deployedHashes);
   const [sent, setSent] = useState<number | null>(null);
   const [nonce, setNonce] = useState(0);
+  const [addOpen, setAddOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+  const isCustom = s.customStatuses.some((c) => c.id === id);
 
   const screenFor = (x: StatusId): DefaultScreen => ({
-    main: STATUSES[x].screen,
-    sub: x === s.current.id ? toOutbound(s).sub : STATUSES[x].hint,
+    main: statusMeta(x).screen,
+    sub: x === s.current.id ? toOutbound(s).sub : statusMeta(x).hint,
     clock: hhmm(now),
     connected: connected && device.kind === "ble",
     layout: s.settings.screenLayout,
@@ -131,11 +174,11 @@ export function StatusScreens() {
     setSent(0);
     try {
       const bytes = await screenBytes(def);
-      const bad = await validateApp(bytes, STATUS_ORDER.indexOf(id)); // 先在本机完整跑约 10 帧，有错不写进设备
+      const bad = await validateApp(bytes, statusApiIndex(id)); // 先在本机完整跑约 10 帧，有错不写进设备
       if (bad) { setError(bad); toast({ message: `代码运行出错，没有上传：${bad}`, seconds: 8 }); return; }
       await sendApp(t, id, bytes, setSent);
       setDeployedHash(id, hashBytes(bytes)); setDeployed(deployedHashes());
-      toast({ message: `已写入设备「${STATUSES[id].label}」屏幕：进入该状态自动运行，断电不丢`, seconds: 8 });
+      toast({ message: `已写入设备「${statusMeta(id).label}」屏幕：进入该状态自动运行，断电不丢`, seconds: 8 });
     } catch (e) {
       toast({ message: `上传失败：${e instanceof Error ? e.message : e}`, seconds: 8 });
     } finally {
@@ -157,7 +200,7 @@ export function StatusScreens() {
       setPendingClears([...new Set([...pendingClears(), id])]); // 记住这次清除，连上设备后真正发 clear
     }
     setDeployedHash(id); setDeployed(deployedHashes());
-    toast({ message: `「${STATUSES[id].label}」已恢复默认屏幕${connected ? "" : "；设备上的程序会在下次连接时一并清除"}`, seconds: 6 });
+    toast({ message: `「${statusMeta(id).label}」已恢复默认屏幕${connected ? "" : "；设备上的程序会在下次连接时一并清除"}`, seconds: 6 });
   };
 
   /** 把当前 WAT 改动存成一块"我的屏幕块"：之后在任何状态的模板区都能选它复用 */
@@ -176,7 +219,7 @@ export function StatusScreens() {
 
   const copyForAgent = async () => {
     const text = [
-      `请为一块 ESP32 桌牌（收工牌）写一个小屏幕程序。这份程序将装到状态「${STATUSES[id].label}」（status()=${STATUS_ORDER.indexOf(id)}），设备每次进入该状态就自动运行它。我会把产出的代码贴进配套网页，由网页编译并上传到设备执行。你不需要了解这个项目的其他背景，下面就是全部契约。`,
+      `请为一块 ESP32 桌牌（收工牌）写一个小屏幕程序。这份程序将装到状态「${statusMeta(id).label}」（status()=${statusApiIndex(id)}），设备每次进入该状态就自动运行它。我会把产出的代码贴进配套网页，由网页编译并上传到设备执行。你不需要了解这个项目的其他背景，下面就是全部契约。`,
       "",
       "【屏幕】",
       "128×64 单色 OLED：每像素只有亮/灭，没有灰度和颜色。坐标原点左上角，x 向右 0–127，y 向下 0–63。小屏建议：文字 ≥10px，元素间隙 ≥2px，避免大面积常亮（OLED 烧屏）。",
@@ -246,7 +289,7 @@ export function StatusScreens() {
     await navigator.clipboard.writeText(text).then(() => toast({ message: "已复制给 Agent 的说明，粘贴给它即可" }), () => toast({ message: "复制失败，请手动查看 doc/display-app-spec.md" }));
   };
 
-  const customCount = STATUS_ORDER.filter((x) => hasCode(s.settings.customScreens[x]) || (known && device.apps?.[x])).length;
+  const customCount = allStatusIds().filter((x) => hasCode(s.settings.customScreens[x]) || (known && device.apps?.[x])).length;
   const appErr = device.appErr && device.appErr.status === id ? device.appErr : undefined;
   const uploading = sent !== null;
   // 设备只报大小：大小不同必然没装；大小相同再比本机记录的上传指纹（没有记录则按大小判断）
@@ -259,7 +302,7 @@ export function StatusScreens() {
         <CardHeader icon={<Tile color="violet" size={30}><Image /></Tile>} title="各状态屏幕" count={customCount || undefined} />
         <div className="card-b">
           <div className="scr-grid">
-            {STATUS_ORDER.map((x) => {
+            {allStatusIds().map((x) => {
               const d = s.settings.customScreens[x];
               const a = known ? device.apps?.[x] : undefined;
               const so = x === id ? src : sourceOf(d, a, known); // 选中项用编辑器里带指纹比对的结果，保持两处一致
@@ -273,15 +316,28 @@ export function StatusScreens() {
                   <div className="scr-cap">
                     <StatusChip id={x} />
                     {x === s.current.id && <span className="badge b-new">当前</span>}
+                    {s.customStatuses.some((c) => c.id === x) && <span className="badge b-new" title="设备注册表 /stdefs.json 中的自定义状态">自定义</span>}
                   </div>
                   <span className={TONE_CLASS[so.tone]}>{so.label}</span>
                 </button>
               );
             })}
+            <button
+              type="button"
+              className="scr-cell scr-add"
+              disabled={!connected || s.customStatuses.length >= 8}
+              title={!connected ? "状态注册表在设备上，连接后才能新建" : s.customStatuses.length >= 8 ? "最多 8 个自定义状态（设备注册表容量上限）" : "新建一个自定义状态（写入设备注册表）"}
+              onClick={() => setAddOpen(true)}
+            >
+              <div className="scr-oled scr-add-oled"><Plus /><span>新状态</span></div>
+              <div className="scr-cap"><span className="chip s-custom">自定义</span></div>
+              <span className="scr-tag">{connected ? "写入设备" : "需连接设备"}</span>
+            </button>
           </div>
           <p className="hint" style={{ margin: "16px 0 0" }}>
             点任意一格可在下方编辑。自定义屏幕的画面完全由程序决定；待办提醒和休息提醒会临时盖住任何屏幕。
-            {!connected && " 设备未连接：标记是本机记录，连接后以设备上报为准，设备上独有的程序会自动取回来显示。"}
+            自定义状态有自己的名字、颜色和说明行，可以像内建状态一样被按键/计划表/语音切换。
+            {!connected && " 设备未连接：屏幕内容和状态定义都以设备为准，这里显示的是上次同步的镜像；新建/删除状态需连接设备。"}
             {connected && device.apps === undefined && " 设备没有上报安装清单，固件需要升级到 0.5 以上才能核对。"}
           </p>
         </div>
@@ -289,9 +345,23 @@ export function StatusScreens() {
 
       <div ref={editorRef} style={{ scrollMarginTop: 20 }}>
         <Card style={{ marginBottom: 20 }}>
-          <CardHeader icon={<Tile color="blue" size={30}><Code2 /></Tile>} title={<>编辑屏幕 · {STATUSES[id].label}</>}
+          <CardHeader icon={<Tile color="blue" size={30}><Code2 /></Tile>} title={<>编辑屏幕 · {statusMeta(id).label}</>}
             extra={<>
               <span className={TONE_CLASS[src.tone]}>{src.label}</span>
+              {isCustom && (
+                <button className="btn btn-danger btn-sm"
+                  disabled={!connected}
+                  title={connected ? "从设备注册表删除这个自定义状态" : "状态注册表在设备上，连接后才能删除"}
+                  onClick={() => {
+                    const meta = statusMeta(id);
+                    const usedBy = s.schedules.filter((sc) => sc.nodes.some((n) => n.status === id)).length;
+                    const usedTip = usedBy ? `\n有 ${usedBy} 张计划表正在使用它，删除后这些表需修正状态才能设为当前计划。` : "";
+                    if (!confirm(`删除自定义状态「${meta.label}」？设备注册表和它的自定义屏幕都会移除；正在使用时会退回“工作中”。${usedTip}\n历史回顾里的记录会保留原名。`)) return;
+                    actions.stdefDel(id);
+                    select("work");
+                    toast({ message: `已删除「${meta.label}」` });
+                  }}><Trash2 />删除状态</button>
+              )}
               <button className="btn btn-secondary btn-sm" onClick={() => void copyForAgent()}><Copy />复制给 Agent</button>
               <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()}><FileUp />导入 .wasm</button>
               <input ref={fileRef} type="file" accept=".wasm" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickFile(f); e.target.value = ""; }} />
@@ -323,8 +393,8 @@ export function StatusScreens() {
               {!hasCode(def) ? (
                 <div className="scr-empty">
                   <Tile color="violet" size={48}><LayoutTemplate /></Tile>
-                  <b>「{STATUSES[id].label}」还在用默认屏幕</b>
-                  <p>{app ? "设备上装过这个状态的程序，但本机没有源码——重新写一个会覆盖它。" : "默认屏幕是设备自带画面，不用装程序。"}想换花样：选一个模板开始改，或导入本地 .wasm。程序装进设备后，每次进入「{STATUSES[id].label}」都会自动运行，网页关掉也照常显示。</p>
+                  <b>「{statusMeta(id).label}」还在用默认屏幕</b>
+                  <p>{app ? "设备上装过这个状态的程序，但本机没有源码——重新写一个会覆盖它。" : "默认屏幕是设备自带画面，不用装程序。"}想换花样：选一个模板开始改，或导入本地 .wasm。程序装进设备后，每次进入「{statusMeta(id).label}」都会自动运行，网页关掉也照常显示。</p>
                   <div className="scr-tpls">
                     {app ? (
                       <button type="button" className="scr-tpl scr-def" onClick={() => void restore()}>
@@ -422,6 +492,17 @@ export function StatusScreens() {
           </div>
         </Card>
       </div>
+      {addOpen && (
+        <AddStatusDialog
+          onClose={() => setAddOpen(false)}
+          onCreate={(d) => {
+            actions.stdefSet(d);
+            setAddOpen(false);
+            select(d.id);
+            toast({ message: `已创建状态「${d.zh}」并写入设备注册表`, seconds: 5 });
+          }}
+        />
+      )}
     </>
   );
 }

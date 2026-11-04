@@ -1,7 +1,7 @@
 import type { StatusId, StatusSegment } from "../domain/types";
-import { STATUSES } from "../domain/statuses";
+import { statusMeta } from "../domain/statuses";
 import { WEEK_SHORT, duration } from "../domain/time";
-import { TRACKED, lastDays, totalsForSegments, trackedSum } from "../domain/review";
+import { lastDays, totalsForSegments, trackedIds, trackedSum } from "../domain/review";
 
 export { totalsForSegments };
 
@@ -35,7 +35,7 @@ export function WeekBars({ history, segments, now, todayKey, days = 5, selected,
         {cols.map((c) => {
           const h = `${c.sum ? Math.max(4, (c.sum / max) * 100) : 3}%`;
           const title = `${c.key} · ${c.sum ? duration(c.sum) : "无记录"}`;
-          const stack = TRACKED.map((k) => (c.totals[k] ? <i key={k} style={{ flex: c.totals[k], background: STATUSES[k].color }} /> : null));
+          const stack = trackedIds(c.totals).map((k) => (c.totals[k] ? <i key={k} style={{ flex: c.totals[k], background: statusMeta(k).color }} /> : null));
           return onSelect ? (
             <button type="button" key={c.key} className={`bar-col${selected === c.key ? " on" : ""}`} onClick={() => onSelect(c.key)} title={title} aria-label={title} aria-pressed={selected === c.key}>
               <span className={`bar${c.sum ? "" : " empty"}`} style={{ height: h }}>{stack}</span>
@@ -51,8 +51,8 @@ export function WeekBars({ history, segments, now, todayKey, days = 5, selected,
         ))}
       </div>
       <div className="legend">
-        {TRACKED.map((k) => (
-          <span key={k} style={{ ["--c" as string]: STATUSES[k].color }}>{STATUSES[k].label}</span>
+        {trackedIds(Object.assign({}, ...cols.map((c) => c.totals))).map((k) => (
+          <span key={k} style={{ ["--c" as string]: statusMeta(k).color }}>{statusMeta(k).label}</span>
         ))}
       </div>
     </>

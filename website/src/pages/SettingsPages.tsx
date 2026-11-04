@@ -1,44 +1,50 @@
 import { Link } from "react-router-dom";
 import {
-  Fingerprint, Keyboard, Gauge, Image, Palette, Sparkles, ShieldCheck, Moon, BarChart3, Monitor, ChevronRight, RotateCcw, Sunset,
+  Fingerprint, Keyboard, Gauge, Image, Palette, Sparkles, ShieldCheck, Moon, BarChart3, Monitor, ChevronRight, RotateCcw, Sunset, Unplug,
 } from "lucide-react";
 import { useStore } from "../store/AppStore";
-import { STATUSES, STATUS_ORDER } from "../domain/statuses";
+import { allStatusIds, statusMeta } from "../domain/statuses";
 import type { AgentState, KeyAction, LedMode, Settings, StatusId } from "../domain/types";
 import { ago } from "../domain/time";
 import { Banner, Card, CardHeader, PageHeader, RowItem, Segmented, SettingRow, Tile, Toggle } from "../ui/Primitives";
 import { StatusScreens } from "./StatusScreens";
 import { useToast } from "../ui/Toast";
 
-const KEY_ACTIONS: { value: KeyAction; label: string }[] = [
+const KEY_ACTIONS_BUILTIN: { value: KeyAction; label: string }[] = [
   { value: "offwork", label: "收工（结束今天）" },
   { value: "focus25", label: "开始 25 分钟专注" },
   { value: "pauseToday", label: "暂停/恢复今日计划" },
-  ...STATUS_ORDER.map((id) => ({ value: id as KeyAction, label: `切换为${STATUSES[id].label}` })),
+];
+// 状态选项动态生成（含设备注册的自定义状态），KEY_ACTIONS_BUILTIN 前缀保持在前
+const keyActionOptions = () => [
+  ...KEY_ACTIONS_BUILTIN,
+  ...allStatusIds().map((id) => ({ value: id as KeyAction, label: `切换为${statusMeta(id).label}` })),
 ];
 
-const KeySelect = ({ value, onChange }: { value: KeyAction; onChange: (v: KeyAction) => void }) => (
-  <select className="input input-sm" value={value} onChange={(e) => onChange(e.target.value as KeyAction)}>
-    {KEY_ACTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+const KeySelect = ({ value, onChange, disabled }: { value: KeyAction; onChange: (v: KeyAction) => void; disabled?: boolean }) => (
+  <select className="input input-sm" value={value} disabled={disabled} onChange={(e) => onChange(e.target.value as KeyAction)}>
+    {keyActionOptions().map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
   </select>
 );
 
 export function ControlsPage() {
-  const { s, actions } = useStore();
+  const { s, actions, device } = useStore();
+  const connected = device.state === "connected";
   const set = (p: Partial<Settings>) => actions.updateSettings(p);
   return (
     <>
       <PageHeader title="触摸与快捷键" desc="设置桌牌上的触摸区、自定义快捷键和旋钮。收工键的“长按确认”规则不能被修改。" />
+      {!connected && <Banner tone="warn" icon={<Unplug />}>设备未连接：按键映射存在设备上，连接后才能查看和修改。</Banner>}
       <div className="grid g-cards">
         <Card>
           <CardHeader icon={<Tile color="blue" size={30}><Keyboard /></Tile>} title="按键映射" extra={<span className="badge b-new">K1–K4</span>} />
           <div className="card-b form">
-            <SettingRow title="K1 · 收工键" desc="默认收工；长按确认规则见下方卡片"><KeySelect value={s.settings.keys.k1} onChange={(v) => set({ keys: { ...s.settings.keys, k1: v } })} /></SettingRow>
-            <SettingRow title="K2 · 快捷键" desc="单击触发"><KeySelect value={s.settings.keys.k2} onChange={(v) => set({ keys: { ...s.settings.keys, k2: v } })} /></SettingRow>
-            <SettingRow title="K3 · 触摸区·左" desc="轻触触发"><KeySelect value={s.settings.keys.k3} onChange={(v) => set({ keys: { ...s.settings.keys, k3: v } })} /></SettingRow>
-            <SettingRow title="K4 · 触摸区·右" desc="轻触触发"><KeySelect value={s.settings.keys.k4} onChange={(v) => set({ keys: { ...s.settings.keys, k4: v } })} /></SettingRow>
-            <p className="hint" style={{ margin: 0 }}>四个按键都可自定义。当前按下已是目标状态时不会再切换或闪烁屏幕。K3/K4 暂由按键模块代行，触摸电极接好后语义不变。</p>
-            <button className="btn btn-ghost btn-sm" style={{ justifySelf: "start" }} onClick={() => set({ keys: { k1: "offwork", k2: "busy", k3: "work", k4: "busy" } })}><RotateCcw />恢复默认</button>
+            <SettingRow title="K1 · 收工键" desc="默认收工；长按确认规则见下方卡片"><KeySelect disabled={!connected} value={s.settings.keys.k1} onChange={(v) => set({ keys: { ...s.settings.keys, k1: v } })} /></SettingRow>
+            <SettingRow title="K2 · 快捷键" desc="单击触发"><KeySelect disabled={!connected} value={s.settings.keys.k2} onChange={(v) => set({ keys: { ...s.settings.keys, k2: v } })} /></SettingRow>
+            <SettingRow title="K3 · 触摸区·左" desc="轻触触发"><KeySelect disabled={!connected} value={s.settings.keys.k3} onChange={(v) => set({ keys: { ...s.settings.keys, k3: v } })} /></SettingRow>
+            <SettingRow title="K4 · 触摸区·右" desc="轻触触发"><KeySelect disabled={!connected} value={s.settings.keys.k4} onChange={(v) => set({ keys: { ...s.settings.keys, k4: v } })} /></SettingRow>
+            <p className="hint" style={{ margin: 0 }}>四个按键都可自定义，写入设备后断电保留。当前按下已是目标状态时不会再切换或闪烁屏幕。K3/K4 暂由按键模块代行，触摸电极接好后语义不变。</p>
+            <button className="btn btn-ghost btn-sm" style={{ justifySelf: "start" }} disabled={!connected} onClick={() => set({ keys: { k1: "offwork", k2: "busy", k3: "work", k4: "busy" } })}><RotateCcw />恢复默认</button>
           </div>
         </Card>
         <Card>
@@ -74,18 +80,20 @@ const LED_OPTS: { value: LedMode; label: string }[] = [
 ];
 
 export function LightingPage() {
-  const { s, actions } = useStore();
+  const { s, actions, device } = useStore();
+  const connected = device.state === "connected";
   return (
     <>
       <PageHeader title="灯效" desc="RGB 灯只用来辅助远距离识别，屏幕文字才是状态的准确信息。灯光默认低亮，可以完全关闭。" />
+      {!connected && <Banner tone="warn" icon={<Unplug />}>设备未连接：灯效设置存在设备上，连接后才能查看和修改。</Banner>}
       <div className="cols">
         <Card>
           <CardHeader icon={<Tile color="pink" size={30}><Palette /></Tile>} title="每个状态的灯光" />
-          {STATUS_ORDER.map((id) => (
+          {allStatusIds().map((id) => (
             <RowItem key={id}
-              lead={<span className="swatch-led" style={{ background: s.settings.led[id] === "off" ? "var(--line-2)" : STATUSES[id].color, boxShadow: s.settings.led[id] === "off" ? "none" : `0 0 10px 1px ${STATUSES[id].color}` }} />}
-              title={STATUSES[id].label}
-              meta={<Segmented value={s.settings.led[id]} options={LED_OPTS} onChange={(v) => actions.updateSettings({ led: { ...s.settings.led, [id]: v } })} />}
+              lead={<span className="swatch-led" style={{ background: s.settings.led[id] === "off" ? "var(--line-2)" : statusMeta(id).color, boxShadow: s.settings.led[id] === "off" ? "none" : `0 0 10px 1px ${statusMeta(id).color}` }} />}
+              title={statusMeta(id).label}
+              meta={<Segmented disabled={!connected} value={s.settings.led[id] ?? "solid"} options={LED_OPTS} onChange={(v) => actions.updateSettings({ led: { ...s.settings.led, [id]: v } })} />}
             />
           ))}
         </Card>
@@ -93,10 +101,10 @@ export function LightingPage() {
           <Card>
             <div className="card-b form">
               <SettingRow title="亮度" desc={`${s.settings.ledBrightness}%`}>
-                <input type="range" min={5} max={100} step={5} value={s.settings.ledBrightness} onChange={(e) => actions.updateSettings({ ledBrightness: Number(e.target.value) })} />
+                <input type="range" min={5} max={100} step={5} value={s.settings.ledBrightness} disabled={!connected} onChange={(e) => actions.updateSettings({ ledBrightness: Number(e.target.value) })} />
               </SettingRow>
-              <SettingRow title="夜间自动关灯" desc="22:00 – 07:00"><Toggle checked={s.settings.ledNightOff} onChange={(v) => actions.updateSettings({ ledNightOff: v })} /></SettingRow>
-              <button className="btn btn-secondary" onClick={() => actions.updateSettings({ led: Object.fromEntries(STATUS_ORDER.map((id) => [id, "off"])) as Settings["led"] })}><Moon />无灯光模式</button>
+              <SettingRow title="夜间自动关灯" desc="22:00 – 07:00"><Toggle checked={s.settings.ledNightOff} disabled={!connected} onChange={(v) => actions.updateSettings({ ledNightOff: v })} /></SettingRow>
+              <button className="btn btn-secondary" disabled={!connected} onClick={() => actions.updateSettings({ led: Object.fromEntries(allStatusIds().map((id) => [id, "off"])) as Settings["led"] })}><Moon />无灯光模式</button>
             </div>
           </Card>
         </div>
@@ -153,7 +161,7 @@ export function SettingsPage() {
             <CardHeader title="手机勿扰联动" extra={<span className="badge b-warn">需手机 App</span>} />
             <div className="card-b form">
               {(["work", "busy", "focus", "meet"] as StatusId[]).map((id) => (
-                <SettingRow key={id} title={`进入“${STATUSES[id].label}”时开启手机勿扰`}>
+                <SettingRow key={id} title={`进入“${statusMeta(id).label}”时开启手机勿扰`}>
                   <Toggle checked={!!s.settings.phoneDnd[id]} onChange={(v) => set({ phoneDnd: { ...s.settings.phoneDnd, [id]: v } })} />
                 </SettingRow>
               ))}

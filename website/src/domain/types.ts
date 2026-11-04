@@ -1,4 +1,14 @@
-export type StatusId = "work" | "busy" | "focus" | "meet" | "rest" | "off";
+/** 状态 id：6 个内建（work/busy/focus/meet/rest/off）+ 设备注册表里的自定义状态（c 开头 ≤7 字符）。显示元数据一律经 statusMeta() 查询，不要直接索引 STATUSES */
+export type StatusId = string;
+
+/** 自定义状态（事实源在设备注册表 /stdefs.json，网页 customStatuses 只是 stdefs 快照的镜像）。id 形如 c3f9a；color=#RRGGBB */
+export interface CustomStatusDef {
+  id: string;
+  name: string;     // 屏显名（wqy16 大字，≤4 汉字为宜）
+  hint?: string;    // 说明行小字
+  color: string;    // #RRGGBB，网页与 RGB 灯共用
+  workLike: boolean; // 计入工作时长/休息提醒
+}
 
 export type StatusSource = "manual" | "touch" | "shortcut" | "schedule" | "timer" | "agent" | "offwork" | "device";
 

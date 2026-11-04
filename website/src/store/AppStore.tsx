@@ -1,14 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type {
-  AgentState, CurrentStatus, DeviceInfo, KeyAction, Member, Reminder, Schedule, Settings, StatusId, StatusSegment, StatusSource,
+  AgentState, CurrentStatus, CustomStatusDef, DeviceInfo, KeyAction, Member, Reminder, Schedule, Settings, StatusId, StatusSegment, StatusSource,
 } from "../domain/types";
-import { STATUSES } from "../domain/statuses";
+import { cacheStatusNames, loadStatusNameCache, setCustomStatusDefs, statusMeta, statusNameCache } from "../domain/statuses";
 import { atToday, dateKey, hhmm, startOfDay, uid } from "../domain/time";
-import { currentNode, nextNode, scheduleForDay } from "../domain/schedule";
 import { lastDays, totalsForSegments } from "../domain/review";
-import { defaultSettings, initialStatus, seedMembers, seedPast, seedReminders, seedSchedules, seedSegments } from "./seed";
-import type { DevSched, DeviceTodo, DeviceTransport, InboundMessage, OutboundMessage } from "../device/protocol";
+import { defaultSettings, seedMembers, seedReminders } from "./seed";
+import type { DevSched, DevStdef, DeviceTodo, DeviceTransport, InboundMessage, OutboundMessage } from "../device/protocol";
 import { MockTransport } from "../device/mockTransport";
 import { BleTransport } from "../device/bleTransport";
 import { SerialTransport } from "../device/serialTransport";
@@ -30,8 +29,26 @@ let breakPending: { minutes?: number; enabled?: boolean; offToday?: boolean } | 
 let pendingSegs: { status: StatusId; start: number; end?: number }[] = [];
 /** app dump 读回分片累积器 */
 let appDumpAcc: { status: string; parts: string[] } = { status: "", parts: [] };
-/** 旧版网页计划表存档：设备清单成为事实源后，首次连接且设备为空时一次性迁入设备 */
-let legacySched: { schedules: Schedule[]; activeId: string } | null = null;
+/** 最近一次收到设备上行消息的时刻：真实传输 15s 无消息即判死（串口假连接——设备断电但端口仍可打开） */
+let lastInboundAt = 0;
+/** 计划表/自定义状态：事实源在设备（网页仅镜像 + 下发 ops），快照整表替换 */
+const schedSetMsg = (sc: Schedule): Extract<OutboundMessage, { type: "sched" }> => ({
+  type: "sched", op: "set", id: sc.id, name: sc.name, kind: sc.kind,
+  wd: sc.kind === "repeat" ? sc.weekdays : undefined,
+  date: sc.kind === "date" ? sc.date : undefined,
+  ns: sc.nodes.map((n) => ({ t: n.time, st: n.status, ...(n.note ? { n: n.note } : {}) })),
+});
+const schedToMirror = (x: DevSched): Schedule => ({
+  id: x.id, name: x.name, kind: x.kind,
+  weekdays: x.kind === "repeat" ? x.wd ?? [] : [],
+  date: x.kind === "date" ? x.date : undefined,
+  nodes: (x.ns ?? []).map((n) => ({ id: uid(), time: n.t, status: n.st, note: n.n })),
+});
+const stdefToMirror = (d: DevStdef): CustomStatusDef => ({
+  id: d.id, name: d.zh, hint: d.hint,
+  color: `#${(d.c ?? 0x8899aa).toString(16).padStart(6, "0")}`,
+  workLike: !!d.work,
+});
 const sendBreak = (patch: { minutes?: number; enabled?: boolean; offToday?: boolean; accumMs?: number }, s: AppState) => {
   const { accumMs, ...persistent } = patch;
   if (Object.keys(persistent).length) breakPending = { ...breakPending, ...persistent };
@@ -77,7 +94,9 @@ export interface AppState {
   history: Record<string, Partial<Record<StatusId, number>>>;
   /** 已归档日期的状态区间（今天的在 segments），用于回顾页查看某天详情 */
   historySegments: Record<string, StatusSegment[]>;
+  /** 计划表镜像：事实源在设备 /schedules.json（schedules 快照整表替换）；断连只读、刷新清空等重推 */
   schedules: Schedule[];
+  /** 当前生效的重复计划 id：设备执行态（schedules 快照 act 采纳） */
   activeScheduleId: string;
   day: string;
   pausedToday: boolean;
@@ -100,6 +119,10 @@ export interface AppState {
   user: { name: string; team: string; zone: string };
   /** 待办事实源（设备 LittleFS 的 todos 推送）：agent/网页 todo 消息写入设备，网页只是视图 */
   deviceTodos: DeviceTodo[];
+  /** 自定义状态镜像：事实源在设备 /stdefs.json（stdefs 快照整表替换）；断连只读、刷新清空等重推 */
+  customStatuses: CustomStatusDef[];
+  /** 见过的状态名/色缓存：定义删除后，历史回顾仍按原名字展示（历史是记录不随定义删除） */
+  statusNameCache: Record<string, { name: string; color: string }>;
   /** 设备端 agent 循环状态（设备是循环主体，网页只是 LLM 代理） */
   deviceAgent: { busy: boolean; reply?: string; err?: string; at: number };
 }
@@ -107,24 +130,17 @@ export interface AppState {
 type Snapshot = Pick<AppState, "current" | "segments" | "offworkToday" | "timer">;
 
 const createInitial = (now: number): AppState => {
-  const schedules = seedSchedules();
-  const sched = scheduleForDay(schedules, "weekday", now);
-  const node = currentNode(sched, now);
-  const segments = sched ? seedSegments(sched, now) : [];
-  const status = initialStatus(sched, now);
-  const next = nextNode(sched, now);
-  const past = seedPast(now);
   return {
-    current: { id: status, source: node ? "schedule" : "manual", since: segments.at(-1)?.start ?? now, until: next ? atToday(next.time, now) : undefined },
-    segments: segments.length ? segments : [{ status, source: "manual", start: now }],
-    history: past.history,
-    historySegments: past.segments,
-    schedules,
-    activeScheduleId: "weekday",
+    current: { id: "work", source: "manual", since: now, until: undefined },
+    segments: [], // 今天的区间是设备事实：连接后由 seg 推送填充，网页不虚构记录
+    history: {},
+    historySegments: {},
+    schedules: [],
+    activeScheduleId: "",
     day: dateKey(now),
     pausedToday: false,
-    offworkToday: status === "off",
-    lastAppliedNode: node ? `${dateKey(now)}:${node.id}` : undefined,
+    offworkToday: false,
+    lastAppliedNode: undefined,
     reminders: seedReminders(now),
     members: seedMembers(now),
     settings: defaultSettings,
@@ -135,6 +151,8 @@ const createInitial = (now: number): AppState => {
     agent: { state: "needsInput", task: "重构登录模块", updatedAt: now - 3 * 60_000 },
     user: { name: "阿杰", team: "3 楼设计组", zone: "3 楼设计组" },
     deviceTodos: [],
+    customStatuses: [],
+    statusNameCache: {},
     deviceAgent: { busy: false, at: 0 },
   };
 };
@@ -147,8 +165,9 @@ const load = (now: number): AppState => {
       // 旧版本字段迁移：touchLeft/touchRight/shortcut → keys.k3/k4/k2
       const legacy = saved.settings as Settings & { touchLeft?: StatusId; touchRight?: StatusId; shortcut?: KeyAction };
       const keys = saved.settings.keys ?? { k1: "offwork" as const, k2: legacy.shortcut ?? "busy", k3: legacy.touchLeft ?? "work", k4: legacy.touchRight ?? "busy" };
-      // 旧版本只存了每日汇总，没有区间：换成可查看详情的演示历史
-      const past = saved.historySegments ? undefined : seedPast(now);
+      // 名字缓存灌注册表：已删状态的历史仍能显示原名；自定义状态注册表只在连接后由设备 stdefs 快照填充
+      loadStatusNameCache(saved.statusNameCache ?? {});
+      setCustomStatusDefs([]);
       return {
         ...createInitial(now), ...saved, breakSyncedAt: 0, settings: { ...defaultSettings, ...saved.settings, keys,
           // 旧布局取值（large/withTime/minimal）固件从未实现：统一迁回固件真实支持的"完整"
@@ -168,13 +187,13 @@ const load = (now: number): AppState => {
         ],
         seededLeftover2: true,
         reminderFlash: undefined, // 只用于本次会话弹 toast，重新打开页面不重弹旧提醒
-        // 设备镜像态不持久化：事实源在设备（连接后由 todos/agent*/schedules 消息重推），存档里的旧值是幽灵
+        // 设备镜像态不持久化：事实源在设备（连接后由 todos/schedules/stdefs/keys/led/agent* 消息重推），存档里的旧值是幽灵
         deviceTodos: [],
         deviceAgent: { busy: false, at: 0 },
-        // 计划表同理：s.schedules 是设备清单镜像；旧存档里的 schedules 只留作迁移队列，不再当事实源
+        schedules: [],
+        activeScheduleId: "",
         pausedToday: false,
-        ...(() => { if (saved.schedules?.length) legacySched = { schedules: saved.schedules, activeId: saved.activeScheduleId ?? "" }; return {}; })(),
-        ...(past ? { history: past.history, historySegments: past.segments } : {}),
+        customStatuses: [],
       };
     }
   } catch {
@@ -231,7 +250,7 @@ const tick = (s: AppState, now: number): AppState => {
 
   const { settings } = next;
   // 本地累计只在从未同步过设备时启用（离线/模拟设备）；连接后设备是计时权威，网页只存快照外推
-  if (settings.breakEnabled && !next.breakOffToday && STATUSES[next.current.id].workLike && !next.breakSyncedAt) {
+  if (settings.breakEnabled && !next.breakOffToday && statusMeta(next.current.id).workLike && !next.breakSyncedAt) {
     const acc = next.breakAccumMs + 1000;
     next = acc >= settings.breakMinutes * 60_000 ? { ...next, breakAccumMs: 0, breakDue: true } : { ...next, breakAccumMs: acc };
   }
@@ -331,19 +350,22 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
       return { ...s, breakDue: false, breakAccumMs: 0, breakSyncedAt: Date.now() };
     });
   },
+  /** 切换当前计划：设备执行态操作，必须连接（sched use → schedules 快照回推 act） */
   setActiveSchedule(id: string) {
-    deviceSend?.({ type: "sched", op: "use", id });          // 事实源在设备：等 schedules 快照回推生效
+    deviceSend?.({ type: "sched", op: "use", id });
   },
+  /** 保存计划表：事实源在设备，下发 sched set；镜像等设备回 schedules 快照再更新 */
   saveSchedule(schedule: Schedule) {
-    deviceSend?.({ type: "sched", op: "set", id: schedule.id, name: schedule.name, kind: schedule.kind, wd: schedule.kind === "repeat" ? schedule.weekdays : undefined, date: schedule.kind === "date" ? schedule.date : undefined, ns: schedule.nodes.map((n) => ({ t: n.time, st: n.status, ...(n.note ? { n: n.note } : {}) })) });
+    deviceSend?.(schedSetMsg(schedule));
   },
+  /** 删除计划表：下发 sched del；镜像等快照更新 */
   deleteSchedule(id: string) {
     deviceSend?.({ type: "sched", op: "del", id });
   },
   duplicateSchedule(id: string) {
     const src = get().schedules.find((x) => x.id === id);
     if (!src) return;
-    deviceSend?.({ type: "sched", op: "set", name: `${src.name}（副本）`, kind: src.kind, wd: src.kind === "repeat" ? src.weekdays : undefined, date: src.kind === "date" ? src.date : undefined, ns: src.nodes.map((n) => ({ t: n.time, st: n.status, ...(n.note ? { n: n.note } : {}) })) });
+    deviceSend?.(schedSetMsg({ ...src, id: uid(), name: `${src.name}（副本）`, nodes: src.nodes.map((n) => ({ ...n, id: uid() })) }));
   },
   addReminder(r: Omit<Reminder, "id" | "done" | "day">) {
     set((s) => ({ ...s, reminders: [{ ...r, id: uid(), day: dateKey(Date.now()), done: false }, ...s.reminders] }));
@@ -387,6 +409,14 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
   deviceTodoSet(id: string, patch: { text?: string; at?: number; trig?: "offwork" | "at"; show?: boolean; done?: boolean }) { deviceSend?.({ type: "todo", op: "set", id, ...patch }); },
   deviceTodoDone(id: string, done = true) { deviceSend?.({ type: "todo", op: "done", id, done }); },
   deviceTodoDel(id: string) { deviceSend?.({ type: "todo", op: "del", id }); },
+  /** 自定义状态：事实源在设备注册表，下发 stdef set；镜像等 stdefs 快照更新（需连接） */
+  stdefSet(d: { id?: string; zh: string; hint?: string; c: number; work?: boolean }) {
+    deviceSend?.({ type: "stdef", op: "set", id: d.id ?? `c${Math.random().toString(36).slice(2, 6)}`, zh: d.zh, hint: d.hint, c: d.c, work: d.work });
+  },
+  /** 删除自定义状态：下发 stdef del；镜像等快照更新（需连接） */
+  stdefDel(id: string) {
+    deviceSend?.({ type: "stdef", op: "del", id });
+  },
   setUserName(name: string) {
     set((s) => ({ ...s, user: { ...s.user, name } })); // 共享场景展示的是用户姓名，不是设备名
   },
@@ -394,7 +424,19 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
     set((s) => {
       if (patch.breakEnabled !== undefined || patch.breakMinutes !== undefined) sendBreak({ minutes: patch.breakMinutes, enabled: patch.breakEnabled }, s);
       if (patch.overrideMode !== undefined) deviceSend?.({ type: "sched", op: "mode", mode: patch.overrideMode === "pauseToday" ? "today" : "next" });
-      return { ...s, settings: { ...s.settings, ...patch } };
+      const next = { ...s.settings, ...patch };
+      // 按键/灯效：事实源在设备 /keys.json /led.json，需连接才写；设备回快照后镜像再校准
+      if (activeTransport) {
+        if (patch.keys) deviceSend?.({ type: "keys", k1: next.keys.k1, k2: next.keys.k2, k3: next.keys.k3, k4: next.keys.k4, ts: Date.now() });
+        if (patch.led !== undefined || patch.ledBrightness !== undefined || patch.ledNightOff !== undefined)
+          deviceSend?.({ type: "led", op: "set", map: next.led, br: next.ledBrightness, night: next.ledNightOff });
+      } else {
+        next.keys = s.settings.keys;                 // 断连时设备真值不可写，本地镜像回滚
+        next.led = s.settings.led;
+        next.ledBrightness = s.settings.ledBrightness;
+        next.ledNightOff = s.settings.ledNightOff;
+      }
+      return { ...s, settings: next };
     });
   },
   setAgent(state: AgentState, task?: string) {
@@ -424,7 +466,7 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
 });
 
 export const toOutbound = (s: AppState): Extract<OutboundMessage, { type: "state" }> => {
-  const meta = STATUSES[s.current.id];
+  const meta = statusMeta(s.current.id);
   const until = s.current.until;
   return {
     type: "state",
@@ -432,8 +474,6 @@ export const toOutbound = (s: AppState): Extract<OutboundMessage, { type: "state
     screen: meta.screen,
     sub: s.timer ? `剩余计时` : until ? `${hhmm(until)} 后有空` : meta.hint,
     until,
-    led: s.settings.led[s.current.id],
-    brightness: s.settings.ledBrightness,
     layout: s.settings.screenLayout,
     ts: s.current.since,
   };
@@ -477,10 +517,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     // 等待设备区间采纳期间不下发 state，避免网页旧状态覆盖设备当前状态
     if (!awaitAdoptionRef.current) await t.send(toOutbound(st));
     await t.send({ type: "time", epoch: Date.now(), tzOffsetMin: -new Date().getTimezoneOffset() });
-    // 计划表不再随快照下发：清单事实源在设备（/schedules.json），hello 后设备主动推 schedules，网页 ops 增量修改
-    // 按键映射下发：设备离线时按用户配置执行（含暂停/恢复今日计划）
-    await t.send({ type: "keys", k1: st.settings.keys.k1, k2: st.settings.keys.k2, k3: st.settings.keys.k3, k4: st.settings.keys.k4, ts: Date.now() });
-    // 休息提醒不再随快照下发：间隔/开关/计时均以设备为准，连接后由 breakState 对齐网页
+    // 设备真值不下发：schedules/stdefs/keys/led/mode/break 都由设备上行采纳（hello 后设备主动推）
     setDevice((d) => ({ ...d, lastSyncAt: Date.now(), pending: 0 }));
   }, []);
 
@@ -501,6 +538,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const handleInbound = useCallback(
     (m: InboundMessage) => {
+      lastInboundAt = Date.now();           // 活性心跳：任何上行消息都证明链路活着
       for (const fn of tapsRef.current) fn(m);   // 页面级订阅先跑（音频帧等实时数据）
       const cur = stateRef.current;
       const runKey = (a: KeyAction, src: StatusSource) => {
@@ -619,36 +657,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           set((s) => ({ ...s, reminderFlash: { text: texts.join("、"), at: Date.now(), ids: m.ids } }));
           break;
         }
-        case "schedules": {
-          // 计划表清单事实源：整表替换镜像（含空表）；act/paused/mode 一并采纳
-          const toSched = (x: DevSched): Schedule => ({
-            id: x.id, name: x.name, kind: x.kind,
-            weekdays: x.kind === "repeat" ? x.wd ?? [] : [],
-            date: x.kind === "date" ? x.date : undefined,
-            nodes: (x.ns ?? []).map((n) => ({ id: uid(), time: n.t, status: n.st, note: n.n })),
-          });
-          set((s) => {
-            const mode = m.mode === "today" ? "pauseToday" as const : "untilNextNode" as const;
-            return {
-              ...s,
-              schedules: m.list.map(toSched),
-              activeScheduleId: m.act,
-              pausedToday: m.paused,
-              settings: s.settings.overrideMode === mode ? s.settings : { ...s.settings, overrideMode: mode },
-            };
-          });
-          // 旧版网页计划表迁移：设备清单非空 → 设备为准，丢弃迁移队列；为空且有旧存档 → 一次性推给设备
-          if (m.list.length) legacySched = null;
-          else if (legacySched) {
-            const mig = legacySched;
-            legacySched = null;
-            for (const sc of mig.schedules)
-              deviceSend?.({ type: "sched", op: "set", id: sc.id, name: sc.name, kind: sc.kind, wd: sc.kind === "repeat" ? sc.weekdays : undefined, date: sc.kind === "date" ? sc.date : undefined, ns: sc.nodes.map((n) => ({ t: n.time, st: n.status, ...(n.note ? { n: n.note } : {}) })) });
-            if (mig.activeId) deviceSend?.({ type: "sched", op: "use", id: mig.activeId });
-            deviceSend?.({ type: "sched", op: "mode", mode: stateRef.current.settings.overrideMode === "pauseToday" ? "today" : "next" });
-          }
+        case "schedules":
+          // 事实源在设备：整表替换镜像 + 执行态（act/paused/mode）采纳
+          set((s) => ({
+            ...s,
+            schedules: m.list.map(schedToMirror),
+            activeScheduleId: m.act,
+            pausedToday: m.paused,
+            settings: { ...s.settings, overrideMode: m.mode === "today" ? "pauseToday" : "untilNextNode" },
+          }));
           break;
-        }
+        case "schedErr":
+          set((s) => ({ ...s, reminderFlash: { text: m.msg === "full" ? "计划表已满（设备最多存 8 张）" : m.msg === "badStatus" ? "该表包含已删除的状态，请先修正节点" : `计划表同步失败：${m.msg}`, at: Date.now(), ids: [] } }));
+          break;
         case "agentReq":
           set((s) => ({ ...s, deviceAgent: { busy: true, at: Date.now() } }));
           proxyAgentReq(m, (err) => set((s) => ({ ...s, deviceAgent: { ...s.deviceAgent, err } })));  // 设备是循环主体；网页只做 LLM 转发
@@ -658,6 +679,25 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           break;
         case "agentErr":
           set((s) => ({ ...s, deviceAgent: { busy: false, err: m.msg, at: Date.now() } }));
+          break;
+        case "stdefs": {
+          // 事实源在设备：整表替换镜像；名字入缓存（删除后历史仍显示原名）
+          const customStatuses = m.list.map(stdefToMirror);
+          setCustomStatusDefs(customStatuses);
+          cacheStatusNames(customStatuses);
+          set((s) => ({ ...s, customStatuses, statusNameCache: statusNameCache() }));
+          break;
+        }
+        case "keys":
+          // 事实源在设备 /keys.json：整组采纳（K1–K4）
+          set((s) => ({ ...s, settings: { ...s.settings, keys: { k1: m.k1 as KeyAction, k2: m.k2 as KeyAction, k3: m.k3 as KeyAction, k4: m.k4 as KeyAction } } }));
+          break;
+        case "led":
+          // 事实源在设备 /led.json：每状态灯效 + 亮度 + 夜间自动关
+          set((s) => ({ ...s, settings: { ...s.settings, led: m.map, ledBrightness: m.br, ledNightOff: m.night } }));
+          break;
+        case "stdefErr":
+          set((s) => ({ ...s, reminderFlash: { text: m.msg === "full" ? "自定义状态已满（最多 8 个），请先删除一个" : `状态设置失败：${m.msg}`, at: Date.now(), ids: [] } }));
           break;
       }
     },
@@ -681,6 +721,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         }
         transportRef.current = t; // 先就位：onMessage 会冲刷握手期间排队的消息，其中的回调需要 deviceSend 可用
         activeTransport = t;
+        lastInboundAt = Date.now(); // 连接成功即视为活着，随后靠上行消息续命
         t.onMessage(handleInbound);
         t.onDisconnect(() => setDevice((d) => ({ ...d, state: "disconnected" })));
         setDevice((d) => ({ ...d, name, kind, state: "connected" }));
@@ -707,6 +748,22 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }
     set((st) => ({ ...st, reminders: [] }));
   }, [device.state, s.reminders]);
+
+  // 活性看门狗：真实传输 15s 无任何上行消息 → 判定链路死（串口假连接：设备断电/拔线后端口仍可打开；
+  // 固件有 10s 心跳 breakState/wantTime，活设备必到）。mock 无心跳不检查。
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (device.state !== "connected" || device.kind === "mock" || device.kind === "none") return;
+      if (Date.now() - lastInboundAt > 15000) {
+        const t = transportRef.current;
+        transportRef.current = undefined;
+        activeTransport = undefined;
+        t?.disconnect().catch(() => {});       // discCb 会把 device.state 置 disconnected
+        setDevice((d) => ({ ...d, state: "disconnected" }));
+      }
+    }, 5000);
+    return () => clearInterval(iv);
+  }, [device.state, device.kind]);
 
   // 页面刷新后静默重连：GATT/串口随页面销毁属正常，但授权关系还在——用上次的通道免弹框直连
   const autoReconnectDone = useRef(false);

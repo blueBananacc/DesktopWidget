@@ -194,6 +194,13 @@ input[type="range"] { accent-color: var(--primary); width: 180px; }
 .scr-cell:hover { background: var(--surface-2); border-color: var(--line-2); }
 .scr-cell.on { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
 .scr-cell:focus-visible { outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent); outline-offset: 2px; }
+.scr-add { border-style: dashed; align-content: start; }
+.scr-add:disabled { opacity: .55; cursor: not-allowed; }
+.scr-add-oled { display: grid; place-content: center; justify-items: center; gap: 6px; color: #7E93B5; font-size: 13px; }
+.scr-add-oled svg { width: 22px; height: 22px; }
+.cust-swatch { width: 26px; height: 26px; border-radius: 8px; border: 2px solid transparent; cursor: pointer; padding: 0; }
+.cust-swatch.on { border-color: var(--ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 20%, transparent); }
+.cust-color { width: 34px; height: 26px; border: 1px solid var(--line); border-radius: 8px; padding: 2px; background: var(--surface); cursor: pointer; }
 .scr-cap { display: flex; align-items: center; gap: 8px; }
 .scr-tag { font-size: 12px; color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .scr-tag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }

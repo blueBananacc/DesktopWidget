@@ -68,9 +68,30 @@ const StatusDef* findStatus(const char* id) {
   for (auto& s : STATUSES) if (!strcmp(s.id, id)) return &s;
   return &STATUSES[0];
 }
+// ===== 自定义状态注册表：设备 LittleFS /stdefs.json 是唯一事实源（v0.9 起） =====
+// 网页 stdef 消息管理；状态 id ≤7 字符（segs/SchedNode 按 8 字节存储），以 c 开头与内建区分。
+struct CustStatus { char id[8]; char zh[21]; char hint[33]; uint8_t r, g, b; bool work; };
+CustStatus custs[8];
+uint8_t    custCount = 0;
+uint32_t   nextCustId = 1;
+int custIdx(const char* id) { for (int i = 0; i < custCount; i++) if (!strcmp(custs[i].id, id)) return i; return -1; }
+// 统一状态定义查询：内建 → 自定义 → 兜底 work（保证 OLED/RGB 永远有定义可显示）
+StatusDef statusDefOf(const char* id) {
+  for (auto& s : STATUSES) if (!strcmp(s.id, id)) return s;
+  const int ci = custIdx(id);
+  if (ci >= 0) return StatusDef{ custs[ci].id, custs[ci].r, custs[ci].g, custs[ci].b, custs[ci].zh, custs[ci].hint };
+  return STATUSES[0];
+}
+// 状态是否有效（内建或已注册自定义）：计划表节点引用已删状态时该表不可用，到点跳过
+bool statusKnown(const char* id) {
+  for (auto& s : STATUSES) if (!strcmp(s.id, id)) return true;
+  return custIdx(id) >= 0;
+}
 // 工作类状态：休息提醒只在这些状态下累计（与网页 STATUSES.workLike 一致）
 bool isWorkLike(const char* id) {
-  return !strcmp(id, "work") || !strcmp(id, "busy") || !strcmp(id, "focus");
+  if (!strcmp(id, "work") || !strcmp(id, "busy") || !strcmp(id, "focus")) return true;
+  const int ci = custIdx(id);
+  return ci >= 0 && custs[ci].work;
 }
 
 // ===================== 外设 =====================
@@ -182,8 +203,62 @@ uint8_t  dumpBuf[768];
 char     dumpB64[1100], dumpLine[1240];
 RTC_DATA_ATTR char crashedApp[12] = "";   // 崩溃防护：复位前正在运行的 app 状态名
 
-// 按键映射（网页 keys 消息下发；设备离线时按此执行。cycleL/cycleR 为出厂默认，网页不下发这两个值）
+// 按键映射（/keys.json 持久化；网页 keys 消息修改。cycleL/cycleR 为出厂默认，网页不下发这两个值）
 char keyAct[4][12] = { "offwork", "busy", "cycleL", "cycleR" };  // K1 K2 K3 K4
+void saveKeys() {
+  JsonDocument doc; doc["k1"] = keyAct[0]; doc["k2"] = keyAct[1]; doc["k3"] = keyAct[2]; doc["k4"] = keyAct[3];
+  File f = LittleFS.open("/keys.json", "w"); if (f) { serializeJson(doc, f); f.close(); }
+}
+void loadKeys() {
+  File f = LittleFS.open("/keys.json", "r"); if (!f) return;
+  JsonDocument doc; if (deserializeJson(doc, f)) { f.close(); return; }
+  const char* ks[4] = { "k1", "k2", "k3", "k4" };
+  for (int i = 0; i < 4; i++) { const char* a = doc[ks[i]] | ""; if (strlen(a) && strlen(a) < sizeof(keyAct[0])) { strncpy(keyAct[i], a, sizeof(keyAct[0]) - 1); keyAct[i][sizeof(keyAct[0]) - 1] = 0; } }
+  f.close();
+}
+void sendKeys() {  // 全量上行：按键映射以设备为准
+  JsonDocument doc; doc["type"] = "keys"; doc["k1"] = keyAct[0]; doc["k2"] = keyAct[1]; doc["k3"] = keyAct[2]; doc["k4"] = keyAct[3];
+  String out; serializeJson(doc, out); sendLine(out);
+}
+
+// 灯效设置（/led.json 持久化）：每状态一档 solid/breath/off + 全局亮度 + 夜间自动关
+struct LedEntry { char id[8]; char mode[7]; };
+LedEntry ledMap[14]; int ledMapCount = 0;
+bool ledNightOff = false;
+const char* ledModeOf(const char* id) {
+  for (int i = 0; i < ledMapCount; i++) if (!strcmp(ledMap[i].id, id)) return ledMap[i].mode;
+  return "solid";
+}
+void saveLed() {
+  JsonDocument doc; doc["br"] = ledBrightness; doc["night"] = ledNightOff;
+  JsonObject m = doc["map"].to<JsonObject>();
+  for (int i = 0; i < ledMapCount; i++) m[ledMap[i].id] = ledMap[i].mode;
+  File f = LittleFS.open("/led.json", "w"); if (f) { serializeJson(doc, f); f.close(); }
+}
+void loadLed() {
+  File f = LittleFS.open("/led.json", "r"); if (!f) return;
+  JsonDocument doc; if (deserializeJson(doc, f)) { f.close(); return; }
+  ledBrightness = doc["br"] | ledBrightness; ledNightOff = doc["night"] | false;
+  ledMapCount = 0;
+  for (JsonPair p : doc["map"].as<JsonObject>()) {
+    if (ledMapCount >= 14) break;
+    strncpy(ledMap[ledMapCount].id, p.key().c_str(), sizeof(ledMap[0].id) - 1);
+    strncpy(ledMap[ledMapCount].mode, p.value() | "solid", sizeof(ledMap[0].mode) - 1);
+    if (ledMap[ledMapCount].id[0]) ledMapCount++;
+  }
+  f.close();
+  ledMode = ledModeOf(curStatusId.c_str());
+}
+void sendLed() {  // 全量上行：灯效设置以设备为准
+  JsonDocument doc; doc["type"] = "led"; doc["br"] = ledBrightness; doc["night"] = ledNightOff;
+  JsonObject m = doc["map"].to<JsonObject>();
+  for (int i = 0; i < ledMapCount; i++) m[ledMap[i].id] = ledMap[i].mode;
+  String out; serializeJson(doc, out); sendLine(out);
+}
+void ledSetMode(const char* id, const char* mode) {  // 写某状态灯效档
+  for (int i = 0; i < ledMapCount; i++) if (!strcmp(ledMap[i].id, id)) { strncpy(ledMap[i].mode, mode, sizeof(ledMap[0].mode) - 1); return; }
+  if (ledMapCount < 14) { strncpy(ledMap[ledMapCount].id, id, sizeof(ledMap[0].id) - 1); strncpy(ledMap[ledMapCount].mode, mode, sizeof(ledMap[0].mode) - 1); ledMapCount++; }
+}
 
 // 今日状态区间记录（设备是时长记录权威；millis 域时间戳，推送时按校时基准换算 epoch）
 struct Seg { char status[8]; uint32_t startMs; uint32_t endMs; };  // endMs=0 表示进行中
@@ -367,7 +442,12 @@ void handleSchedMsg(JsonDocument& doc) {
   } else if (!strcmp(op, "use")) {
     const char* id = doc["id"] | "";
     int i = schedFind(id);
-    if (i >= 0 && scheds[i].kind == 0) { strncpy(schedAct, id, sizeof(schedAct) - 1); schedAct[sizeof(schedAct) - 1] = 0; schedLastMin = -1; saveSchedules(); sendSchedules(); }
+    if (i >= 0 && scheds[i].kind == 0) {
+      bool bad = false;                                        // 含已删状态的表不可启用：需先在网页修正状态
+      for (int k = 0; k < scheds[i].n && !bad; k++) bad = !statusKnown(scheds[i].ns[k].status);
+      if (bad) { sendLine(F("{\"type\":\"schedErr\",\"msg\":\"badStatus\"}")); }
+      else { strncpy(schedAct, id, sizeof(schedAct) - 1); schedAct[sizeof(schedAct) - 1] = 0; schedLastMin = -1; saveSchedules(); sendSchedules(); }
+    }
   } else if (!strcmp(op, "pause")) {
     schedPausedDay = (doc["paused"] | false) && epochBase >= 0 ? dayOf(localEpochMs()) : -1;
     saveSchedules(); sendSchedules();
@@ -375,6 +455,93 @@ void handleSchedMsg(JsonDocument& doc) {
     schedModeToday = !strcmp(doc["mode"] | "next", "today");
     saveSchedules(); sendSchedules();
   } else if (!strcmp(op, "list")) sendSchedules();
+}
+
+// ===================== 自定义状态注册表：/stdefs.json =====================
+
+void saveStdefs() {
+  JsonDocument doc;
+  JsonArray list = doc["list"].to<JsonArray>();
+  for (int i = 0; i < custCount; i++) {
+    JsonObject o = list.add<JsonObject>();
+    o["id"] = custs[i].id; o["zh"] = custs[i].zh;
+    if (custs[i].hint[0]) o["hint"] = custs[i].hint;
+    o["c"] = ((uint32_t)custs[i].r << 16) | ((uint32_t)custs[i].g << 8) | custs[i].b;
+    if (custs[i].work) o["work"] = true;
+  }
+  File f = LittleFS.open("/stdefs.json", "w");
+  if (f) { serializeJson(doc, f); f.close(); }
+}
+void loadStdefs() {
+  File f = LittleFS.open("/stdefs.json", "r");
+  if (!f) return;
+  JsonDocument doc;
+  if (deserializeJson(doc, f)) { f.close(); return; }
+  custCount = 0;
+  for (JsonObject o : doc["list"].as<JsonArray>()) {
+    if (custCount >= 8) break;
+    CustStatus& c = custs[custCount];
+    memset(&c, 0, sizeof c);
+    strncpy(c.id, o["id"] | "", sizeof(c.id) - 1);
+    strncpy(c.zh, o["zh"] | "自定义", sizeof(c.zh) - 1);
+    strncpy(c.hint, o["hint"] | "", sizeof(c.hint) - 1);
+    const uint32_t rgbv = o["c"] | 0x8899AA;
+    c.r = (rgbv >> 16) & 0xFF; c.g = (rgbv >> 8) & 0xFF; c.b = rgbv & 0xFF;
+    c.work = o["work"] | false;
+    if (c.id[0]) custCount++;
+  }
+  f.close();
+  for (int i = 0; i < custCount; i++)                    // id 计数器恢复：防重启后撞 id
+    if (custs[i].id[0] == 'c') {
+      const uint32_t n = (uint32_t)strtoul(custs[i].id + 1, nullptr, 10);
+      if (n >= nextCustId) nextCustId = n + 1;
+    }
+  Serial.printf("[STDEF] loaded %d custom statuses\n", custCount);
+}
+// 全量上行：网页整表替换镜像
+void sendStdefs() {
+  JsonDocument doc;
+  doc["type"] = "stdefs";
+  JsonArray list = doc["list"].to<JsonArray>();
+  for (int i = 0; i < custCount; i++) {
+    JsonObject o = list.add<JsonObject>();
+    o["id"] = custs[i].id; o["zh"] = custs[i].zh;
+    if (custs[i].hint[0]) o["hint"] = custs[i].hint;
+    o["c"] = ((uint32_t)custs[i].r << 16) | ((uint32_t)custs[i].g << 8) | custs[i].b;
+    if (custs[i].work) o["work"] = true;
+  }
+  String out; serializeJson(doc, out); sendLine(out);
+}
+void handleStdefMsg(JsonDocument& doc) {
+  const char* op = doc["op"] | "";
+  if (!strcmp(op, "set")) {                            // 新建/更新：网页传完整定义
+    CustStatus tmp; memset(&tmp, 0, sizeof tmp);
+    const char* id = doc["id"] | "";
+    if (!id[0]) snprintf(tmp.id, sizeof tmp.id, "c%lu", (unsigned long)nextCustId++);
+    else { strncpy(tmp.id, id, sizeof(tmp.id) - 1); }
+    strncpy(tmp.zh, doc["zh"] | "自定义", sizeof(tmp.zh) - 1);
+    strncpy(tmp.hint, doc["hint"] | "", sizeof(tmp.hint) - 1);
+    const uint32_t rgbv = doc["c"] | 0x8899AA;
+    tmp.r = (rgbv >> 16) & 0xFF; tmp.g = (rgbv >> 8) & 0xFF; tmp.b = rgbv & 0xFF;
+    tmp.work = doc["work"] | false;
+    int i = custIdx(tmp.id);
+    if (i >= 0) custs[i] = tmp;
+    else if (custCount < 8) custs[custCount++] = tmp;
+    else { sendLine(F("{\"type\":\"stdefErr\",\"msg\":\"full\"}")); return; }
+    if (!strcmp(curStatusId.c_str(), tmp.id)) { scrMain = tmp.zh; scrSub = tmp.hint; oledDirty = true; } // 改的是当前状态：立即刷新屏幕
+    saveStdefs(); sendStdefs();
+  } else if (!strcmp(op, "del")) {
+    const char* id = doc["id"] | "";
+    const int i = custIdx(id);
+    if (i >= 0) {
+      memmove(&custs[i], &custs[i + 1], (custCount - i - 1) * sizeof(CustStatus));
+      custCount--;
+      removeIfExists("/app_" + String(id) + ".wasm");      // 连带删掉它的自定义屏幕与禁用标记
+      removeIfExists("/app_" + String(id) + ".wasm.bad");
+      if (!strcmp(curStatusId.c_str(), id)) { setLocalStatus("work"); registerManualOverride("work"); } // 正在使用 → 退回工作中
+      saveStdefs(); sendStdefs(); sendApps();
+    }
+  } else if (!strcmp(op, "list")) sendStdefs();
 }
 
 void markStatus(const char* id) {
@@ -516,9 +683,13 @@ void drawOled() {
 // ===================== RGB 灯 =====================
 
 void updateLed() {
-  const StatusDef* st = findStatus(curStatusId.c_str());
-  uint8_t r = st->r, g = st->g, bl = st->b;
+  const StatusDef st = statusDefOf(curStatusId.c_str());
+  uint8_t r = st.r, g = st.g, bl = st.b;
   uint8_t b = (uint16_t)ledBrightness * 255 / 100;
+  if (ledNightOff && epochBase >= 0) {           // 夜间自动关灯：本地 22:00–07:00 强制灭
+    const int h = minOf(localEpochMs()) / 60;
+    if (h >= 22 || h < 7) b = 0;
+  }
   if (!strcmp(ledMode.c_str(), "breath")) {
     float t = millis() / 1800.0f;
     float wave = 0.5f - 0.5f * cosf(2 * PI * fmodf(t, 1.0f));
@@ -553,10 +724,11 @@ void handleLine(const String& line) {
   if (!strcmp(type, "state")) {
     const char* st = doc["status"] | "work";
     String nId = st;
-    String nm = doc["screen"] | findStatus(st)->zh;
+    String nm = doc["screen"] | statusDefOf(st).zh;
     String ns = doc["sub"] | "";
-    String lm = doc["led"] | "solid";
-    uint8_t br = doc["brightness"] | 40;
+    // led/brightness 可选：灯效设置的事实源在设备 /led.json；带则当次覆盖显示，不带按本地配置
+    String lm = doc["led"].isNull() ? ledModeOf(nId.c_str()) : String(doc["led"] | "solid");
+    uint8_t br = doc["brightness"].isNull() ? ledBrightness : doc["brightness"];
     const char* ly = doc["layout"] | "";
     const int8_t nl = !strcmp(ly, "full") ? 0 : !strcmp(ly, "clock") ? 1 : !strcmp(ly, "status") ? 2 : -1;
     if (nl >= 0 && nl != scrLayout) {
@@ -585,6 +757,8 @@ void handleLine(const String& line) {
     sendBreakState(false);                  // 回执：让网页立即对齐
   } else if (!strcmp(type, "sched")) {
     handleSchedMsg(doc);                    // v0.8：计划表清单 ops（set/del/use/pause/mode/list）；设备是事实源
+  } else if (!strcmp(type, "stdef")) {
+    handleStdefMsg(doc);                    // v0.9：自定义状态注册表 ops（set/del/list）
   } else if (!strcmp(type, "reminder")) {
     // 网页提醒到点：OLED 显示 15s + RGB 闪烁 3s；text 仅当用户允许上屏才携带
     const char* t = doc["text"] | "";
@@ -596,13 +770,26 @@ void handleLine(const String& line) {
     oledDirty = true;
     Serial.printf("[REMIND] %s x%d\n", remindText[0] ? remindText : "(private)", remindCount);
   } else if (!strcmp(type, "keys")) {
-    // 按键映射下发：设备离线时按此执行（K1 仍须按住 1.5s）
+    // 按键映射下发：写入 /keys.json 断电保留（K1 仍须按住 1.5s）
     const char* ks[4] = { "k1", "k2", "k3", "k4" };
     for (int i = 0; i < 4; i++) {
       const char* a = doc[ks[i]] | "";
       if (strlen(a) && strlen(a) < sizeof(keyAct[0])) { strncpy(keyAct[i], a, sizeof(keyAct[0]) - 1); keyAct[i][sizeof(keyAct[0]) - 1] = 0; }
     }
+    saveKeys(); sendKeys();
     Serial.printf("[KEYS] %s %s %s %s\n", keyAct[0], keyAct[1], keyAct[2], keyAct[3]);
+  } else if (!strcmp(type, "led")) {
+    // 灯效设置（事实源在设备）：map=每状态档位 / br=亮度 / night=夜间自动关
+    if (doc["map"].is<JsonObject>()) {
+      for (JsonPair p : doc["map"].as<JsonObject>()) {
+        const char* m = p.value() | "";
+        if (p.key().c_str()[0] && strlen(m) && strlen(m) < 7) ledSetMode(p.key().c_str(), m);
+      }
+    }
+    if (!doc["br"].isNull())    ledBrightness = doc["br"];
+    if (!doc["night"].isNull()) ledNightOff = doc["night"];
+    ledMode = ledModeOf(curStatusId.c_str());
+    saveLed(); sendLed();
   } else if (!strcmp(type, "app")) {
     // 按状态自定义屏幕（WASM）：begin{status,size} 开文件 → chunk{base64}×N → run 收尾
     // （收齐且目标是当前状态则立即重载执行）/ stop 停掉当前 app / clear{status} 删除恢复默认
@@ -934,11 +1121,12 @@ m3ApiRawFunction(m3_buttons) { // 按键位掩码：bit0..3 = K1..K4（低电平
   for (int i = 0; i < 4; i++) if (keys[i].last == LOW) m |= (1u << i);
   m3ApiReturn(m);
 }
-m3ApiRawFunction(m3_status) { // 当前状态在 STATUSES 里的下标
+m3ApiRawFunction(m3_status) { // 当前状态下标：内建 0-5，自定义 6+i；未知兜底 0
   m3ApiReturnType(uint32_t);
   const int n = sizeof(STATUSES) / sizeof(STATUSES[0]);
   int idx = 0;
-  for (int i = 0; i < n; i++) if (!strcmp(STATUSES[i].id, curStatusId.c_str())) idx = i;
+  for (int i = 0; i < n; i++) if (!strcmp(STATUSES[i].id, curStatusId.c_str())) { m3ApiReturn((uint32_t)i); }
+  for (int i = 0; i < custCount; i++) if (!strcmp(custs[i].id, curStatusId.c_str())) { m3ApiReturn((uint32_t)(n + i)); }
   m3ApiReturn((uint32_t)idx);
 }
 m3ApiRawFunction(m3_clock) {  // 本地时钟：今日已过分钟数 0-1439；未校时 -1
@@ -1029,20 +1217,22 @@ void appLoad(const String& statusId) {
 
 // 未连接时的本地状态切换：屏幕显示与 LED 跟随，连上后以网页下发为准
 void setLocalStatus(const char* id) {
-  const StatusDef* st = findStatus(id);
-  if (curStatusId != st->id) markStatus(st->id);
-  curStatusId = st->id; scrMain = st->zh; scrSub = st->hint;
+  const StatusDef st = statusDefOf(id);
+  String nid = id;                                     // 保留原 id（自定义/未知状态不塌缩成 work）
+  if (curStatusId != nid) markStatus(nid.c_str());
+  curStatusId = nid; scrMain = st.zh; scrSub = st.hint;
+  ledMode = ledModeOf(nid.c_str());              // 灯效跟随设备配置（事实源 /led.json）
   oledDirty = true;
 }
 void cycleLocal(int dir) {
+  // 循环顺序：内建（off 除外——由收工键单独触发）+ 自定义状态
+  const char* ids[14]; int n = 0;
+  for (auto& s : STATUSES) if (strcmp(s.id, "off")) ids[n++] = s.id;
+  for (int i = 0; i < custCount; i++) ids[n++] = custs[i].id;
   int idx = 0;
-  const int n = sizeof(STATUSES) / sizeof(STATUSES[0]);
-  for (int i = 0; i < n; i++) if (!strcmp(STATUSES[i].id, curStatusId.c_str())) idx = i;
-  for (int step = 0; step < n; step++) {               // 循环只走日常状态；off 由收工键单独触发，不参与循环
-    idx = (idx + dir + n) % n;
-    if (strcmp(STATUSES[idx].id, "off")) break;
-  }
-  setLocalStatus(STATUSES[idx].id);
+  for (int i = 0; i < n; i++) if (!strcmp(ids[i], curStatusId.c_str())) idx = i;
+  idx = (idx + dir + n) % n;
+  setLocalStatus(ids[idx]);
 }
 
 // ===================== 计划表执行（设备自治） =====================
@@ -1070,6 +1260,12 @@ void pollSchedule() {
   if (exp < 0) return;                               // 首个节点之前不干预
   const char* expStatus = tab.ns[exp].status;
   if (offSetDay == day) return;                          // 今天已收工 = 今日计划完成，所有节点作废（手动切换不受影响）
+  static int skipLogged = -2;                            // 失效状态：节点跳过（状态已从注册表删除），每个节点只记一次日志
+  if (!statusKnown(expStatus)) {
+    if (skipLogged != exp) { skipLogged = exp; Serial.printf("[SCHED] %02d:%02d skip unknown status %s (%s)\n", nowMin / 60, nowMin % 60, expStatus, tab.name); }
+    return;
+  }
+  skipLogged = -2;
   if (strcmp(expStatus, curStatusId.c_str())) {
     Serial.printf("[SCHED] %02d:%02d -> %s (%s)\n", nowMin / 60, nowMin % 60, expStatus, tab.name);
     setLocalStatus(expStatus);
@@ -1456,7 +1652,7 @@ const char AGENT_TOOLS[] = R"json([
   {"type":"function","function":{"name":"reminder_add","description":"创建设备上的到点提醒（存在设备本地，断网断电也会到点提醒）","parameters":{"type":"object","properties":{"text":{"type":"string","description":"提醒内容，不超过20个汉字"},"in_minutes":{"type":"integer","description":"多少分钟后提醒；与 at_time 二选一"},"at_time":{"type":"string","description":"本地时间 HH:MM（24小时制）；今天该时刻已过则算明天"}},"required":["text"]}}},
   {"type":"function","function":{"name":"reminder_list","description":"列出设备上的待办提醒","parameters":{"type":"object","properties":{}}}},
   {"type":"function","function":{"name":"status_get","description":"获取设备当前工作状态和本地时间","parameters":{"type":"object","properties":{}}}},
-  {"type":"function","function":{"name":"status_set","description":"切换当前工作状态","parameters":{"type":"object","properties":{"status":{"type":"string","enum":["work","busy","focus","meet","rest","off"],"description":"work=工作中 busy=请勿打扰 focus=专注中 meet=会议中 rest=休息 off=收工"}},"required":["status"]}}}
+  {"type":"function","function":{"name":"status_set","description":"切换当前工作状态","parameters":{"type":"object","properties":{"status":{"type":"string","description":"状态id：work=工作中 busy=请勿打扰 focus=专注中 meet=会议中 rest=休息 off=收工，或自定义状态id(c开头)"}},"required":["status"]}}}
 ])json";
 
 String nowHHMM() {
@@ -1536,12 +1732,12 @@ String runTool(const char* name, const char* argsJson) {
   }
   if (!strcmp(name, "status_get")) {
     char buf[96]; snprintf(buf, sizeof buf, "{\"status\":\"%s\",\"zh\":\"%s\",\"time\":\"%s\"}",
-      curStatusId.c_str(), findStatus(curStatusId.c_str())->zh, nowHHMM().c_str());
+      curStatusId.c_str(), statusDefOf(curStatusId.c_str()).zh, nowHHMM().c_str());
     return String(buf);
   }
   if (!strcmp(name, "status_set")) {
     const char* st = a["status"] | "";
-    bool ok = false;
+    bool ok = custIdx(st) >= 0;
     for (auto& s : STATUSES) if (!strcmp(s.id, st)) ok = true;
     if (!ok) return F("{\"ok\":false,\"err\":\"bad_status\"}");
     setLocalStatus(st); registerManualOverride(st);
@@ -1613,6 +1809,9 @@ void setup() {
   LittleFS.begin(true);               // 自定义屏幕 wasm / 待办存储（失败则格式化）
   loadTodos();
   loadSchedules();                    // 计划表清单：重启后无需网页重连即可继续自治执行
+  loadStdefs();                       // 自定义状态注册表
+  loadKeys();                         // 按键映射
+  loadLed();                          // 灯效设置
   // 崩溃防护：上次运行中的 app 导致看门狗/异常复位 → 禁用该文件（改名 .bad，避免重启死循环）
   esp_reset_reason_t rr = esp_reset_reason();
   if ((rr == ESP_RST_PANIC || rr == ESP_RST_TASK_WDT || rr == ESP_RST_INT_WDT || rr == ESP_RST_WDT) && crashedApp[0]) {
@@ -1643,6 +1842,9 @@ void loop() {
     sendApps();                            // 设备上实际安装的自定义屏幕
     sendTodos();                           // 设备待办事实源同步给网页
     sendSchedules();                       // 计划表清单事实源同步给网页
+    sendStdefs();                          // 自定义状态注册表事实源同步给网页
+    sendKeys();                            // 按键映射事实源同步给网页
+    sendLed();                             // 灯效设置事实源同步给网页
     segDirty = true;                       // 随后推送今日状态区间
   }
   pollKeys();

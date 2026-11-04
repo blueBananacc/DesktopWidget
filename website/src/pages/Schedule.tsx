@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { CalendarDays, Copy, Pencil, Plus, Trash2, Pause, Play, TriangleAlert, Unplug } from "lucide-react";
 import { useStore } from "../store/AppStore";
-import { STATUSES, STATUS_ORDER } from "../domain/statuses";
+import { allStatusIds, isKnownStatus, statusMeta } from "../domain/statuses";
 import type { Schedule, StatusId } from "../domain/types";
 import { WEEK_SHORT, dateKey, hhmm, toMinutes, uid } from "../domain/time";
 import { conflicts, currentNode, nextNode, scheduleForDay, sortedNodes } from "../domain/schedule";
@@ -22,8 +22,8 @@ function Timeline({ schedule, now, showNow }: { schedule: Schedule; now: number;
           const start = pct(toMinutes(n.time));
           const end = pct(nodes[i + 1] ? toMinutes(nodes[i + 1].time) : DAY_END);
           return (
-            <div key={n.id} style={{ left: `${start}%`, width: `${end - start}%`, background: STATUSES[n.status].color }} title={`${n.time} ${STATUSES[n.status].label}`}>
-              {end - start > 6 ? STATUSES[n.status].label : ""}
+            <div key={n.id} style={{ left: `${start}%`, width: `${end - start}%`, background: statusMeta(n.status).color }} title={`${n.time} ${statusMeta(n.status).label}`}>
+              {end - start > 6 ? statusMeta(n.status).label : ""}
             </div>
           );
         })}
@@ -36,21 +36,24 @@ function Timeline({ schedule, now, showNow }: { schedule: Schedule; now: number;
   );
 }
 
+const bytes = (x: string) => new TextEncoder().encode(x).length;
+
 function Editor({ initial, onClose }: { initial: Schedule; onClose: () => void }) {
-  const { actions, s, device } = useStore();
-  const connected = device.state === "connected";
+  const { actions, s } = useStore();
   const toast = useToast();
   const [draft, setDraft] = useState<Schedule>(initial);
   const dup = conflicts(draft);
   const patchNode = (id: string, patch: Partial<Schedule["nodes"][number]>) => setDraft((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === id ? { ...n, ...patch } : n)) }));
-  const valid = draft.name.trim() && draft.nodes.length > 0 && (draft.kind === "date" ? !!draft.date : draft.weekdays.length > 0);
+  // 固件字段定长：name≤24B、note≤16B、ns≤20；超限保存会被设备截断
+  const over = bytes(draft.name) > 24 || draft.nodes.length > 20 || draft.nodes.some((n) => bytes(n.note ?? "") > 16);
+  const valid = draft.name.trim() && draft.nodes.length > 0 && !over && (draft.kind === "date" ? !!draft.date : draft.weekdays.length > 0);
   return (
     <Modal
       title={initial.nodes.length ? "编辑计划表" : "新建计划表"}
       onClose={onClose}
       footer={<>
         <button className="btn btn-ghost" onClick={onClose}>取消</button>
-        <button className="btn btn-primary" disabled={!valid || !connected} onClick={() => { actions.saveSchedule(draft); const willRun = draft.kind === "date" ? draft.date === dateKey(Date.now()) : draft.id === s.activeScheduleId; toast({ message: willRun ? "已保存到设备" : "已保存到设备（不是当前生效的计划）" }); onClose(); }}>保存</button>
+        <button className="btn btn-primary" disabled={!valid} onClick={() => { actions.saveSchedule(draft); const willRun = draft.kind === "date" ? draft.date === dateKey(Date.now()) : draft.id === s.activeScheduleId; toast({ message: willRun ? "已保存到设备" : "已保存到设备（不是当前生效的计划）" }); onClose(); }}>保存</button>
       </>}
     >
       <div className="form">
@@ -72,12 +75,15 @@ function Editor({ initial, onClose }: { initial: Schedule; onClose: () => void }
         <div>
           <div className="form-label">状态节点</div>
           {dup.length > 0 && <Banner tone="warn" icon={<TriangleAlert className="i" />}>{dup.join("、")} 有多个节点，将以最后添加的为准。</Banner>}
+          {over && <Banner tone="warn" icon={<TriangleAlert className="i" />}>超出设备容量：名称 ≤8 个汉字、节点备注 ≤5 个汉字、节点 ≤20 个。</Banner>}
+          {draft.nodes.some((n) => !isKnownStatus(n.status)) && <Banner tone="warn" icon={<TriangleAlert className="i" />}>有节点引用了已删除的状态，该表在修正前不能设为当前计划。</Banner>}
           <div className="node-list">
             {draft.nodes.map((n) => (
               <div key={n.id} className="node-row">
                 <input className="input" type="time" value={n.time} onChange={(e) => patchNode(n.id, { time: e.target.value })} />
                 <select className="input" value={n.status} onChange={(e) => patchNode(n.id, { status: e.target.value as StatusId })}>
-                  {STATUS_ORDER.map((id) => <option key={id} value={id}>{STATUSES[id].label}</option>)}
+                  {!isKnownStatus(n.status) && <option value={n.status}>{statusMeta(n.status).label}（已删除）</option>}
+                  {allStatusIds().map((id) => <option key={id} value={id}>{statusMeta(id).label}</option>)}
                 </select>
                 <input className="input" placeholder="备注（不会显示在设备上）" value={n.note ?? ""} onChange={(e) => patchNode(n.id, { note: e.target.value })} />
                 <button type="button" className="icon-btn" aria-label="删除节点" onClick={() => setDraft((d) => ({ ...d, nodes: d.nodes.filter((x) => x.id !== n.id) }))}><Trash2 className="i" /></button>
@@ -105,9 +111,9 @@ export function SchedulePage() {
       <PageHeader
         title="计划表"
         desc="提前安排每个时间点要显示的状态，到点后设备自动切换，不需要打开网页。"
-        actions={<button className="btn btn-primary" disabled={!connected} title={connected ? "" : "计划表存在设备上，连接后才能新建"} onClick={() => setEditing({ id: uid(), name: "", kind: "repeat", weekdays: [1, 2, 3, 4, 5], nodes: [{ id: uid(), time: "09:00", status: "work" }, { id: uid(), time: "18:00", status: "off" }] })}><Plus />新建计划表</button>}
+        actions={<button className="btn btn-primary" disabled={!connected || s.schedules.length >= 8} title={!connected ? "计划表存在设备上，连接后才能新建" : s.schedules.length >= 8 ? "最多 8 张计划表（设备容量上限）" : ""} onClick={() => setEditing({ id: uid(), name: "", kind: "repeat", weekdays: [1, 2, 3, 4, 5], nodes: [{ id: uid(), time: "09:00", status: "work" }, { id: uid(), time: "18:00", status: "off" }] })}><Plus />新建计划表</button>}
       />
-      {!connected && <Banner tone="warn" icon={<Unplug />}>计划表存在设备上并自治执行：现在显示的是上次同步的镜像。连接设备后才能新建/切换/编辑。</Banner>}
+      {!connected && <Banner tone="warn" icon={<Unplug />}>设备未连接：计划表存在设备上，这里显示的是上次同步的镜像；新建/编辑/复制/删除/切换/暂停都需要连接设备。</Banner>}
 
       <Card style={{ marginBottom: 20 }}>
         <CardHeader
@@ -125,8 +131,8 @@ export function SchedulePage() {
         <div className="card-b" style={{ display: "grid", gap: 16 }}>
           {today ? <Timeline schedule={today} now={now} showNow /> : <p className="hint">在下方选择一个重复计划，或新建单日计划。</p>}
           <div className="row" style={{ gap: 24 }}>
-            <div><div className="hint">当前节点</div><b>{cur ? `${cur.time} ${STATUSES[cur.status].label}` : "—"}</b></div>
-            <div><div className="hint">下一次切换</div><b>{nn ? `${nn.time} → ${STATUSES[nn.status].label}` : "今天没有了"}</b></div>
+            <div><div className="hint">当前节点</div><b>{cur ? `${cur.time} ${statusMeta(cur.status).label}` : "—"}</b></div>
+            <div><div className="hint">下一次切换</div><b>{nn ? `${nn.time} → ${statusMeta(nn.status).label}` : "今天没有了"}</b></div>
             <div><div className="hint">手动切换时</div><b>{s.settings.overrideMode === "untilNextNode" ? "只覆盖到下一个节点" : "暂停今日计划"}</b></div>
           </div>
           {s.pausedToday && <Banner tone="warn" icon={<Pause className="i" />}>今日计划已暂停，到点不会自动切换状态。</Banner>}
@@ -139,11 +145,13 @@ export function SchedulePage() {
           const active = sc.kind === "repeat" && sc.id === s.activeScheduleId;
           const isToday = today?.id === sc.id;
           const past = sc.kind === "date" && sc.date && sc.date < dateKey(now);
+          const broken = sc.nodes.some((n) => !isKnownStatus(n.status)); // 引用了已删除的状态：不能设为当前计划，设备到点也会跳过
           return (
             <Card key={sc.id} className={past ? "stale" : ""}>
               <CardHeader
                 title={sc.name}
                 extra={<>
+                  {broken && <span className="badge b-warn">含已删除状态</span>}
                   {isToday && <span className="badge b-beta">今天生效</span>}
                   {sc.kind === "date" ? <span className="badge b-new">单日 · {sc.date}</span> : <span className="hint">{[1, 2, 3, 4, 5, 6, 0].filter((d) => sc.weekdays.includes(d)).map((d) => `周${WEEK_SHORT[d]}`).join(" ")}</span>}
                 </>}
@@ -151,18 +159,21 @@ export function SchedulePage() {
               <div className="card-b" style={{ display: "grid", gap: 14 }}>
                 <Timeline schedule={sc} now={now} showNow={isToday} />
                 <div className="row" style={{ gap: 6 }}>
-                  {sortedNodes(sc).map((n) => <StatusChip key={n.id} id={n.status}>{n.time} {STATUSES[n.status].label}</StatusChip>)}
+                  {sortedNodes(sc).map((n) => <StatusChip key={n.id} id={n.status}>{n.time} {statusMeta(n.status).label}</StatusChip>)}
                 </div>
+                {broken && <Banner tone="warn" icon={<TriangleAlert className="i" />}>有节点引用了已删除的状态{isToday ? "，到点不会自动切换" : ""}。请编辑修正后才能使用这张表。</Banner>}
                 <div className="row" style={{ justifyContent: "space-between" }}>
                   {sc.kind === "repeat" ? (
-                    active ? <span className="hint">当前选中的重复计划</span> : <button className="btn btn-primary btn-sm" disabled={!connected} title={connected ? "" : "连接设备后才能切换计划"} onClick={() => { actions.setActiveSchedule(sc.id); toast({ message: `已切换为“${sc.name}”` }); }}>设为当前计划</button>
-                  ) : <span className="hint">{past ? "已过期" : sc.date === dateKey(now) ? "今天优先于重复计划" : "到期当天自动生效"}</span>}
+                    active ? <span className="hint">当前选中的重复计划</span> : <button className="btn btn-primary btn-sm" disabled={!connected || broken} title={broken ? "包含已删除的状态，请先在编辑中修正" : connected ? "" : "连接设备后才能切换计划"} onClick={() => { actions.setActiveSchedule(sc.id); toast({ message: `已切换为“${sc.name}”` }); }}>设为当前计划</button>
+                  ) : <span className="hint">{past ? "已过期" : broken ? "需修正状态才能生效" : sc.date === dateKey(now) ? "今天优先于重复计划" : "到期当天自动生效"}</span>}
                   <div className="row" style={{ gap: 2 }}>
-                    <button className="icon-btn" aria-label="编辑" disabled={!connected} onClick={() => setEditing(sc)}><Pencil className="i" /></button>
-                    <button className="icon-btn" aria-label="复制" disabled={!connected} onClick={() => { actions.duplicateSchedule(sc.id); toast({ message: "已复制计划表" }); }}><Copy className="i" /></button>
-                    <button className="icon-btn" aria-label="删除" disabled={!connected || s.schedules.length <= 1} onClick={() => {
+                    <button className="icon-btn" aria-label="编辑" disabled={!connected} title={connected ? "" : "连接设备后才能编辑"} onClick={() => setEditing(sc)}><Pencil className="i" /></button>
+                    <button className="icon-btn" aria-label="复制" disabled={!connected || s.schedules.length >= 8} title={!connected ? "连接设备后才能复制" : s.schedules.length >= 8 ? "最多 8 张计划表（设备容量上限）" : ""} onClick={() => { actions.duplicateSchedule(sc.id); toast({ message: "已复制" }); }}><Copy className="i" /></button>
+                    <button className="icon-btn" aria-label="删除" disabled={!connected} title={connected ? "" : "连接设备后才能删除"} onClick={() => {
                       const onDevice = sc.kind === "date" ? sc.date === dateKey(now) : sc.id === s.activeScheduleId;
-                      const tip = onDevice ? `删除“${sc.name}”？它是当前生效的计划，删除后设备上的这份计划也会被清除。` : `删除“${sc.name}”？这份计划没有下发到设备，删除只影响网页计划库。`;
+                      const tip = onDevice
+                        ? `删除“${sc.name}”？它是当前生效的计划，会从设备上移除。`
+                        : `删除“${sc.name}”？会从设备上移除。`;
                       if (confirm(tip)) { actions.deleteSchedule(sc.id); toast({ message: `已删除“${sc.name}”` }); }
                     }}><Trash2 className="i" /></button>
                   </div>

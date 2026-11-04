@@ -5,15 +5,19 @@ import type { KeyAction, LedMode, ScreenLayout, StatusId } from "../domain/types
  * 字段需与固件对齐后再定稿；BLE 下单条消息过长时由传输层分包。
  */
 export type OutboundMessage =
-  | { type: "state"; status: StatusId; screen: string; sub: string; until?: number; led: LedMode; brightness: number; layout: ScreenLayout; ts: number } // layout 只作用于默认屏，设备持久保存
-  | { type: "sched"; op: "set"; id?: string; name: string; kind: "repeat" | "date"; wd?: number[]; date?: string; ns: { t: string; st: StatusId; n?: string }[] } // 计划表整张 upsert（v0.8 起设备清单是事实源；id 缺省=设备分配）
+  | { type: "state"; status: StatusId; screen: string; sub: string; until?: number; led?: LedMode; brightness?: number; layout: ScreenLayout; ts: number } // led/brightness 可选（灯效事实源在设备 /led.json，缺失时设备按本地配置）；layout 只作用于默认屏，设备持久保存
+  | { type: "sched"; op: "set"; id?: string; name: string; kind: "repeat" | "date"; wd?: number[]; date?: string; ns: { t: string; st: StatusId; n?: string }[] } // 计划表整张 upsert（事实源在设备 /schedules.json；id 缺省=设备分配）
   | { type: "sched"; op: "del" | "use"; id: string }   // 删表 / 设为当前启用的重复计划
   | { type: "sched"; op: "pause"; paused: boolean }    // 今日暂停/恢复（只影响当天，跨天自动失效）
   | { type: "sched"; op: "mode"; mode: "next" | "today" } // 手动干预后恢复策略
   | { type: "sched"; op: "list" }                      // 请求设备回 schedules（hello 后设备也主动推）
+  | { type: "stdef"; op: "set"; id?: string; zh: string; hint?: string; c: number; work?: boolean } // 自定义状态 upsert（事实源在设备 /stdefs.json；id 缺省=设备分配 c<N>，≤7 字符；c=0xRRGGBB）
+  | { type: "stdef"; op: "del"; id: string }           // 删除自定义状态：连带清它的自定义屏幕；正在使用则设备退回 work
+  | { type: "stdef"; op: "list" }                      // 请求设备回 stdefs（hello 后设备也主动推）
   | { type: "time"; epoch: number; tzOffsetMin: number }
   | { type: "break"; minutes: number; enabled: boolean; offToday: boolean; accumMs?: number } // 休息提醒设置；accumMs 仅在明确要求重置时携带，设备保持计时权威
-  | { type: "keys"; k1: KeyAction; k2: KeyAction; k3: KeyAction; k4: KeyAction; ts: number } // 按键映射下发；设备离线时按此执行（K1 仍需按住 1.5s）
+  | { type: "keys"; k1: KeyAction; k2: KeyAction; k3: KeyAction; k4: KeyAction; ts: number } // 按键映射写入设备 /keys.json（K1 仍需按住 1.5s）；设备持久化后回 keys 快照
+  | { type: "led"; op: "set"; map?: Record<string, LedMode>; br?: number; night?: boolean } // 灯效写入设备 /led.json：map=每状态档位，br=亮度，night=夜间自动关；设备持久化后回 led 快照
   | { type: "reminder"; text?: string; count?: number; ts: number } // 提醒触发：text 仅当用户允许上屏时携带；设备 OLED 显示 + RGB 闪烁，任意按键确认
   | { type: "app"; op: "begin"; status: string; size: number } // 按状态上传自定义屏幕：.wasm 写入 LittleFS /app_<status>.wasm（持久，断电不丢）
   | { type: "app"; op: "chunk"; data: string } // wasm 二进制 base64 分片（≤~1KB 解码数据/条），按序追加
@@ -63,8 +67,21 @@ export type InboundMessage =
   | { type: "agentErr"; msg: string }   // agent 中止：timeout/disconnected/cancelled/…
   | { type: "todos"; list: DeviceTodo[] } // 设备待办事实源（v0.7 起；hello 后/增删改/到点触发后推送）
   | { type: "todoFired"; ids: string[]; count: number } // 设备到点/收工触发了哪些待办（v0.8 起；与"用户手动完成"区分）
-  | { type: "schedules"; act: string; paused: boolean; mode: "next" | "today"; list: DevSched[] } // 计划表清单事实源（v0.8 起；hello 后/ops 后推送，网页整表替换镜像含空表）
-  | { type: "schedErr"; msg: string };
+  | { type: "schedules"; act: string; paused: boolean; mode: "next" | "today"; list: DevSched[] } // 设备端计划表快照（v0.8 起；hello 后/ops 后推送）。act/paused 是设备执行态；list 与网页计划库做收敛合并
+  | { type: "schedErr"; msg: string }
+  | { type: "stdefs"; list: DevStdef[] }               // 设备自定义状态注册表快照（v0.9 起；hello 后/ops 后推送）。事实源在设备，网页整表替换镜像
+  | { type: "stdefErr"; msg: string }
+  | { type: "keys"; k1: string; k2: string; k3: string; k4: string } // 设备按键映射快照（v1.0 起；hello 后/keys 写入后推送）。事实源在设备 /keys.json
+  | { type: "led"; map: Record<string, LedMode>; br: number; night: boolean } // 设备灯效设置快照（v1.0 起；hello 后/led 写入后推送）。事实源在设备 /led.json
+
+/** 设备侧自定义状态（事实源在设备）：id ≤7 字符以 c 开头；zh=屏显名（wqy16 大字，建议≤4汉字）；c=0xRRGGBB；work=该状态计入工作时长/休息提醒 */
+export interface DevStdef {
+  id: string;
+  zh: string;
+  hint?: string;
+  c: number;
+  work?: boolean;
+}
 
 /** 设备待办（事实源在设备）：at=epoch ms；trig=offwork 收工触发；show=false 触发时只报数量；created=创建时刻；src=来源(voice/web) */
 export interface DeviceTodo {

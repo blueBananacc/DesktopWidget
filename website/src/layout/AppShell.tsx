@@ -67,7 +67,11 @@ export function AppShell() {
     if (s.reminderFlash && s.reminderFlash.at !== flashedAt.current) {
       flashedAt.current = s.reminderFlash.at;
       const ids = s.reminderFlash.ids;
-      toast({ message: `提醒：${s.reminderFlash.text}`, action: { label: "恢复", onClick: () => ids.forEach((id) => actions.deviceTodoDone(id, false)) }, seconds: 10 });
+      toast({
+        message: ids.length ? `提醒：${s.reminderFlash.text}` : s.reminderFlash.text,
+        action: ids.length ? { label: "恢复", onClick: () => ids.forEach((id) => actions.deviceTodoDone(id, false)) } : undefined,
+        seconds: 10,
+      });
     }
   }, [s.reminderFlash]);
 

@@ -3,7 +3,7 @@ import {
   Bell, Search, CircleHelp, Monitor, CalendarDays, Sparkles, Mic, Coffee, Plus, Sunset, RotateCcw, Lock, Fingerprint, Gauge, ShieldCheck, Timer, AlarmClock,
 } from "lucide-react";
 import { useStore } from "../store/AppStore";
-import { STATUSES, SOURCE_LABEL, keyActionLabel } from "../domain/statuses";
+import { SOURCE_LABEL, customStatusDefs, keyActionLabel, statusMeta } from "../domain/statuses";
 import type { StatusId } from "../domain/types";
 import { atToday, clock, dateKey, duration, greeting, hhmm, weekday, ago, startOfDay } from "../domain/time";
 import { nextNode, scheduleForDay, sortedNodes } from "../domain/schedule";
@@ -27,7 +27,7 @@ export function Overview() {
   const { s, now, device, actions } = useStore();
   const toast = useToast();
   const offwork = useOffwork();
-  const meta = STATUSES[s.current.id];
+  const meta = statusMeta(s.current.id);
   const connected = device.state === "connected"; // 未连接时网页不能声称知道设备状态
   const sched = scheduleForDay(s.schedules, s.activeScheduleId, now);
   const offNode = sched ? sortedNodes(sched).find((n) => n.status === "off" && atToday(n.time, now) > now) : undefined;
@@ -39,7 +39,7 @@ export function Overview() {
   const openReminders = s.deviceTodos.filter((t) => !t.done);
   const breakTotal = s.settings.breakMinutes * 60_000;
   // 已同步设备时：以上次上报值为基准按当前状态外推，心跳周期内平滑、到点不抢跑
-  const breakAccum = s.breakSyncedAt && STATUSES[s.current.id].workLike ? s.breakAccumMs + (now - s.breakSyncedAt) : s.breakAccumMs;
+  const breakAccum = s.breakSyncedAt && meta.workLike ? s.breakAccumMs + (now - s.breakSyncedAt) : s.breakAccumMs;
   const breakLeft = Math.max(0, breakTotal - breakAccum);
   const breakOn = s.settings.breakEnabled && !s.breakOffToday;
   const stale = (t: number) => now - t > s.settings.staleMinutes * 60_000;
@@ -52,7 +52,7 @@ export function Overview() {
   };
 
   const sourceText = (() => {
-    if (s.current.source === "schedule") return `来自计划表“${sched?.name ?? ""}”${nn ? ` · ${nn.time} 自动切换为${STATUSES[nn.status].label}` : ""}`;
+    if (s.current.source === "schedule") return `来自计划表“${sched?.name ?? ""}”${nn ? ` · ${nn.time} 自动切换为${statusMeta(nn.status).label}` : ""}`;
     if (s.current.source === "timer") return "来自专注倒计时 · 结束后不会自动切换状态";
     const tail = s.pausedToday ? " · 今日计划已暂停" : nn && !s.offworkToday ? ` · ${nn.time} 起恢复计划表` : "";
     return `来自${SOURCE_LABEL[s.current.source]}${tail}`;
@@ -144,12 +144,26 @@ export function Overview() {
                       key={p.id}
                       type="button"
                       className={`preset ${connected && s.current.id === p.id ? "on" : ""}`}
-                      style={{ ["--c" as string]: STATUSES[p.id].color }}
+                      style={{ ["--c" as string]: statusMeta(p.id).color }}
                       disabled={!connected}
                       onClick={() => pick(p)}
                     >
-                      <span className="d" style={{ background: STATUSES[p.id].color }} />
-                      {p.label ?? STATUSES[p.id].label}
+                      <span className="d" style={{ background: statusMeta(p.id).color }} />
+                      {p.label ?? statusMeta(p.id).label}
+                    </button>
+                  ))}
+                  {customStatusDefs().map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className={`preset ${connected && s.current.id === c.id ? "on" : ""}`}
+                      style={{ ["--c" as string]: c.color }}
+                      disabled={!connected}
+                      onClick={() => pick({ id: c.id })}
+                      title={c.hint}
+                    >
+                      <span className="d" style={{ background: c.color }} />
+                      {c.name}
                     </button>
                   ))}
                   <Link to="/screen" className="preset add"><Plus className="i" style={{ width: 14, height: 14 }} />自定义</Link>
@@ -200,7 +214,7 @@ export function Overview() {
               />
             ))}
             {s.settings.breakEnabled && !s.breakOffToday && (
-              <RowItem lead={<Tile color="green"><Coffee /></Tile>} title="起来活动一下" desc={`累计“工作类”状态 ${s.settings.breakMinutes} 分钟时提醒`} meta={connected ? (STATUSES[s.current.id].workLike ? `约 ${Math.ceil(breakLeft / 60_000)} 分钟后` : "计时已暂停") : "未连接"} />
+              <RowItem lead={<Tile color="green"><Coffee /></Tile>} title="起来活动一下" desc={`累计“工作类”状态 ${s.settings.breakMinutes} 分钟时提醒`} meta={connected ? (meta.workLike ? `约 ${Math.ceil(breakLeft / 60_000)} 分钟后` : "计时已暂停") : "未连接"} />
             )}
           </Card>
 
@@ -214,8 +228,8 @@ export function Overview() {
                 <RowItem
                   key={n.id}
                   className={blocked ? "stale" : ""}
-                  lead={<div className="time-tile"><i style={{ background: STATUSES[n.status].color }} /><b>{n.time}</b><span>{weekday(now)}</span></div>}
-                  title={`${STATUSES[n.status].label}${n.note ? ` · ${n.note}` : ""}`}
+                  lead={<div className="time-tile"><i style={{ background: statusMeta(n.status).color }} /><b>{n.time}</b><span>{weekday(now)}</span></div>}
+                  title={`${statusMeta(n.status).label}${n.note ? ` · ${n.note}` : ""}`}
                   desc={blocked ? (s.pausedToday ? "今日计划已暂停，不会自动切换" : "今天已收工，不会自动切回工作") : n.status === "off" ? "自动收工并生成今日状态回顾" : "到点自动切换，不需要打开网页"}
                   meta={<StatusChip id={n.status} dot={false}>{n.status === "off" ? "收工" : end ? duration(end - atToday(n.time, now)) : "—"}</StatusChip>}
                 />
@@ -256,10 +270,10 @@ export function Overview() {
                 <RowItem
                   key={m.id}
                   className={isStale ? "stale" : ""}
-                  lead={<span className={`avatar ${m.id === "lin" ? "av2" : m.id === "zhou" ? "av3" : "av4"}`}>{m.name.slice(-1)}{!isStale && m.status && <span className="pres" style={{ background: STATUSES[m.status].color }} />}</span>}
+                  lead={<span className={`avatar ${m.id === "lin" ? "av2" : m.id === "zhou" ? "av3" : "av4"}`}>{m.name.slice(-1)}{!isStale && m.status && <span className="pres" style={{ background: statusMeta(m.status).color }} />}</span>}
                   title={m.name}
                   desc={isStale ? `最后更新 ${hhmm(m.updatedAt)} · 可能已过期` : `${m.via === "espnow" ? "ESP-NOW" : "网关转发"} · ${ago(m.updatedAt, now)}`}
-                  meta={isStale || !m.status ? <UnknownChip /> : <StatusChip id={m.status}>{STATUSES[m.status].label}{m.until ? ` · 至 ${m.until}` : ""}</StatusChip>}
+                  meta={isStale || !m.status ? <UnknownChip /> : <StatusChip id={m.status}>{statusMeta(m.status).label}{m.until ? ` · 至 ${m.until}` : ""}</StatusChip>}
                 />
               );
             })}
@@ -280,7 +294,7 @@ export function Overview() {
               <Ring value={breakOn && connected ? 1 - breakLeft / breakTotal : 0} label={!connected ? "未连接" : breakOn ? clock(breakLeft, false) : "已关闭"} sub={breakOn && connected ? "后提醒" : ""} />
               <div style={{ display: "grid", gap: 8 }}>
                 <div className="hint" style={{ fontSize: 13 }}>
-                  {!connected ? "连接设备后同步休息计时。" : !breakOn ? "今天不会再提醒。" : STATUSES[s.current.id].workLike ? "会议、休息和下班时自动暂停计时。" : `当前“${meta.label}”，计时已暂停。`}
+                  {!connected ? "连接设备后同步休息计时。" : !breakOn ? "今天不会再提醒。" : meta.workLike ? "会议、休息和下班时自动暂停计时。" : `当前“${meta.label}”，计时已暂停。`}
                   {connected && s.breakOffToday && <button className="btn btn-ghost btn-sm" onClick={() => actions.resumeBreakToday()}>恢复提醒</button>}
                 </div>
                 <MinuteChips values={s.settings.breakOptions} selected={s.settings.breakMinutes} disabled={!breakOn || !connected} onSelect={(m) => actions.setBreakInterval(m)} onChange={(v) => actions.updateSettings({ breakOptions: v })} />

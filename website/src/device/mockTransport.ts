@@ -1,4 +1,4 @@
-import type { DevSched, DeviceTodo, DeviceTransport, InboundMessage, OutboundMessage } from "./protocol";
+import type { DevSched, DevStdef, DeviceTodo, DeviceTransport, InboundMessage, OutboundMessage } from "./protocol";
 import { b64ToU8, u8ToB64 } from "./app";
 import { pcmToAdpcmFrame } from "./audio";
 
@@ -30,6 +30,14 @@ export class MockTransport implements DeviceTransport {
   private schedLastMin = -1;
   private offDay = "";           // 进入 off 的日期：当天后续节点作废
   private segs: { status: string; start: number; end?: number }[] = [];
+  /** 模拟设备 /stdefs.json：自定义状态注册表事实源（与固件 v0.9 对齐） */
+  private stdefs: DevStdef[] = [];
+  private stdefNextId = 1;
+  /** 模拟设备 /keys.json + /led.json：按键映射与灯效设置事实源（v1.0 起） */
+  private keyActs: [string, string, string, string] = ["offwork", "busy", "cycleL", "cycleR"];
+  private ledMap: Record<string, "solid" | "breath" | "off"> = {};
+  private ledBr = 40;
+  private ledNight = false;
 
   async connect() {
     await new Promise((r) => setTimeout(r, 600));
@@ -38,9 +46,25 @@ export class MockTransport implements DeviceTransport {
       const j = JSON.parse(localStorage.getItem("sgp-mock-scheds") || "null");
       if (j) { this.scheds = j.list ?? []; this.schedAct = j.act ?? ""; this.schedMode = j.mode ?? "next"; this.schedPausedDay = j.pday ?? ""; this.schedNextId = j.nextId ?? 1; }
     } catch { /* 空 */ }
+    try {
+      const j = JSON.parse(localStorage.getItem("sgp-mock-stdefs") || "null");
+      if (j) { this.stdefs = j.list ?? []; this.stdefNextId = j.nextId ?? 1; }
+    } catch { /* 空 */ }
+    try {
+      const j = JSON.parse(localStorage.getItem("sgp-mock-keys") || "null");
+      if (j) this.keyActs = [j.k1 ?? "offwork", j.k2 ?? "busy", j.k3 ?? "cycleL", j.k4 ?? "cycleR"];
+    } catch { /* 空 */ }
+    try {
+      const j = JSON.parse(localStorage.getItem("sgp-mock-led") || "null");
+      if (j) { this.ledMap = j.map ?? {}; this.ledBr = j.br ?? 40; this.ledNight = !!j.night; }
+      // j.map 已是 LedMode 字典（sgp-mock-led 由 reportLed 写入）
+    } catch { /* 空 */ }
     setTimeout(() => this.reportApps(), 700);
     setTimeout(() => this.reportTodos(), 750); // 与固件 hello→sendTodos 对齐：连接即同步设备待办
     setTimeout(() => this.reportSchedules(), 800); // hello→sendSchedules：计划表清单事实源
+    setTimeout(() => this.reportStdefs(), 850);  // hello→sendStdefs：自定义状态注册表事实源
+    setTimeout(() => this.reportKeys(), 880);    // hello→sendKeys：按键映射事实源
+    setTimeout(() => this.reportLed(), 900);     // hello→sendLed：灯效设置事实源
     this.todoTimer = setInterval(() => { this.pollTodos(); this.pollSchedule(); }, 1000); // 模拟固件 pollTodos+pollSchedule
     return "收工牌-A12（模拟）";
   }
@@ -63,6 +87,21 @@ export class MockTransport implements DeviceTransport {
     if (msg.type === "agent" && msg.op === "cancel") { this.agentMsgs = []; return; }
     if (msg.type === "todo") { this.todoOp(msg); return; }
     if (msg.type === "sched") { this.schedOp(msg); return; }
+    if (msg.type === "stdef") { this.stdefOp(msg); return; }
+    if (msg.type === "keys") {
+      this.keyActs = [msg.k1, msg.k2, msg.k3, msg.k4];
+      this.reportKeys();
+      return;
+    }
+    if (msg.type === "led") {
+      if (msg.op === "set") {
+        if (msg.map) this.ledMap = { ...this.ledMap, ...msg.map };
+        if (msg.br !== undefined) this.ledBr = msg.br;
+        if (msg.night !== undefined) this.ledNight = msg.night;
+      }
+      this.reportLed();
+      return;
+    }
     if (msg.type !== "app") return;
     if (msg.op === "begin") this.upload = { status: msg.status, size: msg.size, parts: [] };
     else if (msg.op === "chunk") this.upload?.parts.push(msg.data);
@@ -180,6 +219,35 @@ export class MockTransport implements DeviceTransport {
     if (this.schedMode === "today") this.schedPausedDay = this.dayKey();
     else this.schedHold = true;
     this.reportSchedules();
+  }
+  // ---- 自定义状态注册表（与固件 /stdefs.json 对齐） ----
+  private reportStdefs() {
+    localStorage.setItem("sgp-mock-stdefs", JSON.stringify({ list: this.stdefs, nextId: this.stdefNextId }));
+    this.msgCb?.({ type: "stdefs", list: this.stdefs.map((d) => ({ ...d })) });
+  }
+  private stdefOp(msg: Extract<OutboundMessage, { type: "stdef" }>) {
+    if (msg.op === "set") {
+      const id = msg.id ?? `c${this.stdefNextId++}`;
+      const d: DevStdef = { id, zh: msg.zh, hint: msg.hint, c: msg.c, work: msg.work };
+      const i = this.stdefs.findIndex((x) => x.id === id);
+      if (i >= 0) this.stdefs[i] = d;
+      else if (this.stdefs.length < 8) this.stdefs.push(d);
+      else { this.msgCb?.({ type: "stdefErr", msg: "full" }); return; }
+    } else if (msg.op === "del") {
+      this.stdefs = this.stdefs.filter((x) => x.id !== msg.id);
+      this.apps.delete(msg.id);            // 与固件一致：连带删除该状态的自定义屏幕
+      this.reportApps();
+    }
+    this.reportStdefs();
+  }
+  // ---- 按键映射 / 灯效（与固件 /keys.json /led.json 对齐） ----
+  private reportKeys() {
+    localStorage.setItem("sgp-mock-keys", JSON.stringify({ k1: this.keyActs[0], k2: this.keyActs[1], k3: this.keyActs[2], k4: this.keyActs[3] }));
+    this.msgCb?.({ type: "keys", k1: this.keyActs[0], k2: this.keyActs[1], k3: this.keyActs[2], k4: this.keyActs[3] });
+  }
+  private reportLed() {
+    localStorage.setItem("sgp-mock-led", JSON.stringify({ map: this.ledMap, br: this.ledBr, night: this.ledNight }));
+    this.msgCb?.({ type: "led", map: { ...this.ledMap }, br: this.ledBr, night: this.ledNight });
   }
   /** 固件 markStatus→sendSegments：模拟设备端状态切换（自治触发）→ 区间推送 */
   private markStatus(status: string) {

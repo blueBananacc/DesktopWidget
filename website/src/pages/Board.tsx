@@ -1,8 +1,8 @@
-import { Lock, Radio, Users, QrCode, LogOut } from "lucide-react";
+import { Lock, Radio, Users, QrCode, LogOut, Unplug } from "lucide-react";
 import { useStore } from "../store/AppStore";
-import { STATUSES } from "../domain/statuses";
+import { statusMeta } from "../domain/statuses";
 import { ago, hhmm } from "../domain/time";
-import { Banner, Card, CardHeader, PageHeader, RowItem, SettingRow, StatusChip, Tile, Toggle, UnknownChip } from "../ui/Primitives";
+import { Banner, Card, CardHeader, EmptyState, PageHeader, RowItem, SettingRow, StatusChip, Tile, Toggle, UnknownChip } from "../ui/Primitives";
 import { useToast } from "../ui/Toast";
 
 const AV = ["av2", "av3", "av4", "av1"];
@@ -11,7 +11,16 @@ export function BoardPage() {
   const { s, now, actions, device } = useStore();
   const toast = useToast();
   const stale = (t: number) => now - t > s.settings.staleMinutes * 60_000;
-  const connected = device.state === "connected"; // 未连接时无法声称自己的当前状态
+  const connected = device.state === "connected"; // 成员状态由连接的设备转发；断连时看板不可用
+
+  if (!connected) {
+    return (
+      <>
+        <PageHeader title="共享看板" desc={`${s.user.zone} · 只显示成员主动分享的当前状态，不包含计划、待办和历史。`} />
+        <Card><div className="card-b"><EmptyState icon={<Unplug />} title="需要连接设备" desc="成员状态靠连接的设备作为网关转发。连接收工牌后才能查看共享看板、设置分享。" /></div></Card>
+      </>
+    );
+  }
 
   return (
     <>
@@ -20,7 +29,7 @@ export function BoardPage() {
         <Card>
           <CardHeader title="成员" count={s.members.length + 1} />
           <RowItem
-            lead={<span className="avatar av1">{s.user.name.slice(-1)}{s.settings.shareEnabled && connected && <span className="pres" style={{ background: STATUSES[s.current.id].color }} />}</span>}
+            lead={<span className="avatar av1">{s.user.name.slice(-1)}{s.settings.shareEnabled && connected && <span className="pres" style={{ background: statusMeta(s.current.id).color }} />}</span>}
             title={`${s.user.name}（我）· ${s.settings.deviceName}`}
             desc={!connected ? "设备未连接，状态同步暂停" : s.settings.shareEnabled ? "分享中 · 刚刚" : "未分享 · 其他人看不到"}
             meta={!connected ? <UnknownChip /> : s.settings.shareEnabled ? <StatusChip id={s.current.id} /> : <span className="chip unknown">未分享</span>}
@@ -31,10 +40,10 @@ export function BoardPage() {
               <RowItem
                 key={m.id}
                 className={isStale ? "stale" : ""}
-                lead={<span className={`avatar ${AV[i % AV.length]}`}>{m.name.slice(-1)}{!isStale && m.status && <span className="pres" style={{ background: STATUSES[m.status].color }} />}</span>}
+                lead={<span className={`avatar ${AV[i % AV.length]}`}>{m.name.slice(-1)}{!isStale && m.status && <span className="pres" style={{ background: statusMeta(m.status).color }} />}</span>}
                 title={m.name}
                 desc={isStale ? `最后更新 ${hhmm(m.updatedAt)} · 可能已过期` : `${m.via === "espnow" ? "ESP-NOW" : "网关转发"} · ${ago(m.updatedAt, now)}`}
-                meta={isStale || !m.status ? <UnknownChip /> : <StatusChip id={m.status}>{STATUSES[m.status].label}{m.until ? ` · 至 ${m.until}` : ""}</StatusChip>}
+                meta={isStale || !m.status ? <UnknownChip /> : <StatusChip id={m.status}>{statusMeta(m.status).label}{m.until ? ` · 至 ${m.until}` : ""}</StatusChip>}
               />
             );
           })}
