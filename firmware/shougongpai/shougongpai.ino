@@ -266,6 +266,13 @@ Seg      segs[96];
 int      segCount = 0;
 bool     segDirty = false;
 uint32_t lastSegPush = 0;
+// 断电恢复：开机把 /segs.json 读进 pendSegs（保持 epoch 域，不换算——millis 表达不了开机前的时刻）；
+// 首次校时且日期吻合时保留，推送/落盘与 live segs 合并输出
+struct PendSeg { char status[8]; int64_t s; int64_t e; };
+PendSeg  pendSegs[96];
+int      pendCount = 0;
+int32_t  pendDay = -1;
+int64_t  pendSaved = 0;
 
 // 本地时间换算（校时后可用）
 int64_t localEpochMs() { return epochBase + millis() - epochBaseMs + (int64_t)tzOffsetMin * 60000; }
@@ -558,10 +565,82 @@ void markStatus(const char* id) {
   segDirty = true;
 }
 
+// 今日区间落盘 /segs.json：随 sendSegments 调用（状态切换 2s 防抖 + 10 分钟兜底，断电误差 ≤10min）
+void saveSegs() {
+  if (epochBase < 0) return;
+  JsonDocument doc;
+  doc["day"] = dayOf(localEpochMs());
+  doc["saved"] = utcEpochMs();                       // 本次落盘时刻 ≈ 断电前的"最后已知存活"边界
+  JsonArray a = doc["segs"].to<JsonArray>();
+  for (int i = 0; i < pendCount; i++) {              // 断电恢复的段本来就是 epoch，原样合并
+    JsonObject o = a.add<JsonObject>();
+    o["st"] = pendSegs[i].status;
+    o["s"] = pendSegs[i].s;
+    if (pendSegs[i].e > 0) o["e"] = pendSegs[i].e;
+  }
+  for (int i = 0; i < segCount; i++) {
+    JsonObject o = a.add<JsonObject>();
+    o["st"] = segs[i].status;
+    o["s"] = epochBase + (int64_t)segs[i].startMs - epochBaseMs;
+    if (segs[i].endMs) o["e"] = epochBase + (int64_t)segs[i].endMs - epochBaseMs;
+  }
+  File f = LittleFS.open("/segs.json", "w"); if (f) { serializeJson(doc, f); f.close(); }
+}
+
+void loadSegs() {
+  File f = LittleFS.open("/segs.json", "r"); if (!f) return;
+  JsonDocument doc;
+  if (deserializeJson(doc, f)) { f.close(); return; }
+  f.close();
+  pendDay = doc["day"] | -1;
+  pendSaved = doc["saved"] | (int64_t)0;
+  for (JsonObject o : doc["segs"].as<JsonArray>()) {
+    if (pendCount >= 96) break;
+    int64_t s = o["s"] | (int64_t)0;
+    int64_t e = o["e"] | (int64_t)0;
+    if (s <= 0) continue;
+    if (pendSaved > 0 && s > pendSaved) continue;    // 段不可能晚于最后落盘时刻：脏数据丢弃
+    if (pendSaved > 0 && e > pendSaved) e = pendSaved; // 结束晚于落盘：钳到断电边界
+    strncpy(pendSegs[pendCount].status, o["st"] | "work", sizeof(pendSegs[0].status) - 1);
+    pendSegs[pendCount].status[sizeof(pendSegs[0].status) - 1] = 0;
+    pendSegs[pendCount].s = s;
+    pendSegs[pendCount].e = e;
+    pendCount++;
+  }
+  // 断电时未闭合的段按 saved（最后一次落盘）收尾 ≈ 断电时刻；到本次开机即"未记录"间隔
+  if (pendCount > 0 && pendSegs[pendCount - 1].e <= 0)
+    pendSegs[pendCount - 1].e = pendSaved > pendSegs[pendCount - 1].s ? pendSaved : pendSegs[pendCount - 1].s;
+}
+
+// 首次校时后调用：日期吻合保留 pendSegs（仍是 epoch 域，推送时直接输出），否则丢弃昨日残留
+void adoptPendSegs() {
+  if (epochBase < 0) return;
+  if (pendCount > 0 && pendDay == dayOf(localEpochMs())) {
+    for (int i = 0; i < pendCount; i++)
+      if (!strcmp(pendSegs[i].status, "off")) { offSetDay = dayOf(localEpochMs()); break; }  // 断电前收过工：今天挡后续计划节点
+    segDirty = true;
+    Serial.printf("[SEG] restored %d persisted segments\n", pendCount);
+  } else {
+    pendCount = 0;
+  }
+  pendDay = -1;
+}
+
 // 推送今日全部区间：segBegin → N×seg → segEnd。仅在校时后推送（millis → epoch 换算）
 void sendSegments() {
   if (epochBase < 0 || segCount == 0) return;
+  saveSegs();                                        // 每次推送顺带落盘：切换即存 + 10min 误差界
   sendLine(F("{\"type\":\"segments\",\"phase\":\"begin\"}"));
+  for (int i = 0; i < pendCount; i++) {              // 断电恢复的段：epoch 域原样直发
+    char buf[128];
+    if (pendSegs[i].e > 0)
+      snprintf(buf, sizeof buf, "{\"type\":\"seg\",\"status\":\"%s\",\"start\":%lld,\"end\":%lld}",
+        pendSegs[i].status, pendSegs[i].s, pendSegs[i].e);
+    else
+      snprintf(buf, sizeof buf, "{\"type\":\"seg\",\"status\":\"%s\",\"start\":%lld}",
+        pendSegs[i].status, pendSegs[i].s);
+    sendLine(buf);
+  }
   for (int i = 0; i < segCount; i++) {
     char buf[128];
     const int64_t start = epochBase + (int64_t)segs[i].startMs - epochBaseMs;
@@ -746,6 +825,7 @@ void handleLine(const String& line) {
     epochBaseMs = millis();
     tzOffsetMin = doc["tzOffsetMin"] | 480;
     lastWantTime = millis();               // 下次重校在 10 分钟后
+    adoptPendSegs();                       // 校时完成：回填断电前持久化的今日区间
     segDirty = true;                       // 校时完成后可换算真实时间，安排推送
     oledDirty = true;
   } else if (!strcmp(type, "break")) {
@@ -1282,7 +1362,8 @@ void pollBreak() {
     if (breakDay < 0) breakDay = day;
     else if (day != breakDay) {
       breakDay = day; breakOffToday = false; breakAccumMs = 0;
-      segCount = 0; markStatus(curStatusId.c_str());   // 新的一天重开区间
+      segCount = 0; pendCount = 0;                   // 昨日恢复段一并丢弃
+      markStatus(curStatusId.c_str());               // 新的一天重开区间
     }
   }
   if (breakEnabled && !breakOffToday && isWorkLike(curStatusId.c_str())) {
@@ -1812,6 +1893,7 @@ void setup() {
   loadStdefs();                       // 自定义状态注册表
   loadKeys();                         // 按键映射
   loadLed();                          // 灯效设置
+  loadSegs();                         // 断电前的今日区间：校时后 adoptPendSegs 回填
   // 崩溃防护：上次运行中的 app 导致看门狗/异常复位 → 禁用该文件（改名 .bad，避免重启死循环）
   esp_reset_reason_t rr = esp_reset_reason();
   if ((rr == ESP_RST_PANIC || rr == ESP_RST_TASK_WDT || rr == ESP_RST_INT_WDT || rr == ESP_RST_WDT) && crashedApp[0]) {
