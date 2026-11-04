@@ -15,7 +15,7 @@ export default function App() {
   return (
     <ToastProvider>
       <AppStoreProvider>
-        <BrowserRouter>
+        <BrowserRouter basename={import.meta.env.BASE_URL}>
           <Routes>
             <Route element={<AppShell />}>
               <Route index element={<Overview />} />

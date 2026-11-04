@@ -20,18 +20,21 @@ ssh -i C:\Users\666\.ssh\sgp_deploy -o StrictHostKeyChecking=no root@120.55.125.
 ## 本站部署形态（2026-11-04 起）
 
 ```
-https://120.55.125.13 ──443──► sgp-web 容器（nginx:1.27-alpine → /opt/sgp-web/site）
-http://120.55.125.13  ──80───► free-hire-frontend（原有系统，零改动）
+https://120.55.125.13 ──443──► sgp-web 容器（nginx:1.27-alpine → /opt/sgp-web/site/sgp）
+                               裸域 / → 302 到 /sgp/；应用 base=/sgp/
+http://120.55.125.13  ──80───► free-hire-frontend（原有系统，零改动；/main 入口是它的可选重定向）
 ```
+
+URL 约定：**本站入口固定 `https://120.55.125.13/sgp/`**——用路径区分两个项目，不用记 http/https 端口差异。Vite `base:"/sgp/"` + React Router `basename=BASE_URL` 配套，资源都在 `/sgp/assets/` 下。
 
 服务器上 `/opt/sgp-web/`：
 
 | 文件 | 作用 |
 |---|---|
 | `docker-compose.yml` | 独立 compose 项目：nginx:1.27-alpine，只发布 `443:443`，`restart: unless-stopped` |
-| `nginx.conf` | TLS + SPA fallback（`try_files $uri $uri/ /index.html`，React Router 必需） |
+| `nginx.conf` | TLS + `/`→302 `/sgp/` + `location /sgp/` SPA fallback（`try_files $uri $uri/ /sgp/index.html`，React Router 必需） |
 | `tls/cert.pem` `key.pem` | 自签证书，`CN=SAN=120.55.125.13`，3650 天，2036 年到期 |
-| `site/` | 网站静态文件（构建产物直接铺这里，容器只读挂载） |
+| `site/sgp/` | 网站静态文件（构建产物直接铺这里，容器只读挂载） |
 
 证书是**自签**的——浏览器首次访问要点「高级 → 继续访问」，例外会被记住。要消掉警告需要域名 + 真证书（Let's Encrypt），目前没有域名。
 
@@ -42,7 +45,7 @@ cd C:\Users\666\Desktop\shangxiabanbaijian\code\website
 powershell -File scripts\deploy.ps1
 ```
 
-脚本做的事：`npm run build` → `scp -r dist\* root@…:/opt/sgp-web/site/` → `curl -k https://127.0.0.1/` 健康检查。**纯静态替换，容器不用重启**。
+脚本做的事：`npm run build` → `scp -r dist\* root@…:/opt/sgp-web/site/sgp/` → `curl -k https://127.0.0.1/sgp/` 健康检查。**纯静态替换，容器不用重启**。
 
 ## 设备连接原理（为什么 HTTPS 是必须的）
 
@@ -52,6 +55,6 @@ powershell -File scripts\deploy.ps1
 
 ## 安全操作边界（同 HROnfire 运维报告）
 
-- 可以：`docker ps` / `docker logs sgp-web` / 替换 `/opt/sgp-web/site/` 内容 / `docker compose -f /opt/sgp-web/docker-compose.yml restart`
+- 可以：`docker ps` / `docker logs sgp-web` / 替换 `/opt/sgp-web/site/sgp/` 内容 / `docker compose -f /opt/sgp-web/docker-compose.yml restart`
 - 禁止：动 `/opt/hronfire`、`docker compose down -v`/`volume rm`/`system prune --volumes`（会删 pg-data）、宿主机装监听 80 的服务、改安全组已有规则、改 iptables
 - 容器删了重建：`cd /opt/sgp-web && docker compose up -d`（挂载文件都在，秒回）
