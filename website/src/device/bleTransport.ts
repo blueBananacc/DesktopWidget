@@ -22,12 +22,24 @@ export class BleTransport implements DeviceTransport {
 
   async connect() {
     if (!bleSupported()) throw new Error("当前浏览器不支持网页蓝牙，请使用电脑版 Chrome 或 Edge");
-    this.device = await navigator.bluetooth.requestDevice({
+    return this.attach(await navigator.bluetooth.requestDevice({
       filters: [{ namePrefix: BLE_NAME_PREFIX }, { services: [BLE_SERVICE_UUID] }],
       optionalServices: [BLE_SERVICE_UUID],
-    });
-    this.device.addEventListener("gattserverdisconnected", () => this.discCb?.());
-    const server = await this.device.gatt!.connect();
+    }));
+  }
+
+  /** 静默重连：只用浏览器已授权的设备，不弹选择框（页面刷新后自动恢复连接用；已授权设备的 gatt.connect 不需要用户手势） */
+  async connectGranted() {
+    if (!bleSupported()) throw new Error("当前浏览器不支持网页蓝牙");
+    const dev = (await navigator.bluetooth.getDevices()).find((d) => d.name?.startsWith(BLE_NAME_PREFIX));
+    if (!dev) throw new Error("没有已授权的蓝牙设备");
+    return this.attach(dev);
+  }
+
+  private async attach(device: BluetoothDevice) {
+    this.device = device;
+    device.addEventListener("gattserverdisconnected", () => this.discCb?.());
+    const server = await device.gatt!.connect();
     const service = await server.getPrimaryService(BLE_SERVICE_UUID);
     this.rx = await service.getCharacteristic(BLE_RX_UUID);
     const tx = await service.getCharacteristic(BLE_TX_UUID);

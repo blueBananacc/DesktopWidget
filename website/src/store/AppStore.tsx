@@ -5,14 +5,15 @@ import type {
 } from "../domain/types";
 import { STATUSES } from "../domain/statuses";
 import { atToday, dateKey, hhmm, startOfDay, uid } from "../domain/time";
-import { currentNode, nextNode, scheduleForDay, sortedNodes } from "../domain/schedule";
+import { currentNode, nextNode, scheduleForDay } from "../domain/schedule";
 import { lastDays, totalsForSegments } from "../domain/review";
 import { defaultSettings, initialStatus, seedMembers, seedPast, seedReminders, seedSchedules, seedSegments } from "./seed";
-import type { DeviceTransport, InboundMessage, OutboundMessage } from "../device/protocol";
+import type { DevSched, DeviceTodo, DeviceTransport, InboundMessage, OutboundMessage } from "../device/protocol";
 import { MockTransport } from "../device/mockTransport";
 import { BleTransport } from "../device/bleTransport";
 import { SerialTransport } from "../device/serialTransport";
 import { b64ToU8, hashBytes, pendingClears, setDeployedHash, setPendingClears } from "../device/app";
+import { callLlm, loadLlmCfg, llmErrText } from "../device/llm";
 
 const STORAGE_KEY = "shougongpai.v1";
 /** 本机保留的历史天数（含今天），超出的在跨天时清理 */
@@ -29,6 +30,8 @@ let breakPending: { minutes?: number; enabled?: boolean; offToday?: boolean } | 
 let pendingSegs: { status: StatusId; start: number; end?: number }[] = [];
 /** app dump 读回分片累积器 */
 let appDumpAcc: { status: string; parts: string[] } = { status: "", parts: [] };
+/** 旧版网页计划表存档：设备清单成为事实源后，首次连接且设备为空时一次性迁入设备 */
+let legacySched: { schedules: Schedule[]; activeId: string } | null = null;
 const sendBreak = (patch: { minutes?: number; enabled?: boolean; offToday?: boolean; accumMs?: number }, s: AppState) => {
   const { accumMs, ...persistent } = patch;
   if (Object.keys(persistent).length) breakPending = { ...breakPending, ...persistent };
@@ -39,6 +42,26 @@ const sendBreak = (patch: { minutes?: number; enabled?: boolean; offToday?: bool
     offToday: patch.offToday ?? s.breakOffToday,
     ...(accumMs !== undefined ? { accumMs } : {}),
   });
+};
+
+/** 设备 agent 循环的 LLM 代理：设备发 agentReq（消息+工具 schema）→ 网页调已配置 LLM → agentRes 回设备。
+ *  设备是循环主体（断连/超时它自己收尾）；网页只转发并记错误便于 UI 提示。 */
+const proxyAgentReq = async (m: Extract<InboundMessage, { type: "agentReq" }>, setErr?: (msg: string) => void) => {
+  const t = activeTransport;
+  if (!t) return;
+  try {
+    const cfg = loadLlmCfg();
+    if (!cfg.key.trim()) throw new Error("未配置 LLM Key（语音转文字页 → LLM 服务商）");
+    const j = await callLlm(cfg, m.msgs, { tools: m.tools as never, maxTokens: 400 });
+    const msg = j.choices?.[0]?.message;
+    if (!msg) throw new Error("模型返回为空");
+    await t.send({ type: "agentRes", message: msg });
+  } catch (e) {
+    const txt = llmErrText(e);
+    setErr?.(txt);
+    // 给设备一个终止回复，让循环正常收尾并在 OLED 上显示原因
+    await t.send({ type: "agentRes", message: { role: "assistant", content: `（LLM 调用失败：${txt}）` } }).catch(() => {});
+  }
 };
 
 export interface TimerState {
@@ -75,6 +98,10 @@ export interface AppState {
   breakOffToday: boolean;
   agent: { state: AgentState; task: string; updatedAt: number };
   user: { name: string; team: string; zone: string };
+  /** 待办事实源（设备 LittleFS 的 todos 推送）：agent/网页 todo 消息写入设备，网页只是视图 */
+  deviceTodos: DeviceTodo[];
+  /** 设备端 agent 循环状态（设备是循环主体，网页只是 LLM 代理） */
+  deviceAgent: { busy: boolean; reply?: string; err?: string; at: number };
 }
 
 type Snapshot = Pick<AppState, "current" | "segments" | "offworkToday" | "timer">;
@@ -107,6 +134,8 @@ const createInitial = (now: number): AppState => {
     breakOffToday: false,
     agent: { state: "needsInput", task: "重构登录模块", updatedAt: now - 3 * 60_000 },
     user: { name: "阿杰", team: "3 楼设计组", zone: "3 楼设计组" },
+    deviceTodos: [],
+    deviceAgent: { busy: false, at: 0 },
   };
 };
 
@@ -139,6 +168,12 @@ const load = (now: number): AppState => {
         ],
         seededLeftover2: true,
         reminderFlash: undefined, // 只用于本次会话弹 toast，重新打开页面不重弹旧提醒
+        // 设备镜像态不持久化：事实源在设备（连接后由 todos/agent*/schedules 消息重推），存档里的旧值是幽灵
+        deviceTodos: [],
+        deviceAgent: { busy: false, at: 0 },
+        // 计划表同理：s.schedules 是设备清单镜像；旧存档里的 schedules 只留作迁移队列，不再当事实源
+        pausedToday: false,
+        ...(() => { if (saved.schedules?.length) legacySched = { schedules: saved.schedules, activeId: saved.activeScheduleId ?? "" }; return {}; })(),
         ...(past ? { history: past.history, historySegments: past.segments } : {}),
       };
     }
@@ -160,10 +195,6 @@ const applyStatus = (s: AppState, id: StatusId, source: StatusSource, now: numbe
   };
 };
 
-const scheduleUntil = (s: AppState, now: number) => {
-  const n = nextNode(scheduleForDay(s.schedules, s.activeScheduleId, now), now);
-  return n ? atToday(n.time, now) : undefined;
-};
 
 const tick = (s: AppState, now: number): AppState => {
   let next = s;
@@ -191,34 +222,10 @@ const tick = (s: AppState, now: number): AppState => {
     };
   }
 
-  const sched = scheduleForDay(next.schedules, next.activeScheduleId, now);
-  const node = currentNode(sched, now);
-  const key = node ? `${today}:${node.id}` : undefined;
-  if (node && key !== next.lastAppliedNode) {
-    const blockedByOffwork = next.offworkToday; // 收工 = 今日计划完成，所有节点作废（手动切回工作不受影响）
-    next = { ...next, lastAppliedNode: key };
-    if (!next.pausedToday && !blockedByOffwork && next.current.id !== node.status) {
-      next = applyStatus(next, node.status, "schedule", now, scheduleUntil(next, now), node.note);
-      if (node.status === "off") next = { ...next, offworkToday: true };
-    } else if (!next.pausedToday && !blockedByOffwork && next.current.source === "schedule") {
-      next = { ...next, current: { ...next.current, until: scheduleUntil(next, now), note: node.note } };
-    }
-  }
+  // 计划节点由设备自治执行（网页不再做调度）：到点后设备切状态并推 segments，网页采纳
+  // s.schedules 只是设备清单镜像（scheduleForDay 仅供页面显示"今天生效哪张"）
 
-  // 提醒触发：定时提醒到点触发（只归属今天的）；收工后提醒在收工后触发（含遗留未处理的）
-  const willFire = (r: Reminder) =>
-    !r.done && !r.firedAt &&
-    ((r.trigger === "time" && r.day === today && !!r.at && atToday(r.at, now) <= now) ||
-     (r.trigger === "afterOffwork" && r.day <= today && next.offworkToday));
-  const firing = next.reminders.filter(willFire);
-  if (firing.length) {
-    next = {
-      ...next,
-      reminders: next.reminders.map((r) => (willFire(r) ? { ...r, firedAt: now } : r)),
-      reminderFlash: { text: firing.map((r) => r.title).join("、"), at: now, ids: firing.map((r) => r.id) },
-    };
-    for (const r of firing) deviceSend?.({ type: "reminder", text: r.showOnDevice ? r.deviceText?.trim() || r.title : undefined, count: firing.length, ts: now });
-  }
+  // 待办提醒由设备自治触发（网页不再做调度）：到点/收工触发后设备推 todoFired + todos，AppShell 负责弹 toast
 
   if (next.timer && !next.timer.expired && now >= next.timer.endsAt) next = { ...next, timer: { ...next.timer, expired: true } };
 
@@ -239,8 +246,10 @@ interface Store {
   device: DeviceInfo;
   transport?: DeviceTransport;
   actions: ReturnType<typeof makeActions>;
-  connect: (kind: "mock" | "ble" | "serial") => Promise<void>;
+  connect: (kind: "mock" | "ble" | "serial", grantedOnly?: boolean) => Promise<void>;
   disconnect: () => Promise<void>;
+  /** 订阅所有入站设备消息（音频帧等页面级消费）；返回退订函数 */
+  onDeviceMessage: (cb: (m: InboundMessage) => void) => () => void;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -251,7 +260,7 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
       const now = Date.now();
       const until = opts.minutes ? now + opts.minutes * 60_000 : undefined;
       let next = applyStatus(s, id, source, now, until, opts.note);
-      if (source !== "schedule" && s.settings.overrideMode === "pauseToday") next = { ...next, pausedToday: true };
+      // 手动干预后的暂停/挂起由设备按 mode 处理（pausedToday 是设备镜像，网页不本地置位）
       if (id === "rest") next = { ...next, breakAccumMs: 0, breakDue: false };
       return next;
     });
@@ -269,13 +278,7 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
     set((s) => ({ ...s, ...snap }));
   },
   pauseToday(paused: boolean) {
-    set((s) => {
-      if (paused) return { ...s, pausedToday: true };
-      const now = Date.now();
-      const node = currentNode(scheduleForDay(s.schedules, s.activeScheduleId, now), now);
-      const resumed = { ...s, pausedToday: false };
-      return node && node.status !== s.current.id ? applyStatus(resumed, node.status, "schedule", now, scheduleUntil(resumed, now), node.note) : resumed;
-    });
+    deviceSend?.({ type: "sched", op: "pause", paused });   // 设备置暂停日并回 schedules 快照，网页等推送
   },
   startTimer(minutes: number, status: StatusId = "focus") {
     set((s) => {
@@ -329,28 +332,18 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
     });
   },
   setActiveSchedule(id: string) {
-    set((s) => ({ ...s, activeScheduleId: id, lastAppliedNode: undefined }));
+    deviceSend?.({ type: "sched", op: "use", id });          // 事实源在设备：等 schedules 快照回推生效
   },
   saveSchedule(schedule: Schedule) {
-    set((s) => {
-      const exists = s.schedules.some((x) => x.id === schedule.id);
-      return { ...s, schedules: exists ? s.schedules.map((x) => (x.id === schedule.id ? schedule : x)) : [...s.schedules, schedule], lastAppliedNode: undefined };
-    });
+    deviceSend?.({ type: "sched", op: "set", id: schedule.id, name: schedule.name, kind: schedule.kind, wd: schedule.kind === "repeat" ? schedule.weekdays : undefined, date: schedule.kind === "date" ? schedule.date : undefined, ns: schedule.nodes.map((n) => ({ t: n.time, st: n.status, ...(n.note ? { n: n.note } : {}) })) });
   },
   deleteSchedule(id: string) {
-    set((s) => {
-      const schedules = s.schedules.filter((x) => x.id !== id);
-      // 删除生效中的重复计划 → 不再启用任何表，设备上这份计划随之清空（不静默换另一张）
-      const activeScheduleId = s.activeScheduleId === id ? "" : s.activeScheduleId;
-      return { ...s, schedules, activeScheduleId };
-    });
+    deviceSend?.({ type: "sched", op: "del", id });
   },
   duplicateSchedule(id: string) {
-    set((s) => {
-      const src = s.schedules.find((x) => x.id === id);
-      if (!src) return s;
-      return { ...s, schedules: [...s.schedules, { ...src, id: uid(), name: `${src.name}（副本）`, nodes: src.nodes.map((n) => ({ ...n, id: uid() })) }] };
-    });
+    const src = get().schedules.find((x) => x.id === id);
+    if (!src) return;
+    deviceSend?.({ type: "sched", op: "set", name: `${src.name}（副本）`, kind: src.kind, wd: src.kind === "repeat" ? src.weekdays : undefined, date: src.kind === "date" ? src.date : undefined, ns: src.nodes.map((n) => ({ t: n.time, st: n.status, ...(n.note ? { n: n.note } : {}) })) });
   },
   addReminder(r: Omit<Reminder, "id" | "done" | "day">) {
     set((s) => ({ ...s, reminders: [{ ...r, id: uid(), day: dateKey(Date.now()), done: false }, ...s.reminders] }));
@@ -389,12 +382,18 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
   restoreReminders(rs: Reminder[]) {
     set((s) => ({ ...s, reminders: [...rs.filter((r) => !s.reminders.some((x) => x.id === r.id)), ...s.reminders] }));
   },
+  /** 待办（事实源在设备）：网页发操作消息，设备改完回 todos 全量同步 */
+  deviceTodoAdd(t: { text: string; at?: number; trig?: "offwork"; show?: boolean; src?: string }) { deviceSend?.({ type: "todo", op: "add", ...t }); },
+  deviceTodoSet(id: string, patch: { text?: string; at?: number; trig?: "offwork" | "at"; show?: boolean; done?: boolean }) { deviceSend?.({ type: "todo", op: "set", id, ...patch }); },
+  deviceTodoDone(id: string, done = true) { deviceSend?.({ type: "todo", op: "done", id, done }); },
+  deviceTodoDel(id: string) { deviceSend?.({ type: "todo", op: "del", id }); },
   setUserName(name: string) {
     set((s) => ({ ...s, user: { ...s.user, name } })); // 共享场景展示的是用户姓名，不是设备名
   },
   updateSettings(patch: Partial<Settings>) {
     set((s) => {
       if (patch.breakEnabled !== undefined || patch.breakMinutes !== undefined) sendBreak({ minutes: patch.breakMinutes, enabled: patch.breakEnabled }, s);
+      if (patch.overrideMode !== undefined) deviceSend?.({ type: "sched", op: "mode", mode: patch.overrideMode === "pauseToday" ? "today" : "next" });
       return { ...s, settings: { ...s.settings, ...patch } };
     });
   },
@@ -475,23 +474,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     const t = transportRef.current;
     if (!t) return;
     const st = stateRef.current;
-    const main = st.schedules.find((x) => x.id === st.activeScheduleId && x.kind === "repeat");
-    const eff = scheduleForDay(st.schedules, st.activeScheduleId, Date.now());
-    const nodesOf = (sc: typeof eff) => (sc ? sortedNodes(sc).map(({ time, status }) => ({ time, status })) : []);
     // 等待设备区间采纳期间不下发 state，避免网页旧状态覆盖设备当前状态
     if (!awaitAdoptionRef.current) await t.send(toOutbound(st));
     await t.send({ type: "time", epoch: Date.now(), tzOffsetMin: -new Date().getTimezoneOffset() });
-    // 生效计划表下发设备自治执行：主表=选中的重复计划；今天的单日计划作 override 优先执行、跨天自动失效
-    await t.send({
-      type: "schedule",
-      kind: "repeat",
-      weekdays: main?.weekdays ?? [],
-      nodes: nodesOf(main),
-      override: eff && eff.kind === "date" && eff.date ? { date: eff.date, nodes: nodesOf(eff) } : undefined,
-      paused: st.pausedToday,
-      mode: st.settings.overrideMode === "pauseToday" ? "today" : "next",
-      ts: Date.now(),
-    });
+    // 计划表不再随快照下发：清单事实源在设备（/schedules.json），hello 后设备主动推 schedules，网页 ops 增量修改
     // 按键映射下发：设备离线时按用户配置执行（含暂停/恢复今日计划）
     await t.send({ type: "keys", k1: st.settings.keys.k1, k2: st.settings.keys.k2, k3: st.settings.keys.k3, k4: st.settings.keys.k4, ts: Date.now() });
     // 休息提醒不再随快照下发：间隔/开关/计时均以设备为准，连接后由 breakState 对齐网页
@@ -505,10 +491,17 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       return;
     }
     sendSnapshot().catch(() => setDevice((d) => ({ ...d, pending: d.pending + 1 })));
-  }, [s.current, s.settings.led, s.settings.ledBrightness, s.settings.screenLayout, s.settings.overrideMode, s.settings.keys, s.schedules, s.activeScheduleId, s.pausedToday]);
+  }, [s.current, s.settings.led, s.settings.ledBrightness, s.settings.screenLayout, s.settings.keys]);
+
+  const tapsRef = useRef(new Set<(m: InboundMessage) => void>());
+  const onDeviceMessage = useCallback((cb: (m: InboundMessage) => void) => {
+    tapsRef.current.add(cb);
+    return () => { tapsRef.current.delete(cb); };
+  }, []);
 
   const handleInbound = useCallback(
     (m: InboundMessage) => {
+      for (const fn of tapsRef.current) fn(m);   // 页面级订阅先跑（音频帧等实时数据）
       const cur = stateRef.current;
       const runKey = (a: KeyAction, src: StatusSource) => {
         if (a === "offwork") actions.offwork("offwork");
@@ -617,25 +610,83 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         case "appErr":
           setDevice((d) => ({ ...d, appErr: { status: m.status, msg: m.msg, at: Date.now() } }));
           break;
+        case "todos":
+          set((s) => ({ ...s, deviceTodos: m.list }));
+          break;
+        case "todoFired": {
+          // 设备到点/收工触发的待办：映射正文，AppShell 弹 toast（action=恢复 → todo done:false）
+          const texts = m.ids.map((id) => stateRef.current.deviceTodos.find((t) => t.id === id)?.text ?? "待办");
+          set((s) => ({ ...s, reminderFlash: { text: texts.join("、"), at: Date.now(), ids: m.ids } }));
+          break;
+        }
+        case "schedules": {
+          // 计划表清单事实源：整表替换镜像（含空表）；act/paused/mode 一并采纳
+          const toSched = (x: DevSched): Schedule => ({
+            id: x.id, name: x.name, kind: x.kind,
+            weekdays: x.kind === "repeat" ? x.wd ?? [] : [],
+            date: x.kind === "date" ? x.date : undefined,
+            nodes: (x.ns ?? []).map((n) => ({ id: uid(), time: n.t, status: n.st, note: n.n })),
+          });
+          set((s) => {
+            const mode = m.mode === "today" ? "pauseToday" as const : "untilNextNode" as const;
+            return {
+              ...s,
+              schedules: m.list.map(toSched),
+              activeScheduleId: m.act,
+              pausedToday: m.paused,
+              settings: s.settings.overrideMode === mode ? s.settings : { ...s.settings, overrideMode: mode },
+            };
+          });
+          // 旧版网页计划表迁移：设备清单非空 → 设备为准，丢弃迁移队列；为空且有旧存档 → 一次性推给设备
+          if (m.list.length) legacySched = null;
+          else if (legacySched) {
+            const mig = legacySched;
+            legacySched = null;
+            for (const sc of mig.schedules)
+              deviceSend?.({ type: "sched", op: "set", id: sc.id, name: sc.name, kind: sc.kind, wd: sc.kind === "repeat" ? sc.weekdays : undefined, date: sc.kind === "date" ? sc.date : undefined, ns: sc.nodes.map((n) => ({ t: n.time, st: n.status, ...(n.note ? { n: n.note } : {}) })) });
+            if (mig.activeId) deviceSend?.({ type: "sched", op: "use", id: mig.activeId });
+            deviceSend?.({ type: "sched", op: "mode", mode: stateRef.current.settings.overrideMode === "pauseToday" ? "today" : "next" });
+          }
+          break;
+        }
+        case "agentReq":
+          set((s) => ({ ...s, deviceAgent: { busy: true, at: Date.now() } }));
+          proxyAgentReq(m, (err) => set((s) => ({ ...s, deviceAgent: { ...s.deviceAgent, err } })));  // 设备是循环主体；网页只做 LLM 转发
+          break;
+        case "agentDone":
+          set((s) => ({ ...s, deviceAgent: { busy: false, reply: m.text || undefined, at: Date.now() } }));
+          break;
+        case "agentErr":
+          set((s) => ({ ...s, deviceAgent: { busy: false, err: m.msg, at: Date.now() } }));
+          break;
       }
     },
     [actions],
   );
 
+  const connectSeqRef = useRef(0); // 连接代际：断开/新连接会让在途的旧连接作废（防"断开瞬间连上又把 key 写回"竞态）
+
   const connect = useCallback(
-    async (kind: "mock" | "ble" | "serial") => {
-      const t: DeviceTransport = kind === "mock" ? new MockTransport() : kind === "ble" ? new BleTransport() : new SerialTransport();
+    async (kind: "mock" | "ble" | "serial", grantedOnly = false) => {
+      const t: DeviceTransport & { connectGranted?: () => Promise<string> } = kind === "mock" ? new MockTransport() : kind === "ble" ? new BleTransport() : new SerialTransport();
+      const seq = ++connectSeqRef.current;
       setDevice((d) => ({ ...d, kind, state: "connecting", apps: undefined, appErr: undefined })); // 安装清单以新连接的设备上报为准
       try {
         // 真机：等设备推送区间并采纳后才恢复下发 state（模拟设备无此流程，立即下发）
         awaitAdoptionRef.current = kind !== "mock";
-        const name = await t.connect();
+        const name = grantedOnly && t.connectGranted ? await t.connectGranted() : await t.connect();
+        if (connectSeqRef.current !== seq) { // 握手期间被断开：孤立连接自行拆掉，不写状态不记通道
+          await t.disconnect().catch(() => {});
+          return;
+        }
         transportRef.current = t; // 先就位：onMessage 会冲刷握手期间排队的消息，其中的回调需要 deviceSend 可用
         activeTransport = t;
         t.onMessage(handleInbound);
         t.onDisconnect(() => setDevice((d) => ({ ...d, state: "disconnected" })));
         setDevice((d) => ({ ...d, name, kind, state: "connected" }));
+        localStorage.setItem("sgp-last-transport", kind); // 记住通道：刷新后用已授权设备/端口静默重连
         await sendSnapshot();
+        if (connectSeqRef.current !== seq) return; // 快照期间被断开：断开方已清理 UI/引用，直接收工
       } catch (e) {
         awaitAdoptionRef.current = false;
         setDevice((d) => ({ ...d, kind: transportRef.current ? d.kind : "none", state: "disconnected" }));
@@ -645,7 +696,30 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [handleInbound, sendSnapshot],
   );
 
+  // 旧版网页待办 → 设备待办：设备成为唯一事实源，存档里遗留的网页待办在首次连上设备时推给设备、清空本地
+  const remindersMigrated = useRef(false);
+  useEffect(() => {
+    if (remindersMigrated.current || device.state !== "connected" || !s.reminders.length) return;
+    remindersMigrated.current = true;
+    for (const r of s.reminders.filter((x) => !x.done)) {
+      const at = r.trigger === "time" && r.at ? atToday(r.at, new Date(`${r.day}T00:00:00`).getTime() || Date.now()) : undefined;
+      deviceSend?.({ type: "todo", op: "add", text: r.title, at, trig: r.trigger === "afterOffwork" ? "offwork" : undefined, show: r.showOnDevice, src: r.createdBy === "voice" ? "voice" : "web" });
+    }
+    set((st) => ({ ...st, reminders: [] }));
+  }, [device.state, s.reminders]);
+
+  // 页面刷新后静默重连：GATT/串口随页面销毁属正常，但授权关系还在——用上次的通道免弹框直连
+  const autoReconnectDone = useRef(false);
+  useEffect(() => {
+    if (autoReconnectDone.current) return;
+    autoReconnectDone.current = true;
+    const last = localStorage.getItem("sgp-last-transport");
+    if (last === "ble" || last === "serial" || last === "mock") connect(last, true).catch(() => {});
+  }, [connect]);
+
   const disconnect = useCallback(async () => {
+    connectSeqRef.current++; // 让在途连接作废
+    localStorage.removeItem("sgp-last-transport"); // 用户主动断开：刷新不再自动重连
     await transportRef.current?.disconnect();
     transportRef.current = undefined;
     activeTransport = undefined;
@@ -654,8 +728,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<Store>(
-    () => ({ s, now, device, transport: transportRef.current, actions, connect, disconnect }),
-    [s, now, device, actions, connect, disconnect],
+    () => ({ s, now, device, transport: transportRef.current, actions, connect, disconnect, onDeviceMessage }),
+    [s, now, device, actions, connect, disconnect, onDeviceMessage],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

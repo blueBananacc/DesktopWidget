@@ -28,8 +28,22 @@ export class SerialTransport implements DeviceTransport {
 
   async connect() {
     if (!serialSupported()) throw new Error("当前浏览器不支持网页串口，请使用电脑版 Chrome 或 Edge");
-    this.port = await navigator.serial.requestPort();
-    await this.port.open({ baudRate: 115200 });
+    // 已授权过的端口直接复用（重连免弹选择框）；没有或多个授权时再让用户挑
+    const granted = await navigator.serial.getPorts();
+    return this.open(granted.length === 1 ? granted[0] : await navigator.serial.requestPort());
+  }
+
+  /** 静默重连：只用已授权的端口，没有就失败（页面刷新后自动恢复用，绝不弹选择框） */
+  async connectGranted() {
+    if (!serialSupported()) throw new Error("当前浏览器不支持网页串口");
+    const granted = await navigator.serial.getPorts();
+    if (!granted.length) throw new Error("没有已授权的串口");
+    return this.open(granted[0]);
+  }
+
+  private async open(port: SerialPort) {
+    this.port = port;
+    await port.open({ baudRate: 460800 });   // 与固件 Serial.begin 一致：音频帧流需要 >11.5KB/s
     this.closed = false;
     void this.readLoop();
     this.writer = this.port.writable!.getWriter();

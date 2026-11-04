@@ -75,7 +75,7 @@ export function ConnBadge({ device, now }: { device: DeviceInfo; now: number }) 
   const color = device.state === "connected" ? "var(--st-work)" : device.state === "connecting" ? "#D69E2E" : "var(--ink-3)";
   const text =
     device.state === "connected"
-      ? device.kind === "ble" ? "蓝牙已连接" : "模拟设备已连接"
+      ? device.kind === "ble" ? "蓝牙已连接" : device.kind === "serial" ? "串口已连接" : "模拟设备已连接"
       : device.state === "connecting"
         ? "连接中…"
         : `离线${device.lastSyncAt ? ` · 最后同步 ${ago(device.lastSyncAt, now)}` : ""}`;

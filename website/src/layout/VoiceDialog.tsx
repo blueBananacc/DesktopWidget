@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Mic, Sparkles } from "lucide-react";
 import { Modal } from "../ui/Primitives";
 import { parseCommand } from "../domain/voiceParse";
+import { atToday } from "../domain/time";
 import type { ParsedCommand } from "../domain/voiceParse";
 import { useStore } from "../store/AppStore";
 import { useToast } from "../ui/Toast";
@@ -9,7 +10,7 @@ import { useToast } from "../ui/Toast";
 const EXAMPLES = ["提醒我今天下班后带狗狗看医生", "设置 45 分钟专注倒计时", "下午 4 点半提醒我给客户回邮件"];
 
 export function VoiceDialog({ onClose }: { onClose: () => void }) {
-  const { actions } = useStore();
+  const { actions, device } = useStore();
   const toast = useToast();
   const [text, setText] = useState("");
   const [parsed, setParsed] = useState<ParsedCommand | null>(null);
@@ -20,14 +21,15 @@ export function VoiceDialog({ onClose }: { onClose: () => void }) {
       actions.startTimer(parsed.minutes);
       toast({ message: `已开始 ${parsed.minutes} 分钟专注倒计时` });
     } else {
-      actions.addReminder({
-        title: parsed.title,
-        trigger: parsed.trigger,
-        at: parsed.trigger === "time" ? parsed.at : undefined,
-        showOnDevice: parsed.trigger === "afterOffwork",
-        createdBy: "voice",
+      if (device.state !== "connected") { toast({ message: "待办存在设备上——先连接设备再创建" }); return; }
+      actions.deviceTodoAdd({
+        text: parsed.title,
+        at: parsed.trigger === "time" ? atToday(parsed.at!, Date.now()) : undefined,
+        trig: parsed.trigger === "afterOffwork" ? "offwork" : undefined,
+        show: parsed.trigger === "afterOffwork",
+        src: "voice",
       });
-      toast({ message: "提醒已创建" });
+      toast({ message: "提醒已创建（存到设备）" });
     }
     onClose();
   };

@@ -37,7 +37,8 @@ function Timeline({ schedule, now, showNow }: { schedule: Schedule; now: number;
 }
 
 function Editor({ initial, onClose }: { initial: Schedule; onClose: () => void }) {
-  const { actions, s } = useStore();
+  const { actions, s, device } = useStore();
+  const connected = device.state === "connected";
   const toast = useToast();
   const [draft, setDraft] = useState<Schedule>(initial);
   const dup = conflicts(draft);
@@ -49,7 +50,7 @@ function Editor({ initial, onClose }: { initial: Schedule; onClose: () => void }
       onClose={onClose}
       footer={<>
         <button className="btn btn-ghost" onClick={onClose}>取消</button>
-        <button className="btn btn-primary" disabled={!valid} onClick={() => { actions.saveSchedule(draft); const onDevice = draft.kind === "date" ? draft.date === dateKey(Date.now()) : draft.id === s.activeScheduleId; toast({ message: onDevice ? "已保存并同步到设备" : "已保存（未启用，不会下发到设备）" }); onClose(); }}>保存</button>
+        <button className="btn btn-primary" disabled={!valid || !connected} onClick={() => { actions.saveSchedule(draft); const willRun = draft.kind === "date" ? draft.date === dateKey(Date.now()) : draft.id === s.activeScheduleId; toast({ message: willRun ? "已保存到设备" : "已保存到设备（不是当前生效的计划）" }); onClose(); }}>保存</button>
       </>}
     >
       <div className="form">
@@ -104,8 +105,9 @@ export function SchedulePage() {
       <PageHeader
         title="计划表"
         desc="提前安排每个时间点要显示的状态，到点后设备自动切换，不需要打开网页。"
-        actions={<button className="btn btn-primary" onClick={() => setEditing({ id: uid(), name: "", kind: "repeat", weekdays: [1, 2, 3, 4, 5], nodes: [{ id: uid(), time: "09:00", status: "work" }, { id: uid(), time: "18:00", status: "off" }] })}><Plus />新建计划表</button>}
+        actions={<button className="btn btn-primary" disabled={!connected} title={connected ? "" : "计划表存在设备上，连接后才能新建"} onClick={() => setEditing({ id: uid(), name: "", kind: "repeat", weekdays: [1, 2, 3, 4, 5], nodes: [{ id: uid(), time: "09:00", status: "work" }, { id: uid(), time: "18:00", status: "off" }] })}><Plus />新建计划表</button>}
       />
+      {!connected && <Banner tone="warn" icon={<Unplug />}>计划表存在设备上并自治执行：现在显示的是上次同步的镜像。连接设备后才能新建/切换/编辑。</Banner>}
 
       <Card style={{ marginBottom: 20 }}>
         <CardHeader
@@ -153,12 +155,12 @@ export function SchedulePage() {
                 </div>
                 <div className="row" style={{ justifyContent: "space-between" }}>
                   {sc.kind === "repeat" ? (
-                    active ? <span className="hint">当前选中的重复计划</span> : <button className="btn btn-primary btn-sm" onClick={() => { actions.setActiveSchedule(sc.id); toast({ message: `已切换为“${sc.name}”` }); }}>设为当前计划</button>
+                    active ? <span className="hint">当前选中的重复计划</span> : <button className="btn btn-primary btn-sm" disabled={!connected} title={connected ? "" : "连接设备后才能切换计划"} onClick={() => { actions.setActiveSchedule(sc.id); toast({ message: `已切换为“${sc.name}”` }); }}>设为当前计划</button>
                   ) : <span className="hint">{past ? "已过期" : sc.date === dateKey(now) ? "今天优先于重复计划" : "到期当天自动生效"}</span>}
                   <div className="row" style={{ gap: 2 }}>
-                    <button className="icon-btn" aria-label="编辑" onClick={() => setEditing(sc)}><Pencil className="i" /></button>
-                    <button className="icon-btn" aria-label="复制" onClick={() => { actions.duplicateSchedule(sc.id); toast({ message: "已复制计划表" }); }}><Copy className="i" /></button>
-                    <button className="icon-btn" aria-label="删除" disabled={s.schedules.length <= 1} onClick={() => {
+                    <button className="icon-btn" aria-label="编辑" disabled={!connected} onClick={() => setEditing(sc)}><Pencil className="i" /></button>
+                    <button className="icon-btn" aria-label="复制" disabled={!connected} onClick={() => { actions.duplicateSchedule(sc.id); toast({ message: "已复制计划表" }); }}><Copy className="i" /></button>
+                    <button className="icon-btn" aria-label="删除" disabled={!connected || s.schedules.length <= 1} onClick={() => {
                       const onDevice = sc.kind === "date" ? sc.date === dateKey(now) : sc.id === s.activeScheduleId;
                       const tip = onDevice ? `删除“${sc.name}”？它是当前生效的计划，删除后设备上的这份计划也会被清除。` : `删除“${sc.name}”？这份计划没有下发到设备，删除只影响网页计划库。`;
                       if (confirm(tip)) { actions.deleteSchedule(sc.id); toast({ message: `已删除“${sc.name}”` }); }

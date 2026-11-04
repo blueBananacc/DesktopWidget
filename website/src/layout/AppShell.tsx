@@ -37,6 +37,7 @@ const GROUPS: { label?: string; items: NavItem[] }[] = [
     label: "设备",
     items: [
       { to: "/device", label: "我的设备", icon: Monitor },
+      { to: "/stt", label: "语音转文字", icon: Mic },
       { to: "/controls", label: "触摸与快捷键", icon: Fingerprint },
       { to: "/screen", label: "屏幕内容", icon: Image },
       { to: "/lighting", label: "灯效", icon: Palette },
@@ -52,21 +53,21 @@ const TABS: NavItem[] = [
   { to: "/me", label: "我的", icon: User },
 ];
 
-const ME_PATHS = ["/me", "/review", "/agent", "/device", "/controls", "/screen", "/lighting", "/settings"];
+const ME_PATHS = ["/me", "/review", "/agent", "/device", "/stt", "/controls", "/screen", "/lighting", "/settings"];
 
 export function AppShell() {
   const { s, actions } = useStore();
   const toast = useToast();
   const [voice, setVoice] = useState(false);
   const { pathname } = useLocation();
-  const openCount = s.reminders.filter((r) => !r.done).length;
+  const openCount = s.deviceTodos.filter((t) => !t.done).length;
   const flashedAt = useRef(0);
   useEffect(() => {
-    // 提醒到点/收工触发：任何页面都弹 toast（设备端另有 OLED+灯光提示）
+    // 设备到点/收工触发待办：任何页面都弹 toast（设备端另有 OLED+灯光提示；todoFired 上行带来 id）
     if (s.reminderFlash && s.reminderFlash.at !== flashedAt.current) {
       flashedAt.current = s.reminderFlash.at;
       const ids = s.reminderFlash.ids;
-      toast({ message: `提醒：${s.reminderFlash.text}`, action: { label: "标记完成", onClick: () => actions.completeReminders(ids) }, seconds: 10 });
+      toast({ message: `提醒：${s.reminderFlash.text}`, action: { label: "恢复", onClick: () => ids.forEach((id) => actions.deviceTodoDone(id, false)) }, seconds: 10 });
     }
   }, [s.reminderFlash]);
 

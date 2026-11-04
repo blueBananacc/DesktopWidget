@@ -36,7 +36,7 @@ export function Overview() {
   const remaining = s.current.until ? s.current.until - now : undefined;
   const sub = s.timer ? `剩余 ${clock(s.timer.endsAt - now, false)}` : s.current.until ? `${hhmm(s.current.since)} – ${hhmm(s.current.until)}` : meta.hint;
   const statusExpired = connected && !s.timer && s.current.until && s.current.source !== "schedule" && now > s.current.until;
-  const openReminders = s.reminders.filter((r) => !r.done);
+  const openReminders = s.deviceTodos.filter((t) => !t.done);
   const breakTotal = s.settings.breakMinutes * 60_000;
   // 已同步设备时：以上次上报值为基准按当前状态外推，心跳周期内平滑、到点不抢跑
   const breakAccum = s.breakSyncedAt && STATUSES[s.current.id].workLike ? s.breakAccumMs + (now - s.breakSyncedAt) : s.breakAccumMs;
@@ -188,13 +188,14 @@ export function Overview() {
             {openReminders.slice(0, 4).map((r) => (
               <RowItem
                 key={r.id}
-                lead={<Tile color={r.createdBy === "voice" ? "pink" : "orange"}>{r.createdBy === "voice" ? <Mic /> : <Bell />}</Tile>}
-                title={r.title}
-                desc={r.detail ?? (r.trigger === "afterOffwork" ? "收工后提醒" : "到点提醒")}
-                meta={r.trigger === "afterOffwork" ? "收工后" : `今天 ${r.at}`}
+                lead={<Tile color={r.src === "voice" ? "pink" : "orange"}>{r.src === "voice" ? <Mic /> : <Bell />}</Tile>}
+                title={r.text}
+                desc={r.trig === "offwork" ? "收工后提醒" : "到点提醒"}
+                meta={r.trig === "offwork" ? "收工后" : r.at !== undefined ? `${hhmm(r.at)}` : "无定时"}
                 onClick={() => {
-                  actions.toggleReminder(r.id);
-                  toast({ message: `已完成“${r.title}”`, action: { label: "撤销", onClick: () => actions.toggleReminder(r.id) }, seconds: 5 });
+                  if (!connected) return;
+                  actions.deviceTodoDone(r.id);
+                  toast({ message: `已完成“${r.text}”`, action: { label: "撤销", onClick: () => actions.deviceTodoDone(r.id, false) }, seconds: 5 });
                 }}
               />
             ))}
