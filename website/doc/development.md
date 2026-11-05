@@ -22,4 +22,5 @@ npm run preview    # 预览构建产物
 - `ui/`：`HoldButton`（按住 1.5s 收工 + 10s 撤销）、`Toast`、`DeviceMirror`（OLED 屏镜像）、`WeekBars` 等
 - `layout/`：`AppShell`（侧栏三组导航 + 顶栏 + 移动端底部 5 标签）、`VoiceDialog`（语音创建提醒）
 - `pages/`：Overview / Schedule / Reminders / Review / Board / DevicePage / SettingsPages
+- `pages/Product.tsx` + `styles/product.css`：电商式产品介绍页，路由 `/product`（不在 AppShell 内，类名 `pd-` 前缀）。图位组件 `Shot` 按 `public/product/<name>.(png|jpg|jpeg|webp)` 自动加载，缺图显示占位框；视频位 `VideoShot` 读 `public/product/<name>.mp4`，IntersectionObserver 进视口播/出视口停。价格/配色在文件顶部 `PRICE` / `COLORS` 常量。控制台截图 `public/product/app-*.png` 用模拟设备（localStorage `sgp-last-transport=mock`）截取
 - `hooks/useOffwork.ts`：收工逻辑

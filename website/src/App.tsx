@@ -9,6 +9,7 @@ import { ReviewPage } from "./pages/Review";
 import { BoardPage } from "./pages/Board";
 import { DevicePage } from "./pages/DevicePage";
 import { SttPage } from "./pages/Stt";
+import { ProductPage } from "./pages/Product";
 import { AgentPage, ControlsPage, LightingPage, MePage, ScreenPage, SettingsPage } from "./pages/SettingsPages";
 
 export default function App() {
@@ -17,6 +18,7 @@ export default function App() {
       <AppStoreProvider>
         <BrowserRouter basename={import.meta.env.BASE_URL}>
           <Routes>
+            <Route path="product" element={<ProductPage />} />
             <Route element={<AppShell />}>
               <Route index element={<Overview />} />
               <Route path="schedule" element={<SchedulePage />} />
