@@ -12,7 +12,7 @@ import { HoldButton } from "../ui/HoldButton";
 import "../styles/product.css";
 
 // ===== 可直接改的商品信息（价格/配色为占位，正式开售前替换） =====
-const PRICE = { now: 299, was: 399, tag: "早鸟价" };
+const PRICE = { now: 99, was: 399, tag: "早鸟价" };
 const COLORS = [
   { id: "graphite", name: "石墨黑", swatch: "#2B2E33" },
   { id: "mist", name: "云雾白", swatch: "#E9E7E2" },
