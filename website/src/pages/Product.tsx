@@ -389,7 +389,7 @@ export function ProductPage() {
         </Feature>
 
         <Feature flip icon={<Sunset />} eyebrow="一键收工" title="给每一天一个明确的结束"
-          media={<div className="pd-stack"><OffworkMock /><Shot name="scene-offwork" alt="傍晚收工场景" hint="夕阳下的工位，桌牌显示“已收工”" ratio="16 / 10" /></div>}>
+          media={<div className="pd-stack"><OffworkMock /><VideoShot name="scene-offwork" alt="傍晚收工场景：夕阳下的工位，桌牌显示“已收工”" ratio="16 / 10" /></div>}>
           <p>长按收工键或在手机上按住 1.5 秒，桌牌切换为“已收工”，今天的状态记录到此为止。误触了？10 秒内可以撤销。</p>
           <Bullets items={["收工后计划表不会再把你切回工作状态", "可以设置“下班后提醒”，收工时才弹出", "手机没连上也能收工，重连后自动同步"]} />
         </Feature>
@@ -413,7 +413,7 @@ export function ProductPage() {
         </Feature>
 
         <Feature flip icon={<Users />} eyebrow="共享状态看板" title="整个团队谁有空，一屏看清"
-          media={<div className="pd-stack"><Shot name="scene-team" alt="团队办公场景" hint="多张工位上各放一台收工牌，显示不同状态" ratio="16 / 10" /><AppShot name="app-board" alt="共享看板界面" /></div>}>
+          media={<div className="pd-stack"><Shot name="scene-team" alt="团队办公场景：多张相邻工位上各放一台收工牌，分别显示不同状态" ratio="2560 / 1425" /><AppShot name="app-board" alt="共享看板界面" /></div>}>
           <p>同一区域的收工牌通过 ESP-NOW 彼此同步。加入团队后，在手机或网页上就能看到每位成员的当前状态和最后更新时间。</p>
           <Bullets items={["分享默认关闭，只分享“当前状态”", "邀请链接 / 二维码加入，随时退出或撤销", "离线成员标记“可能已过期”，不伪装成实时"]} />
         </Feature>

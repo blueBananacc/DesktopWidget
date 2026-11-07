@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>product lab</title>
+<style>
+/* ============ 收工牌 CSS 渲染实验室 ============
+   ?view=front|top|side|macro|night|phone|box
+   ?status=work|busy|focus|meet|rest|off
+   ?color=graphite|mist
+   画布固定 2560x1600，无头 Edge: --window-size=2560,1600 --screenshot */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 2560px; height: 1600px; overflow: hidden; }
+body { font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+
+:root {
+  --c: #3BE08F;
+  --body-hi: #45494F; --body-mid: #2E3138; --body-lo: #1E2126; --body-edge: #17191D;
+  --key-hi: #55595F; --key-lo: #2B2E33;
+}
+.stage {
+  width: 2560px; height: 1600px; position: relative;
+  background: radial-gradient(1400px 900px at 50% 34%, #F2F3F5 0%, #E4E6EA 55%, #D6D9DF 100%);
+}
+.stage::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(1500px 700px at 50% 78%, rgba(0,0,0,.06), transparent 60%);
+}
+.view { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; }
+.view.on { display: flex; }
+
+/* ==================== 正面设备（front/macro/night/phone 共用 DOM） ==================== */
+.device { position: relative; width: 1720px; }
+.shadow {
+  position: absolute; left: 4%; right: 4%; bottom: -64px; height: 110px;
+  background: radial-gradient(50% 50% at 50% 50%, rgba(15,17,20,.5), rgba(15,17,20,.28) 45%, transparent 72%);
+  filter: blur(18px); z-index: 0;
+}
+.glow-floor {
+  position: absolute; left: 18%; right: 18%; bottom: -30px; height: 60px; z-index: 0;
+  background: var(--c); opacity: .30; filter: blur(38px); border-radius: 50%;
+}
+.keys { position: absolute; top: -34px; left: 9.5%; display: flex; gap: 46px; z-index: 2; }
+.keys i {
+  width: 74px; height: 42px; border-radius: 20px 20px 6px 6px; display: block;
+  background: linear-gradient(180deg, var(--key-hi) 0%, var(--key-lo) 78%);
+  box-shadow: inset 0 2px 2px rgba(255,255,255,.28), inset 0 -6px 10px rgba(0,0,0,.35), 0 4px 10px rgba(0,0,0,.35);
+}
+.knob {
+  position: absolute; top: -66px; right: 6%; width: 150px; height: 80px; z-index: 2;
+  border-radius: 16px 16px 8px 8px;
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,.13) 0 3px, rgba(0,0,0,.22) 3px 7px),
+    linear-gradient(180deg, #4C5057 0%, #2C2F35 85%);
+  box-shadow: inset 0 3px 3px rgba(255,255,255,.25), inset 0 -8px 14px rgba(0,0,0,.4), 0 6px 16px rgba(0,0,0,.4);
+}
+.knob::before {
+  content: ""; position: absolute; left: 8px; right: 8px; top: -14px; height: 30px;
+  border-radius: 50% / 100%;
+  background: linear-gradient(180deg, #585C63, #3E4248);
+  box-shadow: inset 0 2px 3px rgba(255,255,255,.3), 0 2px 6px rgba(0,0,0,.3);
+}
+.body {
+  position: relative; z-index: 1; height: 400px; border-radius: 118px;
+  background: linear-gradient(180deg, var(--body-hi) 0%, var(--body-mid) 42%, var(--body-lo) 88%, var(--body-edge) 100%);
+  box-shadow: inset 0 3px 2px rgba(255,255,255,.16), inset 0 -4px 3px rgba(0,0,0,.5),
+    inset 0 -26px 42px rgba(0,0,0,.28), 0 40px 90px -30px rgba(10,12,16,.5);
+  padding: 34px 88px;
+}
+.body::before {
+  content: ""; position: absolute; left: 118px; right: 118px; top: 16px; height: 26px;
+  border-radius: 40px; background: linear-gradient(180deg, rgba(255,255,255,.14), transparent); filter: blur(1px);
+}
+.screen {
+  position: relative; height: 100%; border-radius: 62px; overflow: hidden;
+  background: radial-gradient(120% 130% at 30% 0%, rgba(255,255,255,.05), transparent 45%),
+    linear-gradient(180deg, #101114 0%, #070809 60%, #050607 100%);
+  box-shadow: inset 0 4px 14px rgba(0,0,0,.85), inset 0 -2px 6px rgba(255,255,255,.05), 0 1px 0 rgba(255,255,255,.07);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.screen::before {
+  content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  background: linear-gradient(115deg, rgba(255,255,255,.055) 0%, rgba(255,255,255,.015) 22%, transparent 34%);
+}
+.screen::after {
+  content: ""; position: absolute; inset: 0; z-index: 4; pointer-events: none;
+  background: radial-gradient(circle at center, transparent 0 2.2px, rgba(6,7,8,.94) 2.9px) 0 0 / 5.6px 5.6px;
+}
+.led {
+  color: var(--c); font-weight: 900; font-size: 148px; line-height: 1; letter-spacing: .08em;
+  text-shadow: 0 0 4px var(--c), 0 0 30px var(--c), 0 0 90px var(--c);
+}
+.led-sub {
+  color: var(--c); opacity: .8; font-weight: 700; font-size: 44px; letter-spacing: .22em;
+  margin-top: 26px; text-shadow: 0 0 3px var(--c), 0 0 24px var(--c);
+}
+.strip {
+  position: absolute; left: 150px; right: 150px; bottom: 14px; height: 7px; z-index: 2;
+  border-radius: 6px; background: var(--c); opacity: .95;
+  box-shadow: 0 0 12px var(--c), 0 0 34px var(--c), 0 2px 6px rgba(0,0,0,.5);
+}
+
+/* ==================== 配色：云雾白 ==================== */
+.mist {
+  --body-hi: #FBFAF7; --body-mid: #EDEAE4; --body-lo: #D8D4CC; --body-edge: #C4BFB6;
+  --key-hi: #FFFFFF; --key-lo: #C9C5BD;
+}
+.mist .body {
+  box-shadow: inset 0 3px 2px rgba(255,255,255,.85), inset 0 -4px 4px rgba(120,115,105,.45),
+    inset 0 -26px 42px rgba(140,134,122,.25), 0 40px 90px -30px rgba(80,76,68,.4);
+}
+.mist .knob { background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,.5) 0 3px, rgba(0,0,0,.10) 3px 7px),
+    linear-gradient(180deg, #F6F4EF 0%, #CFCBC2 85%);
+}
+.mist .knob::before { background: linear-gradient(180deg, #FFFFFF, #DDD9D1); }
+
+/* ==================== top：高角度俯视 ==================== */
+.t-device { position: relative; width: 1760px; }
+.t-face { /* 顶面：大圆角板，前缘暗 */
+  position: relative; height: 560px; border-radius: 150px;
+  background: linear-gradient(180deg, #4B4F56 0%, var(--body-mid) 46%, #26292F 82%, #1E2126 100%);
+  box-shadow: inset 0 4px 3px rgba(255,255,255,.22), inset 0 -8px 6px rgba(0,0,0,.45),
+    inset -30px 0 60px rgba(0,0,0,.18), 0 50px 100px -30px rgba(10,12,16,.55);
+}
+.t-face::before { /* 顶面左上角受光 */
+  content: ""; position: absolute; inset: 0; border-radius: 150px;
+  background: radial-gradient(80% 90% at 28% 18%, rgba(255,255,255,.14), transparent 55%);
+}
+.t-keys { position: absolute; top: 50%; left: 9%; transform: translateY(-50%); display: flex; gap: 52px; }
+.t-keys i { /* 俯视按键 = 椭圆，带顶部高光和接触影 */
+  width: 96px; height: 62px; border-radius: 50%;
+  background: radial-gradient(70% 70% at 38% 28%, #5C6067, #2B2E33 72%);
+  box-shadow: inset 0 4px 4px rgba(255,255,255,.3), inset 0 -8px 12px rgba(0,0,0,.5), 0 14px 18px rgba(0,0,0,.45);
+}
+.t-knob { /* 俯视旋钮 = 大椭圆 + 滚花环 + 顶盖 */
+  position: absolute; top: 50%; right: 7%; transform: translateY(-50%);
+  width: 210px; height: 150px; border-radius: 50%;
+  background: repeating-conic-gradient(from 0deg, #4A4E55 0deg 4deg, #33363C 4deg 8deg);
+  box-shadow: inset 0 0 0 6px rgba(0,0,0,.25), 0 18px 30px rgba(0,0,0,.5);
+}
+.t-knob::before {
+  content: ""; position: absolute; inset: 18px; border-radius: 50%;
+  background: radial-gradient(60% 60% at 40% 32%, #55595F, #33363B 75%);
+  box-shadow: inset 0 3px 4px rgba(255,255,255,.25), inset 0 -6px 10px rgba(0,0,0,.4);
+}
+.t-knob::after { /* 中心指示点 */
+  content: ""; position: absolute; left: 50%; top: 14%; width: 14px; height: 14px;
+  transform: translateX(-50%); border-radius: 50%; background: rgba(255,255,255,.5);
+}
+.t-front { /* 露出的一截正面：屏幕亮边 + 灯带 */
+  position: relative; margin-top: -36px; margin-left: 60px; margin-right: 60px; height: 150px;
+  border-radius: 0 0 110px 110px;
+  background: linear-gradient(180deg, #0B0C0E 0%, #191B1F 60%, #22252B 100%);
+  box-shadow: inset 0 8px 10px rgba(0,0,0,.7), 0 40px 70px -20px rgba(10,12,16,.55);
+}
+.t-front::before { /* 屏幕露出的下沿亮光 */
+  content: ""; position: absolute; left: 90px; right: 90px; top: 30px; height: 46px;
+  border-radius: 24px; background: var(--c); opacity: .9; filter: blur(6px);
+}
+.t-front::after {
+  content: ""; position: absolute; left: 130px; right: 130px; bottom: 26px; height: 8px;
+  border-radius: 6px; background: var(--c); box-shadow: 0 0 18px var(--c), 0 0 46px var(--c);
+}
+
+/* ==================== side：3D 挤出机身，右前方 3/4 视角 ==================== */
+#v-side.on { perspective: 3400px; perspective-origin: 50% 32%; }
+.x3 {
+  --L: 1500px; --H: 400px;
+  position: relative; width: var(--L); height: var(--H); transform-style: preserve-3d;
+  transform: translate(-40px, 40px) rotateX(-17deg) rotateY(-36deg);
+}
+.x3 > * { position: absolute; transform-style: preserve-3d; }
+.x3-l { /* 每一层 = 正面轮廓，沿 Z 叠 80 层挤出厚度 */
+  left: 0; top: 0; width: var(--L); height: var(--H); border-radius: 118px;
+  background:
+    linear-gradient(rgba(0,0,0,var(--dk, 0)), rgba(0,0,0,var(--dk, 0))),
+    linear-gradient(90deg, transparent 0%, transparent 88%, rgba(255,255,255,.07) 100%),
+    linear-gradient(180deg, #55595F 0%, var(--body-hi) 6%, var(--body-mid) 44%, var(--body-lo) 86%, var(--body-edge) 100%);
+}
+.x3-front {
+  padding: 30px 78px;
+  box-shadow: inset 0 3px 2px rgba(255,255,255,.2), inset 0 -4px 3px rgba(0,0,0,.45), inset 0 -24px 40px rgba(0,0,0,.25);
+}
+.x3-front .screen { border-radius: 56px; transform: translateZ(1.5px); }
+.x3-front .strip { transform: translateZ(.8px); bottom: 9px; height: 6px; }
+.x3-front .screen::after { background: radial-gradient(circle at center, transparent 0 2px, rgba(6,7,8,.94) 2.6px) 0 0 / 5px 5px; }
+.x3-front .led { font-size: 128px; }
+.x3-front .led-sub { font-size: 38px; margin-top: 22px; }
+.x3-front .strip { left: 130px; right: 130px; bottom: 12px; }
+
+.x3-end { /* 右端平面段：接口区 */
+  left: calc(var(--L) - 150px); top: 112px; width: 300px; height: 176px;
+  transform: translateX(4px) rotateY(90deg);
+  display: flex; align-items: center; justify-content: center; gap: 34px;
+}
+.x3-slot { position: relative; height: 34px; border-radius: 17px; background: #08090A;
+  box-shadow: inset 0 3px 5px rgba(0,0,0,.95), 0 1px 0 rgba(255,255,255,.12); }
+.x3-slot.usb { width: 104px; }
+.x3-slot.mic { width: 86px; }
+.x3-slot.mic::before { content: ""; position: absolute; left: 5px; top: 5px; width: 38px; height: 24px; border-radius: 12px;
+  background: linear-gradient(180deg, #6A6E75, #3A3D43); box-shadow: 0 2px 4px rgba(0,0,0,.6), inset 0 1px 1px rgba(255,255,255,.35); }
+.x3-slot::after { position: absolute; left: 50%; top: -34px; transform: translateX(-50%);
+  font: 700 17px/1 system-ui, sans-serif; letter-spacing: .16em; color: rgba(255,255,255,.38); white-space: nowrap; }
+.x3-slot.usb::after { content: "USB-C"; }
+.x3-slot.mic::after { content: "MIC"; }
+
+.x3-a { pointer-events: none; }          /* 不可见定位点，供 2D 投影 */
+#v-side { position: absolute; }
+
+.x3-floor { /* 地面：接触阴影 + 灯带反光 */
+  left: -260px; top: calc(var(--H) - 450px); width: 2020px; height: 900px;
+  transform: rotateX(90deg);
+  background:
+    radial-gradient(37% 21% at 50% 52%, rgba(12,14,18,.72), rgba(12,14,18,.3) 55%, transparent 82%),
+    radial-gradient(48% 34% at 50% 56%, rgba(12,14,18,.18), transparent 80%),
+    radial-gradient(30% 9% at 50% 72%, color-mix(in srgb, var(--c) 45%, transparent), transparent 75%);
+  filter: blur(10px);
+}
+
+/* ==================== macro：旋钮微距 ==================== */
+#v-macro.on { display: block; }
+.m-device { /* 放大 3.4 倍，变换原点钉在旋钮中心 -> 旋钮成为画面主角 */
+  position: absolute; width: 1720px; left: -42px; top: 646px;
+  transform: scale(3.4); transform-origin: 89.7% -6.5%;
+}
+.m-blur { /* 左侧浅景深 */
+  position: absolute; inset: 0; z-index: 5; pointer-events: none;
+  background: linear-gradient(90deg, rgba(228,230,234,.75) 0%, rgba(228,230,234,.25) 22%, transparent 42%);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  mask-image: linear-gradient(90deg, #000 0%, #000 18%, transparent 44%);
+  -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 18%, transparent 44%);
+}
+
+/* ==================== night：夜间场景 ==================== */
+.stage.night { background: radial-gradient(1600px 1000px at 46% 30%, #23262E 0%, #14161B 52%, #0B0D10 100%); }
+.stage.night::after {
+  background: radial-gradient(1100px 500px at 50% 82%, rgba(0,0,0,.55), transparent 65%);
+}
+.n-backglow { /* 远处隐约有块显示器光 */
+  position: absolute; left: 50%; top: 340px; transform: translateX(-50%);
+  width: 1500px; height: 420px; border-radius: 40px;
+  background: rgba(90,110,160,.13); filter: blur(60px);
+}
+.stage.night .glow-floor { opacity: .8; height: 90px; bottom: -44px; }
+.stage.night .shadow { opacity: .9; }
+.stage.night .strip { box-shadow: 0 0 22px var(--c), 0 0 70px var(--c), 0 2px 6px rgba(0,0,0,.5); }
+.stage.night .led { text-shadow: 0 0 6px var(--c), 0 0 44px var(--c), 0 0 130px var(--c); }
+
+/* ==================== phone：手机联动 ==================== */
+.p-wrap { display: flex; align-items: flex-end; gap: 150px; }
+.p-wrap .device { width: 1380px; flex: none; }
+.phone {
+  position: relative; width: 500px; height: 1010px; border-radius: 72px;
+  background: linear-gradient(160deg, #3C4046, #1C1E22 70%);
+  padding: 16px; transform: rotate(-5deg) translateY(30px); transform-origin: bottom center;
+  box-shadow: inset 0 2px 3px rgba(255,255,255,.2), 0 60px 110px -30px rgba(10,12,16,.6);
+}
+.p-screen {
+  position: relative; height: 100%; border-radius: 58px; overflow: hidden;
+  background: radial-gradient(120% 90% at 50% 0%, #2B3038 0%, #14171C 55%, #0C0E12 100%);
+  display: flex; flex-direction: column; align-items: center;
+  box-shadow: inset 0 0 0 2px rgba(0,0,0,.6);
+}
+.p-notch {
+  width: 170px; height: 40px; border-radius: 20px; background: #0B0C0E; margin-top: 18px;
+  box-shadow: inset 0 1px 2px rgba(255,255,255,.08);
+}
+.p-moon { margin-top: 190px; width: 150px; height: 150px; border-radius: 50%;
+  box-shadow: -34px 18px 0 0 #E8ECF4; transform: rotate(18deg);
+  filter: drop-shadow(0 0 18px rgba(220,228,250,.5));
+}
+.p-dnd { margin-top: 60px; color: #E8ECF4; font-size: 52px; font-weight: 800; letter-spacing: .1em; }
+.p-dndsub { margin-top: 18px; color: #8A93A5; font-size: 30px; letter-spacing: .12em; }
+.p-strip { /* 手机底部小条表示来自收工牌 */
+  margin-top: auto; margin-bottom: 70px; padding: 18px 34px; border-radius: 30px;
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08);
+  color: #B9C2D4; font-size: 26px; letter-spacing: .06em;
+}
+.p-strip b { color: var(--c); font-weight: 700; }
+
+/* ==================== box：包装平铺（俯视） ==================== */
+.lay { position: relative; width: 2100px; height: 1250px; }
+.lay > * { position: absolute; }
+.lay-box { /* 包装盒 */
+  right: 0; top: 120px; width: 760px; height: 560px; border-radius: 36px;
+  background: linear-gradient(150deg, #3A3D44, #24262B 70%);
+  box-shadow: inset 0 2px 2px rgba(255,255,255,.14), 0 40px 80px -20px rgba(10,12,16,.5);
+}
+.lay-box::before { /* 盒盖线 */
+  content: ""; position: absolute; inset: 26px; border-radius: 24px;
+  border: 2px solid rgba(255,255,255,.07);
+}
+.lay-box::after { /* 盒面 logo 区 */
+  content: "收工牌"; position: absolute; left: 60px; top: 60px;
+  font-size: 54px; font-weight: 800; letter-spacing: .14em; color: rgba(255,255,255,.85);
+}
+.lay-dots { position: absolute; left: 62px; top: 150px; display: flex; gap: 14px; }
+.lay-dots i { width: 26px; height: 26px; border-radius: 50%; }
+.lay-dev { /* 俯视小设备 */
+  left: 60px; top: 60px; width: 1180px; transform: scale(.62); transform-origin: top left;
+}
+.lay-card { /* 快速上手卡 */
+  left: 80px; bottom: 60px; width: 560px; height: 380px; border-radius: 20px;
+  background: linear-gradient(170deg, #FFFFFF, #F0F1F4);
+  box-shadow: 0 30px 60px -18px rgba(10,12,16,.35), inset 0 0 0 1px rgba(0,0,0,.05);
+  transform: rotate(-4deg); padding: 44px;
+}
+.lay-card b { display: block; font-size: 38px; font-weight: 800; color: #26292F; letter-spacing: .06em; }
+.lay-card .lc-lines { margin-top: 34px; display: grid; gap: 18px; }
+.lay-card .lc-lines i { display: block; height: 16px; border-radius: 8px; background: #D9DCE2; }
+.lay-card .lc-lines i:nth-child(2) { width: 78%; }
+.lay-card .lc-lines i:nth-child(3) { width: 56%; }
+.lay-cable { /* 盘起来的 USB-C 线 */
+  left: 780px; bottom: 90px; width: 460px; height: 360px;
+}
+.lay-cable i { position: absolute; border-radius: 50%; border: 22px solid #3A3D44;
+  box-shadow: 0 10px 24px rgba(10,12,16,.3), inset 0 2px 3px rgba(255,255,255,.12);
+}
+.lay-cable i:nth-child(1) { inset: 0; }
+.lay-cable i:nth-child(2) { inset: 56px; }
+.lay-cable i:nth-child(3) { inset: 112px; }
+.lay-cable::after { /* 甩出的线头 + 插头 */
+  content: ""; position: absolute; right: -95px; bottom: -6px; width: 170px; height: 22px;
+  border-radius: 12px; background: #3A3D44; transform: rotate(52deg);
+  box-shadow: 0 8px 18px rgba(10,12,16,.3);
+}
+.lay-cable::before { /* C 口金属头 */
+  content: ""; position: absolute; right: -120px; bottom: -74px; width: 54px; height: 30px;
+  border-radius: 8px; background: linear-gradient(180deg, #C9CCD4, #9A9EA8);
+  transform: rotate(52deg); box-shadow: 0 6px 14px rgba(10,12,16,.3); z-index: 2;
+}
+.lay-pad { /* 硅胶防滑垫 */
+  left: 1380px; bottom: 70px; width: 560px; height: 300px; border-radius: 150px;
+  background: linear-gradient(160deg, #4A4E55, #31343A);
+  box-shadow: inset 0 3px 3px rgba(255,255,255,.14), 0 26px 50px -16px rgba(10,12,16,.4);
+}
+.lay-pad::after {
+  content: ""; position: absolute; inset: 40px; border-radius: 110px;
+  border: 3px dashed rgba(255,255,255,.12);
+}
+.lay-label { /* 平铺图小字标签（可选装饰） */ display: none; }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+
+  <div class="view" id="v-front"></div>
+
+  <div class="view" id="v-top">
+    <div class="t-device" id="tdev">
+      <div class="shadow" style="bottom:-90px"></div>
+      <div class="t-face">
+        <div class="t-keys"><i></i><i></i><i></i><i></i></div>
+        <div class="t-knob"></div>
+      </div>
+      <div class="t-front"></div>
+    </div>
+  </div>
+
+  <div class="view" id="v-side"><div class="x3" id="x3"></div></div>
+
+  <div class="view" id="v-macro"><div class="m-device" id="mdev"></div><div class="m-blur"></div></div>
+
+  <div class="view" id="v-night"><div class="n-backglow"></div><div id="ndev"></div></div>
+
+  <div class="view" id="v-phone">
+    <div class="p-wrap">
+      <div id="pdev"></div>
+      <div class="phone">
+        <div class="p-screen">
+          <div class="p-notch"></div>
+          <div class="p-moon"></div>
+          <div class="p-dnd">勿扰模式</div>
+          <div class="p-dndsub">已开启 · 收工牌联动</div>
+          <div class="p-strip"><b>●</b> 桌牌：请勿打扰</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="view" id="v-box">
+    <div class="lay">
+      <div class="lay-box"><div class="lay-dots">
+        <i style="background:#3BE08F"></i><i style="background:#FF4D57"></i><i style="background:#A88BFF"></i><i style="background:#34D7EE"></i>
+      </div></div>
+      <div class="lay-dev"><div class="t-device">
+        <div class="t-face" style="height:520px">
+          <div class="t-keys"><i></i><i></i><i></i><i></i></div>
+          <div class="t-knob"></div>
+        </div>
+        <div class="t-front"></div>
+      </div></div>
+      <div class="lay-card"><b>快速上手</b><div class="lc-lines"><i></i><i></i><i></i></div></div>
+      <div class="lay-cable"><i></i><i></i><i></i></div>
+      <div class="lay-pad"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 正面设备原型，JS 克隆进需要的视图 -->
+<template id="dev-tpl">
+  <div class="device">
+    <div class="keys"><i></i><i></i><i></i><i></i></div>
+    <div class="knob"></div>
+    <div class="body">
+      <div class="screen"><div class="led">工作中</div><div class="led-sub">可以找我</div></div>
+      <div class="strip"></div>
+    </div>
+    <div class="glow-floor"></div>
+    <div class="shadow"></div>
+  </div>
+</template>
+
+<script>
+const P = new URLSearchParams(location.search);
+const STATUS = {
+  work:  ["#3BE08F", "工作中",  "可以找我"],
+  busy:  ["#FF4D57", "请勿打扰", "非紧急请稍后"],
+  focus: ["#FF6A3D", "专注中",  "还剩 24:59"],
+  meet:  ["#A88BFF", "会议中",  "至 15:30"],
+  rest:  ["#34D7EE", "休息中",  "稍后回来"],
+  off:   ["#F3E6CF", "已收工",  "明天见"],
+};
+const view = P.get("view") || "front";
+const [c, t, s] = STATUS[P.get("status")] || STATUS.work;
+document.documentElement.style.setProperty("--c", c);
+
+// 把正面设备 DOM 克隆进需要的视图
+const tpl = document.getElementById("dev-tpl").content;
+const hosts = { front: "v-front", macro: "mdev", night: "ndev", phone: "pdev" };
+for (const [v, id] of Object.entries(hosts)) {
+  if (document.getElementById(id)) document.getElementById(id).appendChild(tpl.cloneNode(true));
+}
+document.querySelectorAll(".device .led").forEach((el) => el.textContent = t);
+document.querySelectorAll(".device .led-sub").forEach((el) => el.textContent = s);
+if (P.get("color") === "mist") document.querySelectorAll(".device, .t-device").forEach((el) => el.classList.add("mist"));
+
+// ---- side：构建 3D 挤出机身 ----
+if (view === "side") {
+  const x3 = document.getElementById("x3");
+  const D = 300, N = 80, add = (cls, style, html = "") => {
+    const el = document.createElement("div"); el.className = cls; el.style.cssText = style; el.innerHTML = html; x3.appendChild(el); return el;
+  };
+  add("x3-floor", "");
+  for (let i = 0; i < N; i++) {
+    const z = -D / 2 + (D * i) / (N - 1), front = i === N - 1;
+    const dk = (0.3 * (1 - i / (N - 1))).toFixed(3);
+    add("x3-l" + (front ? " x3-front" : ""), `transform: translateZ(${z}px); --dk: ${dk}`,
+      front ? `<div class="screen"><div class="led">${t}</div><div class="led-sub">${s}</div></div><div class="strip"></div>` : "");
+  }
+  add("x3-end", "", `<div class="x3-slot mic"></div><div class="x3-slot usb"></div>`);
+  // 按键/旋钮：3D 空间放定位点 → 读投影坐标 → 2D SVG 画圆柱（避开 Chrome 大量相交 3D 平面的排序重影）
+  const SEG = 72, cyls = [];
+  const anchor = (x, y, z) => add("x3-a", `left:${x - 1}px; top:${y - 1}px; width:2px; height:2px; transform: translateZ(${z}px)`);
+  const cyl = (cx, r, h, kind) => {
+    const ring = (y) => Array.from({ length: SEG }, (_, k) => {
+      const a = (k / SEG) * Math.PI * 2;
+      return anchor(cx + r * Math.cos(a), y, r * Math.sin(a));
+    });
+    cyls.push({ kind, base: ring(0), top: ring(-h), ao: Array.from({ length: SEG }, (_, k) => {
+      const a = (k / SEG) * Math.PI * 2;
+      return anchor(cx + r * 1.45 * Math.cos(a), 0, r * 1.45 * Math.sin(a));
+    }) });
+  };
+  [170, 290, 410, 530].forEach((cx) => cyl(cx, 36, 22, "key"));
+  cyl(1280, 66, 70, "knob");
+  window.__drawSide = () => {
+    const pt = (el) => { const b = el.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; };
+    const poly = (ps) => ps.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" ");
+    const hull = (P0) => { // 单调链凸包
+      const p = [...P0].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+      const lo = [], up = [];
+      for (const q of p) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+      for (const q of p.reverse()) { while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+      return lo.slice(0, -1).concat(up.slice(0, -1));
+    };
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="2560" height="1600" style="position:absolute;inset:0;z-index:10">
+      <defs><filter id="bl" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="9"/></filter>
+      <radialGradient id="capK" cx="38%" cy="30%" r="75%"><stop offset="0" stop-color="#6E727A"/><stop offset=".8" stop-color="#383B41"/></radialGradient>
+      <radialGradient id="capN" cx="40%" cy="30%" r="75%"><stop offset="0" stop-color="#6A6E75"/><stop offset=".85" stop-color="#33363C"/></radialGradient></defs>`;
+    for (const c of cyls) {
+      const B = c.base.map(pt), T = c.top.map(pt), A = c.ao.map(pt);
+      svg += `<polygon points="${poly(A)}" fill="rgba(0,0,0,.5)" filter="url(#bl)"/>`;
+      const xs = B.map((p) => p[0]), x0 = Math.min(...xs), x1 = Math.max(...xs);
+      const iL = xs.indexOf(x0), iR = xs.indexOf(x1);
+      const near = (p) => { // 近侧 = 在左右端点连线下方
+        const [ax, ay] = B[iL], [bx, by] = B[iR];
+        return p[1] > ay + ((p[0] - ax) * (by - ay)) / (bx - ax) - 0.5;
+      };
+      svg += `<polygon points="${poly(hull(B.concat(T)))}" fill="${c.kind === "knob" ? "#24272C" : "#2A2D32"}"/>`;
+      // 侧面竖纹：只画朝向镜头的一半，亮度随左右位置变化（左上方来光）
+      for (let k = 0; k < SEG; k++) {
+        if (!near(B[k])) continue;
+        const u = (B[k][0] - x0) / (x1 - x0), lit = Math.round(92 - 50 * u);
+        const ridge = c.kind === "knob" ? (k % 2 ? 1 : 0.55) : 1;
+        const col = `rgb(${Math.round(lit * ridge)},${Math.round((lit + 4) * ridge)},${Math.round((lit + 10) * ridge)})`;
+        const k2 = (k + 1) % SEG;
+        svg += `<polygon points="${poly([B[k], B[k2], T[k2], T[k]])}" fill="${col}" stroke="${col}" stroke-width=".6"/>`;
+      }
+      svg += `<polygon points="${poly(T)}" fill="url(#${c.kind === "knob" ? "capN" : "capK"})" stroke="rgba(255,255,255,.18)" stroke-width="1.5"/>`;
+      if (c.kind === "knob") { // 顶盖指示点
+        const cxT = T.reduce((s, p) => s + p[0], 0) / SEG, cyT = T.reduce((s, p) => s + p[1], 0) / SEG;
+        const q = T[Math.round(SEG * 0.75)], d = [cxT + (q[0] - cxT) * 0.72, cyT + (q[1] - cyT) * 0.72];
+        svg += `<ellipse cx="${d[0]}" cy="${d[1]}" rx="7" ry="4.5" fill="rgba(255,255,255,.7)"/>`;
+      }
+    }
+    document.getElementById("v-side").insertAdjacentHTML("beforeend", svg + "</svg>");
+  };
+}
+
+const target = document.getElementById("v-" + view) || document.getElementById("v-front");
+target.classList.add("on");
+if (window.__drawSide) requestAnimationFrame(() => window.__drawSide());
+if (view === "night") document.getElementById("stage").classList.add("night");
+</script>
+</body>
+</html>
