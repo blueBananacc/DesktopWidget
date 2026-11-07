@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { AudioLines, Bluetooth, ClipboardCopy, KeySquare, Mic, Play, Radio, Sparkles, Square, Usb } from "lucide-react";
+import { AudioLines, Bluetooth, Bot, CheckCircle2, ClipboardCopy, KeySquare, Mic, Play, Radio, Sparkles, Square, Usb, UserRound, Wrench } from "lucide-react";
 import { useStore } from "../store/AppStore";
 import { useToast } from "../ui/Toast";
 import { Banner, Card, CardHeader, PageHeader, SettingRow, Tile, Toggle } from "../ui/Primitives";
@@ -44,6 +45,60 @@ const testWav = () => {
   }
   return pcmToWav([pcm], 16000);
 };
+
+const prettyJson = (s?: string | null) => {
+  if (!s) return "";
+  try { return JSON.stringify(JSON.parse(s)); } catch { return s; }
+};
+
+/** 设备 Agent 运行过程：由设备发来的 agentReq（含完整消息历史）还原——语音输入 → 模型决策 → 工具调用/结果 → 最终回复 */
+function AgentTrace() {
+  const { s, device } = useStore();
+  const a = s.deviceAgent;
+  const trace = a.trace ?? [];
+  const names = new Map<string, string>();
+  for (const m of trace) for (const tc of m.tool_calls ?? []) names.set(tc.id, tc.function.name);
+  const idle = !a.startedAt;
+  const badge = a.busy ? <span className="badge b-new">运行中</span> : a.err ? <span className="badge">已中止</span> : a.reply !== undefined ? <span className="badge b-new">已完成</span> : undefined;
+  return (
+    <Card>
+      <CardHeader icon={<Tile color="blue" size={30}><Bot /></Tile>} title="设备 Agent 运行过程" extra={badge} />
+      <div className="card-b form">
+        {idle ? (
+          <p className="hint" style={{ margin: 0 }}>
+            {device.state === "connected" ? "还没有运行记录。录一段话并开启「识别后交给设备 Agent」，设备的每一步决策和工具调用会显示在这里。" : "连接设备后，这里会显示设备 Agent 每一步的决策和工具调用。"}
+          </p>
+        ) : (
+          <ol style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 10 }}>
+            {trace.map((m, i) => {
+              if (m.role === "user") return <Step key={i} icon={<UserRound />} title="语音输入（设备上送）" body={m.content} />;
+              if (m.role === "tool") return <Step key={i} icon={<CheckCircle2 />} title={`工具结果 · ${names.get(m.tool_call_id ?? "") ?? "tool"}`} body={prettyJson(m.content)} mono />;
+              return (
+                <li key={i} style={{ display: "grid", gap: 10 }}>
+                  {m.content && <Step icon={<Sparkles />} title="模型回复" body={m.content} />}
+                  {(m.tool_calls ?? []).map((tc) => <Step key={tc.id} icon={<Wrench />} title={`调用设备工具 · ${tc.function.name}`} body={prettyJson(tc.function.arguments)} mono />)}
+                </li>
+              );
+            })}
+            {a.busy && <Step icon={<Radio />} title={`第 ${(a.round ?? 0) + 1} 轮：等待 LLM 决策…`} body="设备把消息历史发给网页，网页代理调用你配置的 LLM 后回传设备" pending />}
+            {!a.busy && a.reply !== undefined && <Step icon={<Bot />} title="最终回复（设备 OLED 同步显示）" body={a.reply || "（空）"} done />}
+            {!a.busy && a.err && <Step icon={<Square />} title="运行中止" body={a.err} error />}
+          </ol>
+        )}
+        {!idle && <div className="hint">共 {Math.max(1, (a.round ?? 0) + 1)} 轮 · 循环由设备执行，网页只转发 LLM 请求</div>}
+      </div>
+    </Card>
+  );
+}
+
+function Step({ icon, title, body, mono, pending, done, error }: { icon: ReactNode; title: string; body?: string | null; mono?: boolean; pending?: boolean; done?: boolean; error?: boolean }) {
+  return (
+    <li className="code-box" style={{ display: "grid", gap: 4, opacity: pending ? 0.7 : 1, borderLeft: `3px solid ${error ? "#dc2626" : done ? "#059669" : "#6366f1"}` }}>
+      <div className="row" style={{ gap: 6, fontWeight: 600, fontSize: 13 }}>{icon}{title}</div>
+      {body && <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-all", fontFamily: mono ? "ui-monospace, monospace" : undefined, color: error ? "#dc2626" : undefined }}>{body}</p>}
+    </li>
+  );
+}
 
 export function SttPage() {
   const { s, device, transport, onDeviceMessage } = useStore();
@@ -307,6 +362,7 @@ export function SttPage() {
               )}
             </div>
           </Card>
+          <AgentTrace />
         </div>
 
         <div className="stack">

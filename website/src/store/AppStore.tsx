@@ -7,7 +7,7 @@ import { allStatusIds, cacheStatusNames, loadStatusNameCache, setCustomStatusDef
 import { atToday, dateKey, hhmm, startOfDay, uid } from "../domain/time";
 import { lastDays, totalsForSegments } from "../domain/review";
 import { defaultSettings, seedMembers, seedReminders } from "./seed";
-import type { DevSched, DevStdef, DeviceTodo, DeviceTransport, InboundMessage, OutboundMessage } from "../device/protocol";
+import type { AgentMessage, DevSched, DevStdef, DeviceTodo, DeviceTransport, InboundMessage, OutboundMessage } from "../device/protocol";
 import { MockTransport } from "../device/mockTransport";
 import { BleTransport } from "../device/bleTransport";
 import { SerialTransport } from "../device/serialTransport";
@@ -133,7 +133,7 @@ export interface AppState {
   /** 见过的状态名/色缓存：定义删除后，历史回顾仍按原名字展示（历史是记录不随定义删除） */
   statusNameCache: Record<string, { name: string; color: string }>;
   /** 设备端 agent 循环状态（设备是循环主体，网页只是 LLM 代理） */
-  deviceAgent: { busy: boolean; reply?: string; err?: string; at: number };
+  deviceAgent: { busy: boolean; reply?: string; err?: string; at: number; startedAt?: number; round?: number; trace?: AgentMessage[] };
 }
 
 type Snapshot = Pick<AppState, "current" | "segments" | "offworkToday" | "timer">;
@@ -721,14 +721,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           set((s) => ({ ...s, reminderFlash: { text: m.msg === "full" ? "计划表已满（设备最多存 8 张）" : m.msg === "badStatus" ? "该表包含已删除的状态，请先修正节点" : `计划表同步失败：${m.msg}`, at: Date.now(), ids: [] } }));
           break;
         case "agentReq":
-          set((s) => ({ ...s, deviceAgent: { busy: true, at: Date.now() } }));
+          set((s) => ({ ...s, deviceAgent: { busy: true, at: Date.now(), round: m.round, startedAt: m.round === 0 || !s.deviceAgent.startedAt ? Date.now() : s.deviceAgent.startedAt, trace: m.msgs.filter((x) => x.role !== "system") } }));
           proxyAgentReq(m, (err) => set((s) => ({ ...s, deviceAgent: { ...s.deviceAgent, err } })));  // 设备是循环主体；网页只做 LLM 转发
           break;
         case "agentDone":
-          set((s) => ({ ...s, deviceAgent: { busy: false, reply: m.text || undefined, at: Date.now() } }));
+          set((s) => ({ ...s, deviceAgent: { ...s.deviceAgent, busy: false, reply: m.text || undefined, err: undefined, at: Date.now() } }));
           break;
         case "agentErr":
-          set((s) => ({ ...s, deviceAgent: { busy: false, err: m.msg, at: Date.now() } }));
+          set((s) => ({ ...s, deviceAgent: { ...s.deviceAgent, busy: false, err: m.msg, at: Date.now() } }));
           break;
         case "stdefs": {
           // 事实源在设备：整表替换镜像；名字入缓存（删除后历史仍显示原名）
