@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Bell, Search, CircleHelp, Monitor, CalendarDays, Sparkles, Mic, Coffee, Plus, Sunset, RotateCcw, Lock, Fingerprint, Gauge, ShieldCheck, Timer, AlarmClock,
@@ -7,7 +8,7 @@ import { SOURCE_LABEL, customStatusDefs, keyActionLabel, statusMeta } from "../d
 import type { StatusId } from "../domain/types";
 import { atToday, clock, dateKey, duration, greeting, hhmm, weekday, ago, startOfDay } from "../domain/time";
 import { nextNode, scheduleForDay, sortedNodes } from "../domain/schedule";
-import { Card, CardHeader, ConnBadge, RowItem, StatusChip, Tile, UnknownChip, Banner } from "../ui/Primitives";
+import { Card, CardHeader, ConnBadge, Modal, RowItem, Segmented, SettingRow, StatusChip, Tile, UnknownChip, Banner } from "../ui/Primitives";
 import { DeviceMirror } from "../ui/DeviceMirror";
 import { HoldButton } from "../ui/HoldButton";
 import { useToast } from "../ui/Toast";
@@ -27,6 +28,7 @@ export function Overview() {
   const { s, now, device, actions } = useStore();
   const toast = useToast();
   const offwork = useOffwork();
+  const [knobOpen, setKnobOpen] = useState(false);
   const meta = statusMeta(s.current.id);
   const connected = device.state === "connected"; // 未连接时网页不能声称知道设备状态
   const sched = scheduleForDay(s.schedules, s.activeScheduleId, now);
@@ -189,14 +191,17 @@ export function Overview() {
                 <Tile color="blue" size={30}><Fingerprint /></Tile>
                 <span><b>触摸区</b>左 {keyActionLabel(s.settings.keys.k3)} · 右 {keyActionLabel(s.settings.keys.k4)}</span>
               </Link>
-              <Link to="/controls" className="dev-meta-link" title="打开旋钮定时设置">
+              <div className="dev-meta-link" role="button" tabIndex={0} title="调节旋钮每格时长"
+                style={{ cursor: "pointer" }}
+                onClick={() => setKnobOpen(true)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setKnobOpen(true); } }}>
                 <Tile color="orange" size={30}><Gauge /></Tile>
                 <span><b>旋钮</b>{!connected ? "未连接"
                   : s.knobTimer?.mode === "run" ? `倒计时 ${clock(Math.max(0, (s.knobTimer.endsAt ?? now) - now), false)}`
                   : s.knobTimer?.mode === "select" ? `设定 ${s.knobTimer.minutes} 分钟`
                   : s.knobTimer?.mode === "expired" ? "时间到"
-                  : `每格 +${s.settings.knobStep} 分钟`}</span>
-              </Link>
+                  : `每格 ±${s.settings.knobStep} 分钟`}</span>
+              </div>
             </div>
           </Card>
 
@@ -325,6 +330,31 @@ export function Overview() {
           </Card>
         </div>
       </div>
+
+      {knobOpen && (
+        <Modal title="旋钮定时" onClose={() => setKnobOpen(false)}>
+          <div className="form">
+            <SettingRow title="每格时长" desc="旋转一格增加/减少的分钟数">
+              <Segmented
+                disabled={!connected}
+                value={String(s.settings.knobStep)}
+                options={[{ value: "1", label: "±1 分钟" }, { value: "5", label: "±5 分钟" }, { value: "10", label: "±10 分钟" }]}
+                onChange={(v) => actions.updateSettings({ knobStep: Number(v) })}
+              />
+            </SettingRow>
+            <SettingRow title="最长时长" desc="可以选到的最大倒计时时长">
+              <select className="input input-sm" disabled={!connected} value={s.settings.knobMax} onChange={(e) => actions.updateSettings({ knobMax: Number(e.target.value) })}>
+                {[60, 120, 180].map((m) => <option key={m} value={m}>{m} 分钟</option>)}
+              </select>
+            </SettingRow>
+            <p className="hint" style={{ margin: 0 }}>
+              {connected
+                ? "配置写入设备并断电保留。在桌牌上旋转调时长、按下开始、长按取消；倒计时由设备独立执行，网页关闭也照常计时。"
+                : "设备未连接：该配置保存在设备上，连接后才能修改。"}
+            </p>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }
