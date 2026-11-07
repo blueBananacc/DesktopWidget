@@ -38,6 +38,10 @@ export class MockTransport implements DeviceTransport {
   private ledMap: Record<string, "solid" | "breath" | "off"> = {};
   private ledBr = 40;
   private ledNight = false;
+  /** 模拟设备 /knob.json + 快速定时（与固件对齐：计时本体在"设备"侧自治，网页只收镜像） */
+  private knobStep = 5;
+  private knobMax = 180;
+  private timerTimeout?: ReturnType<typeof setTimeout>;
 
   async connect() {
     await new Promise((r) => setTimeout(r, 600));
@@ -59,12 +63,17 @@ export class MockTransport implements DeviceTransport {
       if (j) { this.ledMap = j.map ?? {}; this.ledBr = j.br ?? 40; this.ledNight = !!j.night; }
       // j.map 已是 LedMode 字典（sgp-mock-led 由 reportLed 写入）
     } catch { /* 空 */ }
+    try {
+      const j = JSON.parse(localStorage.getItem("sgp-mock-knob") || "null");
+      if (j) { this.knobStep = j.step ?? 5; this.knobMax = j.max ?? 180; }
+    } catch { /* 空 */ }
     setTimeout(() => this.reportApps(), 700);
     setTimeout(() => this.reportTodos(), 750); // 与固件 hello→sendTodos 对齐：连接即同步设备待办
     setTimeout(() => this.reportSchedules(), 800); // hello→sendSchedules：计划表清单事实源
     setTimeout(() => this.reportStdefs(), 850);  // hello→sendStdefs：自定义状态注册表事实源
     setTimeout(() => this.reportKeys(), 880);    // hello→sendKeys：按键映射事实源
     setTimeout(() => this.reportLed(), 900);     // hello→sendLed：灯效设置事实源
+    setTimeout(() => this.reportKnobCfg(), 920); // hello→sendTimerCfg/sendTimer：旋钮定时事实源
     this.todoTimer = setInterval(() => { this.pollTodos(); this.pollSchedule(); }, 1000); // 模拟固件 pollTodos+pollSchedule
     return "收工牌-A12（模拟）";
   }
@@ -100,6 +109,26 @@ export class MockTransport implements DeviceTransport {
         if (msg.night !== undefined) this.ledNight = msg.night;
       }
       this.reportLed();
+      return;
+    }
+    if (msg.type === "timerCfg") {
+      this.knobStep = Math.min(30, Math.max(1, msg.step));
+      this.knobMax = Math.min(600, Math.max(this.knobStep, msg.max));
+      this.reportKnobCfg();
+      return;
+    }
+    if (msg.type === "timer") {
+      // 与固件一致：计时本体在"设备"侧自治——start 后由这里到点发 done，网页不参与计时
+      if (msg.op === "start") {
+        const minutes = Math.min(this.knobMax, Math.max(this.knobStep, msg.minutes));
+        const remain = minutes * 60_000;
+        this.msgCb?.({ type: "timer", st: "run", minutes, remain });
+        if (this.timerTimeout) clearTimeout(this.timerTimeout);
+        this.timerTimeout = setTimeout(() => this.msgCb?.({ type: "timer", st: "done", minutes }), remain);
+      } else if (msg.op === "cancel") {
+        if (this.timerTimeout) { clearTimeout(this.timerTimeout); this.timerTimeout = undefined; }
+        this.msgCb?.({ type: "timer", st: "idle" });
+      }
       return;
     }
     if (msg.type !== "app") return;
@@ -248,6 +277,11 @@ export class MockTransport implements DeviceTransport {
   private reportLed() {
     localStorage.setItem("sgp-mock-led", JSON.stringify({ map: this.ledMap, br: this.ledBr, night: this.ledNight }));
     this.msgCb?.({ type: "led", map: { ...this.ledMap }, br: this.ledBr, night: this.ledNight });
+  }
+  private reportKnobCfg() {
+    localStorage.setItem("sgp-mock-knob", JSON.stringify({ step: this.knobStep, max: this.knobMax }));
+    this.msgCb?.({ type: "timerCfg", step: this.knobStep, max: this.knobMax });
+    this.msgCb?.({ type: "timer", st: "idle" });
   }
   /** 固件 markStatus→sendSegments：模拟设备端状态切换（自治触发）→ 区间推送 */
   private markStatus(status: string) {

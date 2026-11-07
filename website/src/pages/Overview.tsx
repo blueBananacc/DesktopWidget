@@ -34,7 +34,10 @@ export function Overview() {
   const upcoming = sched ? sortedNodes(sched).filter((n) => atToday(n.time, now) > now).slice(0, 3) : [];
   const nn = nextNode(sched, now);
   const remaining = s.current.until ? s.current.until - now : undefined;
-  const sub = s.timer ? `剩余 ${clock(s.timer.endsAt - now, false)}` : s.current.until ? `${hhmm(s.current.since)} – ${hhmm(s.current.until)}` : meta.hint;
+  const sub = s.timer ? `剩余 ${clock(s.timer.endsAt - now, false)}`
+    : connected && s.knobTimer?.mode === "run" ? `倒计时 ${clock(Math.max(0, (s.knobTimer.endsAt ?? now) - now), false)}`
+    : connected && s.knobTimer?.mode === "select" ? `设定 ${s.knobTimer.minutes} 分钟`
+    : s.current.until ? `${hhmm(s.current.since)} – ${hhmm(s.current.until)}` : meta.hint;
   const statusExpired = connected && !s.timer && s.current.until && s.current.source !== "schedule" && now > s.current.until;
   const openReminders = s.deviceTodos.filter((t) => !t.done);
   const breakTotal = s.settings.breakMinutes * 60_000;
@@ -80,8 +83,15 @@ export function Overview() {
         </div>
       </div>
 
-      {(s.timer?.expired || statusExpired || (connected && s.breakDue)) && (
+      {(s.timer?.expired || statusExpired || (connected && s.breakDue) || (connected && s.knobTimer?.mode === "expired")) && (
         <div className="stack" style={{ marginBottom: 20, gap: 10 }}>
+          {connected && s.knobTimer?.mode === "expired" && (
+            <Banner tone="warn" icon={<Timer className="i" />} actions={
+              <button className="btn btn-primary btn-sm" onClick={() => actions.knobTimerCancel()}>知道了</button>
+            }>
+              <b>旋钮倒计时 {s.knobTimer.minutes} 分钟已到</b>计时由设备执行，不会改变当前状态。
+            </Banner>
+          )}
           {s.timer?.expired && (
             <Banner tone="warn" icon={<Timer className="i" />} actions={<>
               <button className="btn btn-secondary btn-sm" onClick={() => actions.extendTimer(5)}>延长 5 分钟</button>
@@ -171,18 +181,22 @@ export function Overview() {
               </div>
             </div>
             <div className="dev-meta">
-              <div>
+              <Link to="/lighting" className="dev-meta-link" title="打开灯效设置">
                 <span className="swatch-led" style={{ background: !connected || s.settings.led[s.current.id] === "off" ? "var(--line-2)" : meta.color }} />
                 <span><b>RGB 灯</b>{!connected ? "未连接" : s.settings.led[s.current.id] === "off" ? "已关闭" : `${s.settings.led[s.current.id] === "breath" ? "呼吸" : "常亮"} · 亮度 ${s.settings.ledBrightness}%`}</span>
-              </div>
-              <div>
+              </Link>
+              <Link to="/controls" className="dev-meta-link" title="打开触摸与快捷键设置">
                 <Tile color="blue" size={30}><Fingerprint /></Tile>
                 <span><b>触摸区</b>左 {keyActionLabel(s.settings.keys.k3)} · 右 {keyActionLabel(s.settings.keys.k4)}</span>
-              </div>
-              <div>
+              </Link>
+              <Link to="/controls" className="dev-meta-link" title="打开旋钮定时设置">
                 <Tile color="orange" size={30}><Gauge /></Tile>
-                <span><b>旋钮</b>每格 +{s.settings.knobStep} 分钟</span>
-              </div>
+                <span><b>旋钮</b>{!connected ? "未连接"
+                  : s.knobTimer?.mode === "run" ? `倒计时 ${clock(Math.max(0, (s.knobTimer.endsAt ?? now) - now), false)}`
+                  : s.knobTimer?.mode === "select" ? `设定 ${s.knobTimer.minutes} 分钟`
+                  : s.knobTimer?.mode === "expired" ? "时间到"
+                  : `每格 +${s.settings.knobStep} 分钟`}</span>
+              </Link>
             </div>
           </Card>
 

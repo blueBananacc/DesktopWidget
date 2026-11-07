@@ -48,11 +48,11 @@ export function ControlsPage() {
           </div>
         </Card>
         <Card>
-          <CardHeader icon={<Tile color="orange" size={30}><Gauge /></Tile>} title="旋钮定时" extra={<span className="badge b-warn">硬件待补充</span>} />
+          <CardHeader icon={<Tile color="orange" size={30}><Gauge /></Tile>} title="旋钮定时" extra={<span className="badge b-new">设备执行</span>} />
           <div className="card-b form">
-            <SettingRow title="每格时长"><Segmented value={String(s.settings.knobStep)} options={[{ value: "1", label: "1 分钟" }, { value: "5", label: "5 分钟" }, { value: "10", label: "10 分钟" }]} onChange={(v) => set({ knobStep: Number(v) })} /></SettingRow>
-            <SettingRow title="最长时长"><select className="input input-sm" value={s.settings.knobMax} onChange={(e) => set({ knobMax: Number(e.target.value) })}>{[60, 120, 180].map((m) => <option key={m} value={m}>{m} 分钟</option>)}</select></SettingRow>
-            <p className="hint" style={{ margin: 0 }}>旋转选择时长，按下开始倒计时。计时结束不会自动改变状态。</p>
+            <SettingRow title="每格时长"><Segmented disabled={!connected} value={String(s.settings.knobStep)} options={[{ value: "1", label: "1 分钟" }, { value: "5", label: "5 分钟" }, { value: "10", label: "10 分钟" }]} onChange={(v) => set({ knobStep: Number(v) })} /></SettingRow>
+            <SettingRow title="最长时长"><select className="input input-sm" disabled={!connected} value={s.settings.knobMax} onChange={(e) => set({ knobMax: Number(e.target.value) })}>{[60, 120, 180].map((m) => <option key={m} value={m}>{m} 分钟</option>)}</select></SettingRow>
+            <p className="hint" style={{ margin: 0 }}>配置存在设备上，断电保留。旋转选择时长，按下开始倒计时，长按取消；倒计时由设备独立执行，网页关闭也照常计时，到点只提醒、不会自动改变状态。</p>
           </div>
         </Card>
         <Card>

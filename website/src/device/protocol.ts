@@ -18,6 +18,9 @@ export type OutboundMessage =
   | { type: "break"; minutes: number; enabled: boolean; offToday: boolean; accumMs?: number } // 休息提醒设置；accumMs 仅在明确要求重置时携带，设备保持计时权威
   | { type: "keys"; k1: KeyAction; k2: KeyAction; k3: KeyAction; k4: KeyAction; ts: number } // 按键映射写入设备 /keys.json（K1 仍需按住 1.5s）；设备持久化后回 keys 快照
   | { type: "led"; op: "set"; map?: Record<string, LedMode>; br?: number; night?: boolean } // 灯效写入设备 /led.json：map=每状态档位，br=亮度，night=夜间自动关；设备持久化后回 led 快照
+  | { type: "timerCfg"; step: number; max: number } // 旋钮快速定时配置写入设备 /knob.json：step=每格分钟，max=最长时间；设备持久化后回 timerCfg 快照
+  | { type: "timer"; op: "start"; minutes: number } // 让设备启动快速倒计时（计时本体在设备自治，网页只是触发入口）
+  | { type: "timer"; op: "cancel" }                // 取消设备上的快速倒计时/关闭到点提醒
   | { type: "reminder"; text?: string; count?: number; ts: number } // 提醒触发：text 仅当用户允许上屏时携带；设备 OLED 显示 + RGB 闪烁，任意按键确认
   | { type: "app"; op: "begin"; status: string; size: number } // 按状态上传自定义屏幕：.wasm 写入 LittleFS /app_<status>.wasm（持久，断电不丢）
   | { type: "app"; op: "chunk"; data: string } // wasm 二进制 base64 分片（≤~1KB 解码数据/条），按序追加
@@ -51,7 +54,9 @@ export type InboundMessage =
   | { type: "touch"; zone: "left" | "right" }
   | { type: "shortcut"; press: "single" | "long" }
   | { type: "offworkKey" }
-  | { type: "knob"; minutes: number }
+  | { type: "knob"; minutes: number }              // 旧版旋钮消息（兼容）：等同 timer st:run
+  | { type: "timer"; st: "idle" | "select" | "run" | "done"; minutes?: number; remain?: number } // 设备旋钮快速定时镜像：select=选择中(分钟)；run=运行中(remain=剩余ms)；done=到点；idle=无计时
+  | { type: "timerCfg"; step: number; max: number } // 设备旋钮配置快照（hello 后/timerCfg 写入后推送）。事实源在设备 /knob.json
   | { type: "breakState"; minutes: number; accumMs: number; enabled: boolean; offToday: boolean; due: boolean }
   | { type: "wantTime" } // 设备未校时（如中途重启）主动请求 time
   | { type: "segments"; phase: "begin" | "end" } // 今日状态区间全量推送的起止帧

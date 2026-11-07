@@ -88,6 +88,13 @@ export interface TimerState {
   expired?: boolean;
 }
 
+/** 设备旋钮快速定时的镜像（事实源在设备；网页只展示，不参与计时） */
+export interface KnobTimerState {
+  mode: "select" | "run" | "expired";
+  minutes: number;
+  endsAt?: number; // run：由设备 remain 换算的预计截止
+}
+
 export interface AppState {
   current: CurrentStatus;
   segments: StatusSegment[];
@@ -111,6 +118,8 @@ export interface AppState {
   members: Member[];
   settings: Settings;
   timer?: TimerState;
+  /** 设备旋钮快速定时镜像：由 timer/timerCfg 上行消息驱动；断连显示为未知（不虚构剩余时间） */
+  knobTimer?: KnobTimerState;
   breakAccumMs: number;   // 已同步时 = 设备上次上报的累计值；显示时按 breakSyncedAt 外推
   breakSyncedAt: number;  // 上次收到设备 breakState 的时刻；0 = 从未同步（离线模式，本地累计）
   breakDue: boolean;
@@ -247,6 +256,9 @@ const tick = (s: AppState, now: number): AppState => {
   // 待办提醒由设备自治触发（网页不再做调度）：到点/收工触发后设备推 todoFired + todos，AppShell 负责弹 toast
 
   if (next.timer && !next.timer.expired && now >= next.timer.endsAt) next = { ...next, timer: { ...next.timer, expired: true } };
+  // 旋钮倒计时：到点消息丢了也能靠 endsAt 补一记过期镜像（不代替设备 done 消息，只兜底显示）
+  if (next.knobTimer?.mode === "run" && next.knobTimer.endsAt && now >= next.knobTimer.endsAt)
+    next = { ...next, knobTimer: { ...next.knobTimer, mode: "expired" } };
 
   const { settings } = next;
   // 本地累计只在从未同步过设备时启用（离线/模拟设备）；连接后设备是计时权威，网页只存快照外推
@@ -409,6 +421,14 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
   deviceTodoSet(id: string, patch: { text?: string; at?: number; trig?: "offwork" | "at"; show?: boolean; done?: boolean }) { deviceSend?.({ type: "todo", op: "set", id, ...patch }); },
   deviceTodoDone(id: string, done = true) { deviceSend?.({ type: "todo", op: "done", id, done }); },
   deviceTodoDel(id: string) { deviceSend?.({ type: "todo", op: "del", id }); },
+  /** 旋钮快速定时：网页只是触发入口，计时本体在设备自治（设备回 timer 消息更新镜像） */
+  knobTimerStart(minutes: number) {
+    deviceSend?.({ type: "timer", op: "start", minutes });
+  },
+  knobTimerCancel() {
+    deviceSend?.({ type: "timer", op: "cancel" });
+    set((s) => (s.knobTimer ? { ...s, knobTimer: undefined } : s));
+  },
   /** 自定义状态：事实源在设备注册表，下发 stdef set；镜像等 stdefs 快照更新（需连接） */
   stdefSet(d: { id?: string; zh: string; hint?: string; c: number; work?: boolean }) {
     deviceSend?.({ type: "stdef", op: "set", id: d.id ?? `c${Math.random().toString(36).slice(2, 6)}`, zh: d.zh, hint: d.hint, c: d.c, work: d.work });
@@ -430,11 +450,16 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
         if (patch.keys) deviceSend?.({ type: "keys", k1: next.keys.k1, k2: next.keys.k2, k3: next.keys.k3, k4: next.keys.k4, ts: Date.now() });
         if (patch.led !== undefined || patch.ledBrightness !== undefined || patch.ledNightOff !== undefined)
           deviceSend?.({ type: "led", op: "set", map: next.led, br: next.ledBrightness, night: next.ledNightOff });
+        // 旋钮定时配置：事实源在设备 /knob.json，设备回 timerCfg 快照后镜像校准
+        if (patch.knobStep !== undefined || patch.knobMax !== undefined)
+          deviceSend?.({ type: "timerCfg", step: next.knobStep, max: next.knobMax });
       } else {
         next.keys = s.settings.keys;                 // 断连时设备真值不可写，本地镜像回滚
         next.led = s.settings.led;
         next.ledBrightness = s.settings.ledBrightness;
         next.ledNightOff = s.settings.ledNightOff;
+        next.knobStep = s.settings.knobStep;
+        next.knobMax = s.settings.knobMax;
       }
       return { ...s, settings: next };
     });
@@ -558,7 +583,21 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           runKey(cur.settings.keys.k1, "offwork");
           break;
         case "knob":
-          actions.startTimer(m.minutes);
+          // 旧协议兼容：等同一个已运行的设备倒计时镜像（不再转成网页侧专注计时）
+          set((s) => ({ ...s, knobTimer: { mode: "run", minutes: m.minutes, endsAt: Date.now() + m.minutes * 60_000 } }));
+          break;
+        case "timer": {
+          // 设备旋钮快速定时镜像：计时本体在设备，网页只展示
+          const now = Date.now();
+          if (m.st === "idle") set((s) => (s.knobTimer ? { ...s, knobTimer: undefined } : s));
+          else if (m.st === "select") set((s) => ({ ...s, knobTimer: { mode: "select", minutes: m.minutes ?? s.knobTimer?.minutes ?? cur.settings.knobStep } }));
+          else if (m.st === "run") set((s) => ({ ...s, knobTimer: { mode: "run", minutes: m.minutes ?? s.knobTimer?.minutes ?? 0, endsAt: now + (m.remain ?? 0) } }));
+          else if (m.st === "done") set((s) => ({ ...s, knobTimer: { mode: "expired", minutes: m.minutes ?? s.knobTimer?.minutes ?? 0 } }));
+          break;
+        }
+        case "timerCfg":
+          // 旋钮配置事实源在设备：快照直接校准镜像（不改写设备值）
+          set((s) => (s.settings.knobStep === m.step && s.settings.knobMax === m.max ? s : { ...s, settings: { ...s.settings, knobStep: m.step, knobMax: m.max } }));
           break;
         case "breakState": {
           // 设备是唯一事实来源；但有未回执的网页设置（breakPending）时，该字段暂不采纳、并重发到一致为止

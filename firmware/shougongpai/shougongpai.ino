@@ -158,6 +158,57 @@ uint32_t remindUntil = 0;
 char     remindText[48] = "";
 int      remindCount = 0;
 
+// ===== 旋钮快速定时（PRD 3.13）：设备自治倒计时 =====
+// 旋转进选择态（每格 ±knobStepMin），按下确认开始，长按取消；到点 OLED 提醒 + RGB 闪。
+// 与计划表并行、不改写计划，也不推断/改变当前状态；断电即失效（不持久化计时本体）。
+uint8_t  knobStepMin = 5;               // 每格分钟数（网页 timerCfg 下发，/knob.json 持久）
+uint16_t knobMaxMin = 180;              // 可选最长时间
+uint8_t  timerPhase = 0;                // 0=空闲 1=选择时长 2=运行中 3=到点提醒中
+uint16_t timerMin = 5;                  // 选择/运行中的总分钟数
+uint32_t timerEndsMs = 0;               // 运行中：截止时刻（millis）
+uint32_t timerSelectAt = 0;             // 选择态最后操作时刻（10s 无操作退出）
+uint32_t timerNoticeUntil = 0;          // 到点提醒画面截止
+uint32_t timerLastPush = 0;             // 运行中每秒推一次剩余时间给网页
+
+void sendTimer() {  // 上行镜像：网页据此展示，不参与计时
+  char buf[96];
+  if (timerPhase == 1)      snprintf(buf, sizeof buf, "{\"type\":\"timer\",\"st\":\"select\",\"minutes\":%u}", (unsigned)timerMin);
+  else if (timerPhase == 2) snprintf(buf, sizeof buf, "{\"type\":\"timer\",\"st\":\"run\",\"minutes\":%u,\"remain\":%lu}", (unsigned)timerMin, (unsigned long)max((uint32_t)0, timerEndsMs - millis()));
+  else if (timerPhase == 3) snprintf(buf, sizeof buf, "{\"type\":\"timer\",\"st\":\"done\",\"minutes\":%u}", (unsigned)timerMin);
+  else                      snprintf(buf, sizeof buf, "{\"type\":\"timer\",\"st\":\"idle\"}");
+  sendLine(buf);
+}
+void sendTimerCfg() {
+  char buf[72];
+  snprintf(buf, sizeof buf, "{\"type\":\"timerCfg\",\"step\":%u,\"max\":%u}", (unsigned)knobStepMin, (unsigned)knobMaxMin);
+  sendLine(buf);
+}
+void saveKnob() {
+  JsonDocument doc; doc["step"] = knobStepMin; doc["max"] = knobMaxMin;
+  File f = LittleFS.open("/knob.json", "w"); if (f) { serializeJson(doc, f); f.close(); }
+}
+void loadKnob() {
+  File f = LittleFS.open("/knob.json", "r"); if (!f) return;
+  JsonDocument doc; if (deserializeJson(doc, f)) { f.close(); return; }
+  uint8_t st = doc["step"] | 5; uint16_t mx = doc["max"] | 180;
+  knobStepMin = constrain(st, 1, 30);
+  knobMaxMin = constrain(mx, (uint16_t)knobStepMin, (uint16_t)600);
+  f.close();
+}
+void timerStart(uint16_t minutes) {
+  timerMin = constrain(minutes, (uint16_t)knobStepMin, knobMaxMin);
+  timerPhase = 2;
+  timerEndsMs = millis() + (uint32_t)timerMin * 60000UL;
+  timerLastPush = 0;
+  oledDirty = true;
+  sendTimer();
+}
+void timerStop() {           // 取消/提醒结束 → 回空闲
+  timerPhase = 0; timerNoticeUntil = 0;
+  oledDirty = true;
+  sendTimer();
+}
+
 // 待办提醒存储（设备事实源）：agent 工具与网页 todo 消息写入，到点复用提醒画面触发
 // trig: 0=定时(at epoch ms) 1=收工后触发; show: 触发时正文上屏(否则只显示数量); created/src 供网页展示
 struct Todo { char id[12]; int64_t at; uint8_t trig; char text[40]; uint8_t show; int64_t created; char src[6]; bool done; };
@@ -721,17 +772,29 @@ void drawOled() {
   const bool rec = micOn && !remind && !notice;                    // 录音画面排第三
   const bool ag = agentWaiting && !remind && !notice && !rec;      // agent 等 LLM 回复排第四
   const bool agd = !remind && !notice && !rec && !ag && millis() < agentReplyUntil;  // 回复结果 8s
-  const char* main = remind ? "有新待办" : notice ? "起来活动一下" : rec ? "录音中" : ag ? "AI 思考中" : agd ? agentReply : scrMain.c_str();
-  char subBuf[48];
+  // 旋钮快速定时排在第五：到点提醒 > 时长选择 > 运行倒计时 > 普通状态屏
+  const bool tnot = !remind && !notice && !rec && !ag && !agd && millis() < timerNoticeUntil;
+  const bool tsel = !remind && !notice && !rec && !ag && !agd && !tnot && timerPhase == 1;
+  const bool trun = !remind && !notice && !rec && !ag && !agd && !tnot && timerPhase == 2;
+  char subBuf[48], tBuf[24];
+  uint32_t trem = trun ? (timerEndsMs > millis() ? timerEndsMs - millis() : 0) : 0;
+  const char* main = remind ? "有新待办" : notice ? "起来活动一下" : rec ? "录音中" : ag ? "AI 思考中" : agd ? agentReply
+    : tnot ? "时间到"
+    : tsel ? (snprintf(tBuf, sizeof tBuf, "%u 分钟", (unsigned)timerMin), tBuf)
+    : trun ? (snprintf(tBuf, sizeof tBuf, "%02lu:%02lu", (unsigned long)(trem / 60000), (unsigned long)(trem / 1000 % 60)), tBuf)
+    : scrMain.c_str();
   const char* sub = remind
     ? (remindText[0] ? remindText : (snprintf(subBuf, sizeof subBuf, "有 %d 条待办", remindCount), subBuf))
     : notice ? "下一轮计时已开始"
     : rec ? (snprintf(subBuf, sizeof subBuf, "%02lu:%02lu", (unsigned long)(micLastMs / 60000), (unsigned long)(micLastMs / 1000 % 60)), subBuf)
     : ag ? "…"
     : agd ? "AI 回复"
+    : tnot ? "按任意键关闭"
+    : tsel ? "旋转调整 · 按下开始"
+    : trun ? (snprintf(subBuf, sizeof subBuf, "%s · 长按取消", scrMain.c_str()), subBuf)
     : scrSub.c_str();
-  // 布局只作用于常规状态屏；提醒/休息/录音/agent 画面始终完整显示
-  const uint8_t lay = (remind || notice || rec || ag || agd) ? 0 : scrLayout;
+  // 布局只作用于常规状态屏；提醒/休息/录音/agent/定时 画面始终完整显示
+  const uint8_t lay = (remind || notice || rec || ag || agd || tnot || tsel || trun) ? 0 : scrLayout;
   oled.clearBuffer();
   if (lay < 2) {
     // 左上角连接状态点
@@ -870,6 +933,17 @@ void handleLine(const String& line) {
     if (!doc["night"].isNull()) ledNightOff = doc["night"];
     ledMode = ledModeOf(curStatusId.c_str());
     saveLed(); sendLed();
+  } else if (!strcmp(type, "timerCfg")) {
+    // 旋钮快速定时配置（事实源在设备 /knob.json）：step=每格分钟，max=最长时间
+    if (!doc["step"].isNull()) knobStepMin = constrain((int)(doc["step"] | 5), 1, 30);
+    if (!doc["max"].isNull())  knobMaxMin  = constrain((int)(doc["max"] | 180), (int)knobStepMin, 600);
+    saveKnob(); sendTimerCfg();
+    Serial.printf("[KNOB] step=%u max=%u\n", (unsigned)knobStepMin, (unsigned)knobMaxMin);
+  } else if (!strcmp(type, "timer")) {
+    // 网页可直接启动/取消倒计时（计时本体仍在设备，网页只是触发入口）
+    const char* op = doc["op"] | "";
+    if (!strcmp(op, "start")) timerStart((uint16_t)(doc["minutes"] | knobStepMin));
+    else if (!strcmp(op, "cancel")) timerStop();
   } else if (!strcmp(type, "app")) {
     // 按状态自定义屏幕（WASM）：begin{status,size} 开文件 → chunk{base64}×N → run 收尾
     // （收齐且目标是当前状态则立即重载执行）/ stop 停掉当前 app / clear{status} 删除恢复默认
@@ -1031,16 +1105,16 @@ void pollKeys() {
     bool pressed = !k.last;
     if (k.pin == KEY_SHORTCUT) {
       if (pressed && !k.longSent && now - k.t0 > LONG_MS) {
-        sendLine(F("{\"type\":\"shortcut\",\"press\":\"long\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0;
+        sendLine(F("{\"type\":\"shortcut\",\"press\":\"long\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0; timerNoticeUntil = 0;
         if (!bleConnected) { setLocalStatus("focus"); registerManualOverride("focus"); }   // 离线：长按固定 = 专注中
       } else if (!pressed && !k.longSent && k.sawPress && now - k.t0 > DEBOUNCE_MS) {
-        sendLine(F("{\"type\":\"shortcut\",\"press\":\"single\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0;
+        sendLine(F("{\"type\":\"shortcut\",\"press\":\"single\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0; timerNoticeUntil = 0;
         if (!bleConnected) applyKeyAction(keyAct[1]);    // 离线：短按按网页下发的 K2 映射执行
       }
     } else if (k.pin == KEY_OFFWORK) {
       // K1：按住 1.5s 才触发收工动作（与网页按住收工一致，防误触）；松早了取消
       if (pressed && !k.longSent && now - k.t0 > OFFWORK_HOLD_MS) {
-        k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0;
+        k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0; timerNoticeUntil = 0;
         sendLine(F("{\"type\":\"offworkKey\"}"));
         if (!bleConnected) applyKeyAction(keyAct[0]);
       } else if (!pressed) {
@@ -1048,7 +1122,7 @@ void pollKeys() {
       }
     } else if (pressed && now - k.t0 > DEBOUNCE_MS && !k.longSent) {
       k.longSent = true;
-      breakNoticeUntil = 0; remindUntil = 0;  // 任意按键提前关闭提醒画面
+      breakNoticeUntil = 0; remindUntil = 0; timerNoticeUntil = 0;  // 任意按键提前关闭提醒画面
       if (!strcmp(k.ev1, "touchL")) sendLine(F("{\"type\":\"touch\",\"zone\":\"left\"}"));
       else if (!strcmp(k.ev1, "touchR")) sendLine(F("{\"type\":\"touch\",\"zone\":\"right\"}"));
       // 离线：K3/K4 按网页下发的映射执行（出厂默认 = 上一个/下一个状态循环）
@@ -1406,49 +1480,89 @@ void pollTouch() {
 }
 #else
 void pollTouch() {}
+#endif
 
-// —— 接线验证探针（临时）：新模块只打串口日志，功能角色待正式分配 ——
-bool ttpLast; int8_t encAcc = 0; uint8_t encLast = 0; bool encKeyLast; uint8_t rawA = 2, rawB = 2;
-uint8_t rawK[4] = { 2, 2, 2, 2 };
-const uint8_t rawKPin[4] = { 17, 16, 15, 7 };     // 按键四脚边沿：排查插错行/悬 GND
-bool encQuadAlive; int8_t singleAcc;               // 双相是否真解出过步（B 毛刺锁不死单相兜底）
+// ===================== EC11 旋钮快速定时（PRD 3.13） =====================
+// A=GPIO1 B=GPIO40 KEY=GPIO42（上拉，按住=0）；B 悬空/断线时单相兜底：按住 KEY 转=反向。
+// 交互：空闲旋转进选择态实时上屏；旋转按 knobStepMin 调整；按下确认开始倒计时；
+// 运行中/选择态长按取消；选择态 10s 无操作退出；到点 OLED 提醒 + RGB 闪 3s，不改状态。
+bool ttpLast;                                        // TTP223 引脚保留（setup 初始化用）
+int8_t   encAcc = 0;
+uint8_t  encLast = 0;
+bool     encQuadAlive = false;                       // 双相是否真解出过步（B 毛刺锁不死单相兜底）
+int8_t   singleAcc = 0;
+uint8_t  rawA = 2, rawB = 2;
+bool     encKeyLast = true;
+uint32_t encKeyT0 = 0;
+bool     encLongSent = false;
 
-void sendEncDir(int dir) {
-  char buf[48]; snprintf(buf, sizeof buf, "{\"type\":\"enc\",\"dir\":%d}", dir);
-  sendLine(buf);
+void encDetent(int dir) {                            // 一个机械档位（±4 电平转换）
+  if (timerPhase == 0) {                             // 空闲：旋转即进入时长选择
+    timerPhase = 1; timerMin = knobStepMin;
+  } else if (timerPhase == 1) {                      // 选择中：±step，界内夹取
+    int v = (int)timerMin + dir * (int)knobStepMin;
+    timerMin = (uint16_t)constrain(v, (int)knobStepMin, (int)knobMaxMin);
+  } else {
+    return;                                          // 运行中/提醒中：旋转不改剩余时间
+  }
+  timerSelectAt = millis();
+  oledDirty = true;
+  sendTimer();
 }
 
-void pollProbes() {
-  bool t = digitalRead(PIN_TTP_SIG);          // TTP223 主动输出：高=摸到
-  if (t != ttpLast) { ttpLast = t; Serial.printf("[PROBE] TTP223 %s\n", t ? "touch" : "release"); }
-  for (int i = 0; i < 4; i++) {
-    uint8_t v = digitalRead(rawKPin[i]);
-    if (v != rawK[i]) { rawK[i] = v; Serial.printf("[PROBE] KEY %d=%d\n", rawKPin[i], v); }
-  }
-  bool k = digitalRead(PIN_ENC_KEY);          // 上拉：按住=0
-  uint8_t ra = digitalRead(PIN_ENC_A), rb = digitalRead(PIN_ENC_B);   // 原始电平边沿，排查线通不通
+void pollEncoder() {
+  uint8_t ra = digitalRead(PIN_ENC_A), rb = digitalRead(PIN_ENC_B);
+  bool k = digitalRead(PIN_ENC_KEY);                 // 0=按住
   bool aEdge = (ra != rawA);
-  if (aEdge) { rawA = ra; Serial.printf("[PROBE] ENC A=%d\n", ra); }
-  if (rb != rawB) { rawB = rb; Serial.printf("[PROBE] ENC B=%d\n", rb); }
+  rawA = ra; rawB = rb;
   static const int8_t qei[16] = { 0,-1,1,0, 1,0,0,-1, -1,0,0,1, 0,1,-1,0 };
   uint8_t s = (ra << 1) | rb;
   encAcc += qei[(encLast << 2) | s]; encLast = s;
   if (encAcc >= 4 || encAcc <= -4) {
     int dir = encAcc > 0 ? 1 : -1; encAcc = 0; encQuadAlive = true; singleAcc = 0;
-    if (!k) dir = -dir;                                   // 按住 KEY 转 = 反向（双相模式下也生效）
-    Serial.printf("[PROBE] ENC %s%s\n", dir > 0 ? "cw ->" : "ccw <-", !k ? " key" : "");
-    sendEncDir(dir);
+    if (!k) dir = -dir;                              // 按住 KEY 转 = 反向（双相模式下也生效）
+    encDetent(dir);
   }
-  // 单相兜底：双相从没真解出过步（S2 没接上/断了）→ 方向只能靠"按住 KEY 转=反向"
-  if (!encQuadAlive && aEdge && ++singleAcc >= 2) {
+  if (!encQuadAlive && aEdge && ++singleAcc >= 2) {  // 单相兜底：B 悬空/断线
     singleAcc = 0;
-    int dir = k ? 1 : -1;
-    Serial.printf("[PROBE] ENC %s 1-phase%s\n", dir > 0 ? "cw ->" : "ccw <-", k ? "" : " key");
-    sendEncDir(dir);
+    encDetent(k ? 1 : -1);
   }
-  if (k != encKeyLast) { encKeyLast = k; Serial.printf("[PROBE] ENC key %s\n", k ? "release" : "press"); }
+  // 按键：短按=确认开始/关提醒；长按≥800ms=取消或重置
+  if (k != encKeyLast) {
+    encKeyLast = k;
+    if (!k) { encKeyT0 = millis(); encLongSent = false; }
+    else if (!encLongSent && millis() - encKeyT0 > DEBOUNCE_MS) {
+      if (timerPhase == 1) timerStart(timerMin);     // 选择态：确认开始
+      else if (timerPhase == 3) timerStop();         // 提醒中：按下关闭
+      // 空闲/运行中短按不动作（防误触）
+    }
+  }
+  if (!k && !encLongSent && millis() - encKeyT0 > 800 && timerPhase) {
+    encLongSent = true;
+    timerStop();                                     // 选择态重置 / 运行中取消 / 提醒中关闭
+  }
 }
-#endif
+
+void pollTimer() {
+  const uint32_t now = millis();
+  if (timerPhase == 1 && now - timerSelectAt > 10000) {          // 选择 10s 无操作 → 退出
+    timerPhase = 0; oledDirty = true; sendTimer();
+  } else if (timerPhase == 2) {
+    if ((int32_t)(now - timerEndsMs) >= 0) {                     // 到点：只提醒，不改状态
+      timerPhase = 3;
+      timerNoticeUntil = now + 15000;
+      breakFlashUntil = now + 3000;
+      oledDirty = true;
+      Serial.printf("[TIMER] %u min done\n", (unsigned)timerMin);
+      sendTimer();
+    } else if (now - timerLastPush >= 1000) {                    // 每秒同步剩余给网页镜像
+      timerLastPush = now;
+      sendTimer();
+    }
+  } else if (timerPhase == 3 && (int32_t)(now - timerNoticeUntil) >= 0) {
+    timerPhase = 0; oledDirty = true; sendTimer();               // 提醒 15s 自动结束
+  }
+}
 
 // ===================== 语音转文字：I2S 麦 + IMA-ADPCM 帧流 =====================
 // 网页发 stt start/stop；设备把 16kHz PCM 编成 ADPCM，按 aud JSON 帧上行（BLE notify / 串口同路）
@@ -1893,6 +2007,7 @@ void setup() {
   loadStdefs();                       // 自定义状态注册表
   loadKeys();                         // 按键映射
   loadLed();                          // 灯效设置
+  loadKnob();                         // 旋钮定时配置（每格分钟/最长时间）
   loadSegs();                         // 断电前的今日区间：校时后 adoptPendSegs 回填
   // 崩溃防护：上次运行中的 app 导致看门狗/异常复位 → 禁用该文件（改名 .bad，避免重启死循环）
   esp_reset_reason_t rr = esp_reset_reason();
@@ -1927,11 +2042,14 @@ void loop() {
     sendStdefs();                          // 自定义状态注册表事实源同步给网页
     sendKeys();                            // 按键映射事实源同步给网页
     sendLed();                             // 灯效设置事实源同步给网页
+    sendTimerCfg();                        // 旋钮定时配置（每格分钟/最长时间）
+    sendTimer();                           // 快速定时当前状态
     segDirty = true;                       // 随后推送今日状态区间
   }
   pollKeys();
   pollTouch();
-  pollProbes();
+  pollEncoder();
+  pollTimer();
   pollBreak();
   pollSchedule();
   pollTodos();
