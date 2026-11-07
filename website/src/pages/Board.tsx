@@ -47,6 +47,9 @@ export function BoardPage() {
               />
             );
           })}
+          {s.membersLive && s.members.length === 0 && (
+            <div className="card-b"><p className="hint" style={{ margin: 0 }}>区域内还没有其他成员广播。其他收工牌开启「分享我的当前状态」且区域码一致时会出现在这里。</p></div>
+          )}
         </Card>
         <div className="stack">
           <Card>
@@ -69,7 +72,7 @@ export function BoardPage() {
           <Banner tone="info" icon={<Radio className="i" />}>
             <b>数据从哪里来</b>同一区域的设备之间用 ESP-NOW 互相广播状态，网页不能直接收到。看板上的成员状态由连接到网页的设备作为网关转发；跨区域查看需要以后接入联网服务。
           </Banner>
-          <Banner tone="info" icon={<Users className="i" />}>当前成员数据为演示数据，接入网关设备后显示真实成员。</Banner>
+          {!s.membersLive && <Banner tone="info" icon={<Users className="i" />}>当前成员数据为演示数据，接入网关设备后显示真实成员。</Banner>}
         </div>
       </div>
     </>

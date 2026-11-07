@@ -116,6 +116,8 @@ export interface AppState {
   seededLeftover?: boolean;
   seededLeftover2?: boolean;
   members: Member[];
+  /** 收到过真实 peers 快照后置真：看板不再显示演示成员 */
+  membersLive?: boolean;
   settings: Settings;
   timer?: TimerState;
   /** 设备旋钮快速定时镜像：由 timer/timerCfg 上行消息驱动；断连显示为未知（不虚构剩余时间） */
@@ -442,6 +444,7 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
   },
   setUserName(name: string) {
     set((s) => ({ ...s, user: { ...s.user, name } })); // 共享场景展示的是用户姓名，不是设备名
+    deviceSend?.({ type: "share", op: "set", name }); // 广播用名的事实源在设备：改名同步下发
   },
   updateSettings(patch: Partial<Settings>) {
     set((s) => {
@@ -456,6 +459,8 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
         // 旋钮定时配置：事实源在设备 /knob.json，设备回 timerCfg 快照后镜像校准
         if (patch.knobStep !== undefined || patch.knobMax !== undefined)
           deviceSend?.({ type: "timerCfg", step: next.knobStep, max: next.knobMax });
+        // 分享开关：事实源在设备 /share.json（ESP-NOW 广播由设备执行）
+        if (patch.shareEnabled !== undefined) deviceSend?.({ type: "share", op: "set", en: next.shareEnabled });
       } else {
         next.keys = s.settings.keys;                 // 断连时设备真值不可写，本地镜像回滚
         next.led = s.settings.led;
@@ -463,6 +468,7 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
         next.ledNightOff = s.settings.ledNightOff;
         next.knobStep = s.settings.knobStep;
         next.knobMax = s.settings.knobMax;
+        next.shareEnabled = s.settings.shareEnabled;
       }
       return { ...s, settings: next };
     });
@@ -748,6 +754,18 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         case "led":
           // 事实源在设备 /led.json：每状态灯效 + 亮度 + 夜间自动关
           set((s) => ({ ...s, settings: { ...s.settings, led: m.map, ledBrightness: m.br, ledNightOff: m.night } }));
+          break;
+        case "share":
+          // 事实源在设备 /share.json：广播开关 + 共享昵称 + 区域码
+          set((s) => ({ ...s, settings: { ...s.settings, shareEnabled: m.en }, user: { ...s.user, name: m.name || s.user.name, zone: m.zone || s.user.zone } }));
+          break;
+        case "peers":
+          // 事实源在网关设备：成员表整表替换（设备只转发 ESP-NOW 听到的广播）
+          set((s) => ({
+            ...s,
+            membersLive: true,
+            members: m.list.map((p) => ({ id: p.i, name: p.n || `设备 ${p.i}`, status: p.st as StatusId, via: "espnow" as const, updatedAt: p.at ?? Date.now() })),
+          }));
           break;
         case "stdefErr":
           set((s) => ({ ...s, reminderFlash: { text: m.msg === "full" ? "自定义状态已满（最多 8 个），请先删除一个" : `状态设置失败：${m.msg}`, at: Date.now(), ids: [] } }));

@@ -33,6 +33,7 @@ export type OutboundMessage =
   | { type: "stt"; op: "stop" }  // 停止录音；设备回 sttState idle 作收尾
   | { type: "sttResult"; text: string } // ASR 结果回传设备 → 触发设备端 agent 循环（v0.7 起）
   | { type: "agentRes"; message: AgentMessage } // 网页代理 LLM 的结果回设备（assistant 消息，含 tool_calls 时设备继续循环）
+  | { type: "share"; op: "set"; en?: boolean; name?: string; zone?: string } // 分享设置写设备 /share.json（v1.5 起）：en=ESP-NOW 广播开关 name=共享昵称 zone=区域码；设备保存后回 share 快照
   | { type: "agent"; op: "cancel" } // 中止设备上进行中的 agent 循环
   | { type: "todo"; op: "add"; text: string; at?: number; trig?: "offwork"; show?: boolean; src?: string } // 网页→设备建待办（at=epoch ms；trig=offwork 收工触发；show=false 触发时只报数量；src=来源标记）
   | { type: "todo"; op: "set"; id: string; text?: string; at?: number; trig?: "offwork" | "at"; show?: boolean; done?: boolean } // 部分更新（编辑；at=-1 清定时）
@@ -71,6 +72,8 @@ export type InboundMessage =
   | { type: "agentReq"; round: number; msgs: AgentMessage[]; tools?: unknown[] } // 设备 agent 循环请求网页代理调 LLM（v0.7 起）
   | { type: "agentDone"; text: string } // agent 循环结束：最终回复（设备 OLED 同时上屏 8s）
   | { type: "agentErr"; msg: string }   // agent 中止：timeout/disconnected/cancelled/…
+  | { type: "share"; en: boolean; name: string; zone: string } // 分享设置快照（v1.5 起；hello 后/share 写入后推送）。事实源在设备 /share.json
+  | { type: "peers"; list: { i: string; n: string; st: string; at?: number }[] } // ESP-NOW 成员表快照（v1.5 起）：i=MAC尾 id、n=昵称、st=状态id、at=最后听到 epoch ms；网关设备转发，成员表变化或每 30s 推送
   | { type: "todos"; list: DeviceTodo[] } // 设备待办事实源（v0.7 起；hello 后/增删改/到点触发后推送）
   | { type: "todoFired"; ids: string[]; count: number } // 设备到点/收工触发了哪些待办（v0.8 起；与"用户手动完成"区分）
   | { type: "schedules"; act: string; paused: boolean; mode: "next" | "today"; list: DevSched[] } // 设备端计划表快照（v0.8 起；hello 后/ops 后推送）。act/paused 是设备执行态；list 与网页计划库做收敛合并

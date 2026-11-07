@@ -42,6 +42,12 @@ export class MockTransport implements DeviceTransport {
   private knobStep = 5;
   private knobMax = 180;
   private timerTimeout?: ReturnType<typeof setTimeout>;
+  /** 模拟设备 /share.json + ESP-NOW 成员表：一个假想的同区域同伴周期性广播状态（与固件网关转发对齐） */
+  private shareEn = false;
+  private shareName = "";
+  private shareZone = "default";
+  private peerStIdx = 0;
+  private peerTimer?: ReturnType<typeof setInterval>;
 
   async connect() {
     await new Promise((r) => setTimeout(r, 600));
@@ -67,6 +73,10 @@ export class MockTransport implements DeviceTransport {
       const j = JSON.parse(localStorage.getItem("sgp-mock-knob") || "null");
       if (j) { this.knobStep = j.step ?? 5; this.knobMax = j.max ?? 180; }
     } catch { /* 空 */ }
+    try {
+      const j = JSON.parse(localStorage.getItem("sgp-mock-share") || "null");
+      if (j) { this.shareEn = !!j.en; this.shareName = j.name ?? ""; this.shareZone = j.zone ?? "default"; }
+    } catch { /* 空 */ }
     setTimeout(() => this.reportApps(), 700);
     setTimeout(() => this.reportTodos(), 750); // 与固件 hello→sendTodos 对齐：连接即同步设备待办
     setTimeout(() => this.reportSchedules(), 800); // hello→sendSchedules：计划表清单事实源
@@ -74,12 +84,15 @@ export class MockTransport implements DeviceTransport {
     setTimeout(() => this.reportKeys(), 880);    // hello→sendKeys：按键映射事实源
     setTimeout(() => this.reportLed(), 900);     // hello→sendLed：灯效设置事实源
     setTimeout(() => this.reportKnobCfg(), 920); // hello→sendTimerCfg/sendTimer：旋钮定时事实源
+    setTimeout(() => { this.reportShare(); this.reportPeers(); }, 950); // hello→sendShare/sendPeers：分享设置+成员表事实源
     this.todoTimer = setInterval(() => { this.pollTodos(); this.pollSchedule(); }, 1000); // 模拟固件 pollTodos+pollSchedule
+    this.peerTimer = setInterval(() => this.peerTick(), 8000);           // 模拟同区域同伴周期性 ESP-NOW 广播
     return "收工牌-A12（模拟）";
   }
   async disconnect() {
     if (this.sttTimer) clearInterval(this.sttTimer);
     if (this.todoTimer) clearInterval(this.todoTimer);
+    if (this.peerTimer) clearInterval(this.peerTimer);
     this.discCb?.();
   }
   async send(msg: OutboundMessage) {
@@ -131,6 +144,14 @@ export class MockTransport implements DeviceTransport {
         if (this.timerTimeout) { clearTimeout(this.timerTimeout); this.timerTimeout = undefined; }
         this.msgCb?.({ type: "timer", st: "idle" });
       }
+      return;
+    }
+    if (msg.type === "share") {
+      // 与固件一致：en/name/zone 写入设备持久存储后回 share 快照
+      if (msg.en !== undefined) this.shareEn = msg.en;
+      if (msg.name !== undefined && msg.name.length) this.shareName = msg.name;
+      if (msg.zone !== undefined && msg.zone.length) this.shareZone = msg.zone;
+      this.reportShare();
       return;
     }
     if (msg.type !== "app") return;
@@ -285,6 +306,21 @@ export class MockTransport implements DeviceTransport {
     localStorage.setItem("sgp-mock-knob", JSON.stringify({ step: this.knobStep, max: this.knobMax }));
     this.msgCb?.({ type: "timerCfg", step: this.knobStep, max: this.knobMax });
     this.msgCb?.({ type: "timer", st: "idle" });
+  }
+  // ---- 共享看板（与固件 /share.json + ESP-NOW 成员表对齐） ----
+  private reportShare() {
+    localStorage.setItem("sgp-mock-share", JSON.stringify({ en: this.shareEn, name: this.shareName, zone: this.shareZone }));
+    this.msgCb?.({ type: "share", en: this.shareEn, name: this.shareName, zone: this.shareZone });
+  }
+  /** 模拟 ESP-NOW 收到的同伴广播 → 网关转发 peers 快照（同伴状态每 8s 轮换一次） */
+  private peerTick() {
+    const sts = ["work", "focus", "meet", "busy", "rest"] as const;
+    this.peerStIdx = (this.peerStIdx + 1) % sts.length;
+    this.reportPeers();
+  }
+  private reportPeers() {
+    const sts = ["work", "focus", "meet", "busy", "rest"] as const;
+    this.msgCb?.({ type: "peers", list: [{ i: "34:B7", n: "工位旁的小王", st: sts[this.peerStIdx], at: Date.now() }] });
   }
   /** 固件 markStatus→sendSegments：模拟设备端状态切换（自治触发）→ 区间推送 */
   private markStatus(status: string) {

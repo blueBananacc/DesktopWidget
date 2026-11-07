@@ -26,6 +26,9 @@
 #include <ArduinoJson.h>
 #include <mbedtls/base64.h>
 #include <LittleFS.h>
+#include <WiFi.h>
+#include <esp_now.h>
+#include <esp_wifi.h>
 #include <wasm3.h>
 #include "driver/i2s.h"
 
@@ -336,6 +339,89 @@ int64_t utcEpochMs()   { return epochBase + millis() - epochBaseMs; }           
 int32_t dayOf(int64_t e) { return (int32_t)(e / 86400000); }
 int     minOf(int64_t e) { return (int)((e % 86400000) / 60000); }
 int     weekdayOf(int32_t day) { return (int)((day + 4) % 7); }   // 0=周日；1970-01-01=周四
+
+// ===================== 共享看板（ESP-NOW，PRD 3.7）=====================
+// 同区域设备互相广播"当前状态"（2.4G 直连、不联网）；连上网页的设备当网关，
+// 把收到的成员表经 BLE/串口转发给网页。只广播 当前状态+昵称+区域码；
+// 未开启分享时不广播。开放空口——不当私密传输（PRD 3.7 明确）。
+constexpr uint8_t ESPNOW_BCAST[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+struct SharePeer { uint8_t mac[6]; char name[17]; char st[12]; int64_t t; uint32_t seen; };
+SharePeer sharePeers[8]; int sharePeerCount = 0;    // 成员表：源 MAC 去重，上限 8
+bool     shareEn = false;                            // 默认不广播（隐私：需用户显式开启）
+char     shareName[17] = "收工牌";
+char     shareZone[9]  = "sgp";
+uint8_t  selfMac[6] = {0};
+bool     espnowReady = false;
+bool     shareDirty = false;                         // 成员表有变化 → 推 peers
+uint32_t shareBeatMs = 0, sharePushMs = 0;
+
+void saveShare() {
+  JsonDocument doc; doc["en"] = shareEn; doc["n"] = shareName; doc["z"] = shareZone;
+  File f = LittleFS.open("/share.json", "w"); if (f) { serializeJson(doc, f); f.close(); }
+}
+void loadShare() {
+  File f = LittleFS.open("/share.json", "r"); if (!f) return;
+  JsonDocument doc; if (deserializeJson(doc, f)) { f.close(); return; }
+  shareEn = doc["en"] | false;
+  const char* n = doc["n"] | ""; if (strlen(n) && strlen(n) < sizeof shareName) { strncpy(shareName, n, sizeof shareName - 1); shareName[sizeof shareName - 1] = 0; }
+  const char* z = doc["z"] | ""; if (strlen(z) && strlen(z) < sizeof shareZone) { strncpy(shareZone, z, sizeof shareZone - 1); shareZone[sizeof shareZone - 1] = 0; }
+  f.close();
+}
+void sendShare() {  // 分享设置快照（事实源在设备）
+  JsonDocument doc; doc["type"] = "share"; doc["en"] = shareEn; doc["name"] = shareName; doc["zone"] = shareZone;
+  String out; serializeJson(doc, out); sendLine(out);
+}
+void sendPeers() {  // 成员表快照：at=各自最后一次被听到的 epoch（校时后可用；网页据它标过期）
+  JsonDocument doc; doc["type"] = "peers";
+  JsonArray l = doc["list"].to<JsonArray>();
+  for (int i = 0; i < sharePeerCount; i++) {
+    JsonObject p = l.add<JsonObject>();
+    char id[13]; snprintf(id, sizeof id, "%02x%02x%02x", sharePeers[i].mac[3], sharePeers[i].mac[4], sharePeers[i].mac[5]);
+    p["i"] = id; p["n"] = sharePeers[i].name; p["st"] = sharePeers[i].st;
+    if (sharePeers[i].t > 0) p["at"] = (double)sharePeers[i].t;
+    else if (epochBase >= 0) p["at"] = (double)(utcEpochMs() - (int64_t)(millis() - sharePeers[i].seen)); // 对方未校时：用我方时钟换算"最后听到"时刻
+  }
+  String out; serializeJson(doc, out); sendLine(out);
+}
+void espnowBroadcast(const char* st) {  // 广播指定状态（仅分享开启时；调用方传"生效中的状态 id"——markStatus 内 curStatusId 尚未更新）
+  if (!espnowReady || !shareEn) return;
+  JsonDocument doc; doc["sgp"] = 1;
+  char id[13]; snprintf(id, sizeof id, "%02x%02x%02x", selfMac[3], selfMac[4], selfMac[5]);
+  doc["i"] = id; doc["n"] = shareName; doc["z"] = shareZone; doc["st"] = st;
+  doc["t"] = (double)(epochBase >= 0 ? utcEpochMs() : 0);
+  String out; serializeJson(doc, out);
+  esp_now_send(ESPNOW_BCAST, (const uint8_t*)out.c_str(), out.length());
+}
+void onEspNowRecv(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
+  // WiFi 任务上下文：包小直接解析；对 sharePeers 的读写与 loop 并发存在理论撕裂，
+  // 容忍——下一包心跳会自愈
+  JsonDocument doc;
+  if (deserializeJson(doc, data, len)) return;
+  if ((int)(doc["sgp"] | 0) != 1) return;
+  const char* z = doc["z"] | ""; if (strcmp(z, shareZone)) return;   // 只收同区域
+  int idx = -1;
+  for (int i = 0; i < sharePeerCount; i++) if (!memcmp(sharePeers[i].mac, info->src_addr, 6)) { idx = i; break; }
+  if (idx < 0 && sharePeerCount < 8) idx = sharePeerCount++;
+  if (idx < 0) return;
+  SharePeer& p = sharePeers[idx];
+  memcpy(p.mac, info->src_addr, 6);
+  const char* n = doc["n"] | ""; const char* st = doc["st"] | "";
+  if (strncmp(p.name, n, sizeof p.name)) { strncpy(p.name, n, sizeof p.name - 1); p.name[sizeof p.name - 1] = 0; shareDirty = true; }
+  if (strcmp(p.st, st)) { strncpy(p.st, st, sizeof p.st - 1); p.st[sizeof p.st - 1] = 0; shareDirty = true; }
+  p.t = (int64_t)(doc["t"] | (double)0);
+  p.seen = millis();
+}
+void espnowInit() {
+  WiFi.mode(WIFI_STA);
+  esp_wifi_get_mac(WIFI_IF_STA, selfMac);
+  esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);   // 固定信道 1：未连路由器的设备互收的前提
+  if (esp_now_init() != ESP_OK) { Serial.println("[ESPNOW] init failed"); return; }
+  esp_now_register_recv_cb(onEspNowRecv);
+  esp_now_peer_info_t pi{}; memcpy(pi.peer_addr, ESPNOW_BCAST, 6);
+  pi.channel = 1; pi.encrypt = false; pi.ifidx = WIFI_IF_STA;
+  if (esp_now_add_peer(&pi) == ESP_OK) espnowReady = true;
+  Serial.printf("[ESPNOW] ready, id=%02x%02x%02x\n", selfMac[3], selfMac[4], selfMac[5]);
+}
 // 天数→年月日（Hinnant civil_from_days）
 void daysToYMD(int32_t z, int &y, int &m, int &d) {
   z += 719468;
@@ -619,6 +705,7 @@ void markStatus(const char* id) {
     segCount++;
   }
   segDirty = true;
+  espnowBroadcast(id);        // 状态变化 → 同区域成员即刻可见（仅分享开启时发包）
 }
 
 // 今日区间落盘 /segs.json：随 sendSegments 调用（状态切换 2s 防抖 + 10 分钟兜底，断电误差 ≤10min）
@@ -950,6 +1037,14 @@ void handleLine(const String& line) {
     if (!doc["max"].isNull())  knobMaxMin  = constrain((int)(doc["max"] | 180), (int)knobStepMin, 600);
     saveKnob(); sendTimerCfg();
     Serial.printf("[KNOB] step=%u max=%u\n", (unsigned)knobStepMin, (unsigned)knobMaxMin);
+  } else if (!strcmp(type, "share")) {
+    // 分享设置（事实源在设备 /share.json）：en=广播开关 name=共享昵称 zone=区域码
+    if (!doc["en"].isNull()) shareEn = doc["en"];
+    const char* n = doc["name"] | ""; if (strlen(n) && strlen(n) < sizeof shareName) { strncpy(shareName, n, sizeof shareName - 1); shareName[sizeof shareName - 1] = 0; }
+    const char* z = doc["zone"] | ""; if (strlen(z) && strlen(z) < sizeof shareZone) { strncpy(shareZone, z, sizeof shareZone - 1); shareZone[sizeof shareZone - 1] = 0; }
+    saveShare(); sendShare();
+    espnowBroadcast(curStatusId.c_str());                // 开关/改名立即广播一次（关闭时函数内跳过）
+    Serial.printf("[SHARE] en=%d name=%s zone=%s\n", (int)shareEn, shareName, shareZone);
   } else if (!strcmp(type, "timer")) {
     // 网页可直接启动/取消倒计时（计时本体仍在设备，网页只是触发入口）
     const char* op = doc["op"] | "";
@@ -2012,6 +2107,8 @@ void setup() {
   loadSchedules();                    // 计划表清单：重启后无需网页重连即可继续自治执行
   loadStdefs();                       // 自定义状态注册表
   loadKeys();                         // 按键映射
+  loadShare();                        // 分享设置（默认不广播）
+  espnowInit();                       // ESP-NOW 共享看板：STA + 信道1 + 广播 peer
   loadLed();                          // 灯效设置
   loadKnob();                         // 旋钮定时配置（每格分钟/最长时间）
   loadSegs();                         // 断电前的今日区间：校时后 adoptPendSegs 回填
@@ -2050,6 +2147,8 @@ void loop() {
     sendLed();                             // 灯效设置事实源同步给网页
     sendTimerCfg();                        // 旋钮定时配置（每格分钟/最长时间）
     sendTimer();                           // 快速定时当前状态
+    sendShare();                           // 分享设置事实源同步给网页
+    sendPeers();                           // 成员表事实源同步给网页
     segDirty = true;                       // 随后推送今日状态区间
   }
   pollKeys();
@@ -2060,6 +2159,16 @@ void loop() {
   pollSchedule();
   pollTodos();
   if (agentWaiting && (int32_t)(millis() - agentDeadline) > 0) agentAbort("timeout");
+  // 共享看板：15s 心跳广播；成员 10min 未听到则移出成员表；表变化或每 30s 推 peers 给网页
+  if (shareEn && millis() - shareBeatMs > 15000) { shareBeatMs = millis(); espnowBroadcast(curStatusId.c_str()); }
+  for (int i = sharePeerCount - 1; i >= 0; i--)
+    if (millis() - sharePeers[i].seen > 10 * 60 * 1000UL) {
+      sharePeers[i] = sharePeers[--sharePeerCount];
+      shareDirty = true;
+    }
+  if (shareDirty || (sharePeerCount > 0 && millis() - sharePushMs > 30000)) {
+    shareDirty = false; sharePushMs = millis(); sendPeers();
+  }
   // 串口通道：与 BLE 共用同一套 JSON 行协议
   static String serBuf;
   while (Serial.available()) {
