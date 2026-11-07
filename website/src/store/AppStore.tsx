@@ -1,9 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type {
-  AgentState, CurrentStatus, CustomStatusDef, DeviceInfo, KeyAction, Member, Reminder, Schedule, Settings, StatusId, StatusSegment, StatusSource,
+  AgentState, CurrentStatus, CustomStatusDef, DeviceInfo, KeyAction, KeyMap, Member, Reminder, Schedule, Settings, StatusId, StatusSegment, StatusSource,
 } from "../domain/types";
-import { cacheStatusNames, loadStatusNameCache, setCustomStatusDefs, statusMeta, statusNameCache } from "../domain/statuses";
+import { allStatusIds, cacheStatusNames, loadStatusNameCache, setCustomStatusDefs, statusMeta, statusNameCache } from "../domain/statuses";
 import { atToday, dateKey, hhmm, startOfDay, uid } from "../domain/time";
 import { lastDays, totalsForSegments } from "../domain/review";
 import { defaultSettings, seedMembers, seedReminders } from "./seed";
@@ -173,7 +173,10 @@ const load = (now: number): AppState => {
       const saved = JSON.parse(raw) as AppState;
       // 旧版本字段迁移：touchLeft/touchRight/shortcut → keys.k3/k4/k2
       const legacy = saved.settings as Settings & { touchLeft?: StatusId; touchRight?: StatusId; shortcut?: KeyAction };
-      const keys = saved.settings.keys ?? { k1: "offwork" as const, k2: legacy.shortcut ?? "busy", k3: legacy.touchLeft ?? "work", k4: legacy.touchRight ?? "busy" };
+      const savedKeys = saved.settings.keys as Partial<KeyMap> | undefined;
+      const keys: KeyMap = savedKeys
+        ? { k1: "offwork", k2: "busy", k3: "cycleL", k4: "cycleR", t: "rest", ...savedKeys }
+        : { k1: "offwork", k2: legacy.shortcut ?? "busy", k3: legacy.touchLeft ?? "cycleL", k4: legacy.touchRight ?? "cycleR", t: "rest" };
       // 名字缓存灌注册表：已删状态的历史仍能显示原名；自定义状态注册表只在连接后由设备 stdefs 快照填充
       loadStatusNameCache(saved.statusNameCache ?? {});
       setCustomStatusDefs([]);
@@ -447,7 +450,7 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
       const next = { ...s.settings, ...patch };
       // 按键/灯效：事实源在设备 /keys.json /led.json，需连接才写；设备回快照后镜像再校准
       if (activeTransport) {
-        if (patch.keys) deviceSend?.({ type: "keys", k1: next.keys.k1, k2: next.keys.k2, k3: next.keys.k3, k4: next.keys.k4, ts: Date.now() });
+        if (patch.keys) deviceSend?.({ type: "keys", k1: next.keys.k1, k2: next.keys.k2, k3: next.keys.k3, k4: next.keys.k4, t: next.keys.t, ts: Date.now() });
         if (patch.led !== undefined || patch.ledBrightness !== undefined || patch.ledNightOff !== undefined)
           deviceSend?.({ type: "led", op: "set", map: next.led, br: next.ledBrightness, night: next.ledNightOff });
         // 旋钮定时配置：事实源在设备 /knob.json，设备回 timerCfg 快照后镜像校准
@@ -570,11 +573,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         if (a === "offwork") actions.offwork("offwork");
         else if (a === "focus25") actions.startTimer(25);
         else if (a === "pauseToday") actions.pauseToday(!cur.pausedToday);
+        else if (a === "cycleL" || a === "cycleR") {
+          const ids = allStatusIds().filter((id) => id !== "off"); // 循环不含 off，与固件一致
+          const i = Math.max(0, ids.indexOf(cur.current.id));
+          actions.setStatus(ids[(i + (a === "cycleL" ? ids.length - 1 : 1)) % ids.length], src);
+        }
         else if (a !== cur.current.id) actions.setStatus(a, src); // 同状态重按不产生新区间，也不重发设备
       };
       switch (m.type) {
         case "touch":
-          runKey(m.zone === "left" ? cur.settings.keys.k3 : cur.settings.keys.k4, "touch");
+          runKey(cur.settings.keys.t, "touch");
+          break;
+        case "key":
+          runKey(cur.settings.keys[`k${m.k}` as "k1" | "k2" | "k3" | "k4"], m.k === 1 ? "offwork" : "shortcut");
           break;
         case "shortcut":
           runKey(cur.settings.keys.k2, "shortcut");
@@ -728,8 +739,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "keys":
-          // 事实源在设备 /keys.json：整组采纳（K1–K4）
-          set((s) => ({ ...s, settings: { ...s.settings, keys: { k1: m.k1 as KeyAction, k2: m.k2 as KeyAction, k3: m.k3 as KeyAction, k4: m.k4 as KeyAction } } }));
+          // 事实源在设备 /keys.json：整组采纳（K1–K4 实体键 + t 触摸键）
+          set((s) => ({ ...s, settings: { ...s.settings, keys: { k1: m.k1 as KeyAction, k2: m.k2 as KeyAction, k3: m.k3 as KeyAction, k4: m.k4 as KeyAction, t: (m.t ?? s.settings.keys.t) as KeyAction } } }));
           break;
         case "led":
           // 事实源在设备 /led.json：每状态灯效 + 亮度 + 夜间自动关

@@ -189,7 +189,7 @@ export function Overview() {
               </Link>
               <Link to="/controls" className="dev-meta-link" title="打开触摸与快捷键设置">
                 <Tile color="blue" size={30}><Fingerprint /></Tile>
-                <span><b>触摸区</b>左 {keyActionLabel(s.settings.keys.k3)} · 右 {keyActionLabel(s.settings.keys.k4)}</span>
+                <span><b>触摸键</b>{keyActionLabel(s.settings.keys.t)} · K1–K4 {([s.settings.keys.k1, s.settings.keys.k2, s.settings.keys.k3, s.settings.keys.k4]).map(keyActionLabel).join("/")}</span>
               </Link>
               <div className="dev-meta-link" role="button" tabIndex={0} title="调节旋钮每格时长"
                 style={{ cursor: "pointer" }}

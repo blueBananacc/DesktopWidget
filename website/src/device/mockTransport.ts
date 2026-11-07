@@ -34,7 +34,7 @@ export class MockTransport implements DeviceTransport {
   private stdefs: DevStdef[] = [];
   private stdefNextId = 1;
   /** 模拟设备 /keys.json + /led.json：按键映射与灯效设置事实源（v1.0 起） */
-  private keyActs: [string, string, string, string] = ["offwork", "busy", "cycleL", "cycleR"];
+  private keyActs: [string, string, string, string, string] = ["offwork", "busy", "cycleL", "cycleR", "rest"];
   private ledMap: Record<string, "solid" | "breath" | "off"> = {};
   private ledBr = 40;
   private ledNight = false;
@@ -56,7 +56,7 @@ export class MockTransport implements DeviceTransport {
     } catch { /* 空 */ }
     try {
       const j = JSON.parse(localStorage.getItem("sgp-mock-keys") || "null");
-      if (j) this.keyActs = [j.k1 ?? "offwork", j.k2 ?? "busy", j.k3 ?? "cycleL", j.k4 ?? "cycleR"];
+      if (j) this.keyActs = [j.k1 ?? "offwork", j.k2 ?? "busy", j.k3 ?? "cycleL", j.k4 ?? "cycleR", j.t ?? "rest"];
     } catch { /* 空 */ }
     try {
       const j = JSON.parse(localStorage.getItem("sgp-mock-led") || "null");
@@ -98,7 +98,9 @@ export class MockTransport implements DeviceTransport {
     if (msg.type === "sched") { this.schedOp(msg); return; }
     if (msg.type === "stdef") { this.stdefOp(msg); return; }
     if (msg.type === "keys") {
-      this.keyActs = [msg.k1, msg.k2, msg.k3, msg.k4];
+      // 与固件一致：K1–K4 中必须含一个 offwork，否则拒绝写入
+      const next: [string, string, string, string, string] = [msg.k1, msg.k2, msg.k3, msg.k4, msg.t ?? this.keyActs[4]];
+      if (next.slice(0, 4).includes("offwork")) this.keyActs = next;
       this.reportKeys();
       return;
     }
@@ -271,8 +273,9 @@ export class MockTransport implements DeviceTransport {
   }
   // ---- 按键映射 / 灯效（与固件 /keys.json /led.json 对齐） ----
   private reportKeys() {
-    localStorage.setItem("sgp-mock-keys", JSON.stringify({ k1: this.keyActs[0], k2: this.keyActs[1], k3: this.keyActs[2], k4: this.keyActs[3] }));
-    this.msgCb?.({ type: "keys", k1: this.keyActs[0], k2: this.keyActs[1], k3: this.keyActs[2], k4: this.keyActs[3] });
+    const [k1, k2, k3, k4, t] = this.keyActs;
+    localStorage.setItem("sgp-mock-keys", JSON.stringify({ k1, k2, k3, k4, t }));
+    this.msgCb?.({ type: "keys", k1, k2, k3, k4, t });
   }
   private reportLed() {
     localStorage.setItem("sgp-mock-led", JSON.stringify({ map: this.ledMap, br: this.ledBr, night: this.ledNight }));

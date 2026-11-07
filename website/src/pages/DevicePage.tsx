@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bluetooth, Monitor, Radio, Unplug, Hand, Keyboard, Sunset, Gauge, WifiOff, RefreshCw, Usb } from "lucide-react";
+import { Bluetooth, Monitor, Radio, Unplug, Hand, Keyboard, Gauge, WifiOff, RefreshCw, Usb } from "lucide-react";
 import { useStore, toOutbound } from "../store/AppStore";
 import { bleSupported } from "../device/bleTransport";
 import { serialSupported } from "../device/serialTransport";
@@ -70,11 +70,11 @@ export function DevicePage() {
               <div className="card-b form">
                 <p className="hint" style={{ margin: 0 }}>模拟在桌牌上的操作，用来检查网页和设备之间的同步逻辑。</p>
                 <div className="row">
-                  <button className="btn btn-secondary" onClick={() => mock.emit({ type: "touch", zone: "left" })}><Hand />触摸左侧</button>
-                  <button className="btn btn-secondary" onClick={() => mock.emit({ type: "touch", zone: "right" })}><Hand />触摸右侧</button>
-                  <button className="btn btn-secondary" onClick={() => mock.emit({ type: "shortcut", press: "single" })}><Keyboard />按快捷键</button>
+                  <button className="btn btn-secondary" onClick={() => mock.emit({ type: "touch" })}><Hand />触摸键</button>
+                  {([1, 2, 3, 4] as const).map((k) => (
+                    <button key={k} className="btn btn-secondary" onClick={() => mock.emit({ type: "key", k })}><Keyboard />按 K{k}</button>
+                  ))}
                   <button className="btn btn-secondary" onClick={() => mock.emit({ type: "knob", minutes: 15 })}><Gauge />旋钮 15 分钟</button>
-                  <button className="btn btn-secondary" onClick={() => mock.emit({ type: "offworkKey" })}><Sunset />长按收工键</button>
                   <button className="btn btn-ghost" onClick={() => mock.drop()}><WifiOff />模拟断线</button>
                 </div>
                 <div className="code-box">

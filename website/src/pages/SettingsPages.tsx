@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import {
-  Fingerprint, Keyboard, Gauge, Image, Palette, Sparkles, ShieldCheck, Moon, BarChart3, Monitor, ChevronRight, RotateCcw, Sunset, Unplug,
+  Fingerprint, Keyboard, Gauge, Image, Palette, Sparkles, ShieldCheck, Moon, BarChart3, Monitor, ChevronRight, RotateCcw, Unplug,
 } from "lucide-react";
 import { useStore } from "../store/AppStore";
 import { allStatusIds, statusMeta } from "../domain/statuses";
@@ -14,6 +14,8 @@ const KEY_ACTIONS_BUILTIN: { value: KeyAction; label: string }[] = [
   { value: "offwork", label: "收工（结束今天）" },
   { value: "focus25", label: "开始 25 分钟专注" },
   { value: "pauseToday", label: "暂停/恢复今日计划" },
+  { value: "cycleL", label: "上一个状态" },
+  { value: "cycleR", label: "下一个状态" },
 ];
 // 状态选项动态生成（含设备注册的自定义状态），KEY_ACTIONS_BUILTIN 前缀保持在前
 const keyActionOptions = () => [
@@ -29,22 +31,36 @@ const KeySelect = ({ value, onChange, disabled }: { value: KeyAction; onChange: 
 
 export function ControlsPage() {
   const { s, actions, device } = useStore();
+  const toast = useToast();
   const connected = device.state === "connected";
   const set = (p: Partial<Settings>) => actions.updateSettings(p);
+  // 规则：K1–K4 中必须保留一个「收工」——想把最后一个收工键改掉时拒绝并提示
+  const setKey = (k: "k1" | "k2" | "k3" | "k4", v: KeyAction) => {
+    const next = { ...s.settings.keys, [k]: v };
+    if (![next.k1, next.k2, next.k3, next.k4].includes("offwork")) {
+      toast({ message: "四个实体键中必须保留一个「收工」" });
+      return;
+    }
+    set({ keys: next });
+  };
   return (
     <>
-      <PageHeader title="触摸与快捷键" desc="设置桌牌上的触摸区、自定义快捷键和旋钮。收工键的“长按确认”规则不能被修改。" />
+      <PageHeader title="触摸与快捷键" desc="设置桌牌上的 4 个实体键、触摸键和旋钮。映射为收工的键需要按住确认，防止误触。" />
       {!connected && <Banner tone="warn" icon={<Unplug />}>设备未连接：按键映射存在设备上，连接后才能查看和修改。</Banner>}
       <div className="grid g-cards">
         <Card>
-          <CardHeader icon={<Tile color="blue" size={30}><Keyboard /></Tile>} title="按键映射" extra={<span className="badge b-new">K1–K4</span>} />
+          <CardHeader icon={<Tile color="blue" size={30}><Keyboard /></Tile>} title="按键映射" extra={<span className="badge b-new">K1–K4 + 触摸</span>} />
           <div className="card-b form">
-            <SettingRow title="K1 · 收工键" desc="默认收工；长按确认规则见下方卡片"><KeySelect disabled={!connected} value={s.settings.keys.k1} onChange={(v) => set({ keys: { ...s.settings.keys, k1: v } })} /></SettingRow>
-            <SettingRow title="K2 · 快捷键" desc="单击触发"><KeySelect disabled={!connected} value={s.settings.keys.k2} onChange={(v) => set({ keys: { ...s.settings.keys, k2: v } })} /></SettingRow>
-            <SettingRow title="K3 · 触摸区·左" desc="轻触触发"><KeySelect disabled={!connected} value={s.settings.keys.k3} onChange={(v) => set({ keys: { ...s.settings.keys, k3: v } })} /></SettingRow>
-            <SettingRow title="K4 · 触摸区·右" desc="轻触触发"><KeySelect disabled={!connected} value={s.settings.keys.k4} onChange={(v) => set({ keys: { ...s.settings.keys, k4: v } })} /></SettingRow>
-            <p className="hint" style={{ margin: 0 }}>四个按键都可自定义，写入设备后断电保留。当前按下已是目标状态时不会再切换或闪烁屏幕。K3/K4 暂由按键模块代行，触摸电极接好后语义不变。</p>
-            <button className="btn btn-ghost btn-sm" style={{ justifySelf: "start" }} disabled={!connected} onClick={() => set({ keys: { k1: "offwork", k2: "busy", k3: "work", k4: "busy" } })}><RotateCcw />恢复默认</button>
+            {(["k1", "k2", "k3", "k4"] as const).map((k, i) => (
+              <SettingRow key={k} title={`K${i + 1} · 实体键`} desc={s.settings.keys[k] === "offwork" ? "映射为收工：按住 1.5 秒才触发" : "按下触发"}>
+                <KeySelect disabled={!connected} value={s.settings.keys[k]} onChange={(v) => setKey(k, v)} />
+              </SettingRow>
+            ))}
+            <SettingRow title="触摸键" desc={s.settings.keys.t === "offwork" ? "映射为收工：按住 1.5 秒才触发" : "触摸触发"}>
+              <KeySelect disabled={!connected} value={s.settings.keys.t} onChange={(v) => set({ keys: { ...s.settings.keys, t: v } })} />
+            </SettingRow>
+            <p className="hint" style={{ margin: 0 }}>映射写入设备后断电保留。<b>K1–K4 中必须保留一个「收工」</b>；映射为收工的键需要按住约 1.5 秒才触发，防止误收工。当前已是目标状态时按键不会再切换或闪烁屏幕。</p>
+            <button className="btn btn-ghost btn-sm" style={{ justifySelf: "start" }} disabled={!connected} onClick={() => set({ keys: { k1: "offwork", k2: "busy", k3: "cycleL", k4: "cycleR", t: "rest" } })}><RotateCcw />恢复默认</button>
           </div>
         </Card>
         <Card>
@@ -54,10 +70,6 @@ export function ControlsPage() {
             <SettingRow title="最长时长"><select className="input input-sm" disabled={!connected} value={s.settings.knobMax} onChange={(e) => set({ knobMax: Number(e.target.value) })}>{[60, 120, 180].map((m) => <option key={m} value={m}>{m} 分钟</option>)}</select></SettingRow>
             <p className="hint" style={{ margin: 0 }}>配置存在设备上，断电保留。旋转选择时长，按下开始倒计时，长按取消；倒计时由设备独立执行，网页关闭也照常计时，到点只提醒、不会自动改变状态。</p>
           </div>
-        </Card>
-        <Card>
-          <CardHeader icon={<Tile color="orange" size={30}><Sunset /></Tile>} title="收工键" />
-          <div className="card-b form"><p className="hint" style={{ margin: 0 }}>长按约 2 秒收工（阈值待原型测试）。网页上按住 1.5 秒收工，完成后 10 秒内可撤销。</p></div>
         </Card>
       </div>
     </>

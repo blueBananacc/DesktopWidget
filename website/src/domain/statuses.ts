@@ -60,7 +60,8 @@ export function statusApiIndex(id: StatusId): number {
 }
 
 export const keyActionLabel = (a: KeyAction): string =>
-  a === "offwork" ? "收工" : a === "focus25" ? "专注 25′" : a === "pauseToday" ? "暂停/恢复计划" : statusMeta(a).label;
+  a === "offwork" ? "收工" : a === "focus25" ? "专注 25′" : a === "pauseToday" ? "暂停/恢复计划"
+    : a === "cycleL" ? "上一个状态" : a === "cycleR" ? "下一个状态" : statusMeta(a).label;
 
 export const SOURCE_LABEL: Record<StatusSource, string> = {
   manual: "网页手动切换",

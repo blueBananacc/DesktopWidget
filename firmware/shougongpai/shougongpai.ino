@@ -38,10 +38,10 @@
 // 引脚分配（与 HARDWARE.md 一致）
 constexpr uint8_t PIN_SDA = 5, PIN_SCL = 9;        // OLED I2C（SDA 2026-11-03 由 8 改 5，原 K2 脚）
 constexpr uint8_t PIN_RGB = 48;                     // 板载 WS2812
-constexpr uint8_t KEY_OFFWORK = 17;                 // K1 收工键（原 4）
-constexpr uint8_t KEY_SHORTCUT = 16;                // K2 自定义键（原 5）
-constexpr uint8_t KEY_TOUCH_L = 15;                 // K3 暂代触摸区·左（原 6）
-constexpr uint8_t KEY_TOUCH_R = 7;                  // K4 暂代触摸区·右
+constexpr uint8_t KEY_OFFWORK = 17;                 // K1 实体键（默认映射收工；映射跟随 /keys.json，不绑定引脚）
+constexpr uint8_t KEY_SHORTCUT = 16;                // K2 实体键
+constexpr uint8_t KEY_TOUCH_L = 15;                 // K3 实体键
+constexpr uint8_t KEY_TOUCH_R = 7;                  // K4 实体键
 constexpr uint8_t TOUCH_L = 13, TOUCH_R = 14;       // 电容触摸电极（可选）
 // 面包板新模块（2026-11-03 定案）
 constexpr uint8_t PIN_TTP_SIG = 4;                  // TTP223 触摸模块 SIG：触摸=高电平（与按键低有效相反）
@@ -254,21 +254,26 @@ uint8_t  dumpBuf[768];
 char     dumpB64[1100], dumpLine[1240];
 RTC_DATA_ATTR char crashedApp[12] = "";   // 崩溃防护：复位前正在运行的 app 状态名
 
-// 按键映射（/keys.json 持久化；网页 keys 消息修改。cycleL/cycleR 为出厂默认，网页不下发这两个值）
-char keyAct[4][12] = { "offwork", "busy", "cycleL", "cycleR" };  // K1 K2 K3 K4
+// 按键映射（/keys.json 持久化；网页 keys 消息修改）：4 个实体键 K1-K4 + 触摸键 T
+// 规则：K1-K4 中必须至少一个映射为 offwork（收工）；映射为 offwork 的键需按住 1.5s 触发
+char keyAct[5][12] = { "offwork", "busy", "cycleL", "cycleR", "rest" };  // K1 K2 K3 K4 触摸
 void saveKeys() {
-  JsonDocument doc; doc["k1"] = keyAct[0]; doc["k2"] = keyAct[1]; doc["k3"] = keyAct[2]; doc["k4"] = keyAct[3];
+  JsonDocument doc; doc["k1"] = keyAct[0]; doc["k2"] = keyAct[1]; doc["k3"] = keyAct[2]; doc["k4"] = keyAct[3]; doc["t"] = keyAct[4];
   File f = LittleFS.open("/keys.json", "w"); if (f) { serializeJson(doc, f); f.close(); }
 }
 void loadKeys() {
   File f = LittleFS.open("/keys.json", "r"); if (!f) return;
   JsonDocument doc; if (deserializeJson(doc, f)) { f.close(); return; }
-  const char* ks[4] = { "k1", "k2", "k3", "k4" };
-  for (int i = 0; i < 4; i++) { const char* a = doc[ks[i]] | ""; if (strlen(a) && strlen(a) < sizeof(keyAct[0])) { strncpy(keyAct[i], a, sizeof(keyAct[0]) - 1); keyAct[i][sizeof(keyAct[0]) - 1] = 0; } }
+  const char* ks[5] = { "k1", "k2", "k3", "k4", "t" };
+  for (int i = 0; i < 5; i++) { const char* a = doc[ks[i]] | ""; if (strlen(a) && strlen(a) < sizeof(keyAct[0])) { strncpy(keyAct[i], a, sizeof(keyAct[0]) - 1); keyAct[i][sizeof(keyAct[0]) - 1] = 0; } }
   f.close();
+  // 自愈：旧固件可能写入过无收工的映射——K1-K4 全无 offwork 时强制 K1=收工并回写
+  bool anyOff = false;
+  for (int i = 0; i < 4; i++) anyOff = anyOff || !strcmp(keyAct[i], "offwork");
+  if (!anyOff) { strcpy(keyAct[0], "offwork"); saveKeys(); }
 }
 void sendKeys() {  // 全量上行：按键映射以设备为准
-  JsonDocument doc; doc["type"] = "keys"; doc["k1"] = keyAct[0]; doc["k2"] = keyAct[1]; doc["k3"] = keyAct[2]; doc["k4"] = keyAct[3];
+  JsonDocument doc; doc["type"] = "keys"; doc["k1"] = keyAct[0]; doc["k2"] = keyAct[1]; doc["k3"] = keyAct[2]; doc["k4"] = keyAct[3]; doc["t"] = keyAct[4];
   String out; serializeJson(doc, out); sendLine(out);
 }
 
@@ -913,14 +918,20 @@ void handleLine(const String& line) {
     oledDirty = true;
     Serial.printf("[REMIND] %s x%d\n", remindText[0] ? remindText : "(private)", remindCount);
   } else if (!strcmp(type, "keys")) {
-    // 按键映射下发：写入 /keys.json 断电保留（K1 仍须按住 1.5s）
-    const char* ks[4] = { "k1", "k2", "k3", "k4" };
-    for (int i = 0; i < 4; i++) {
+    // 按键映射下发：写入 /keys.json 断电保留（映射为收工的键须按住 1.5s）
+    const char* ks[5] = { "k1", "k2", "k3", "k4", "t" };
+    char next[5][12]; memcpy(next, keyAct, sizeof next);
+    for (int i = 0; i < 5; i++) {
       const char* a = doc[ks[i]] | "";
-      if (strlen(a) && strlen(a) < sizeof(keyAct[0])) { strncpy(keyAct[i], a, sizeof(keyAct[0]) - 1); keyAct[i][sizeof(keyAct[0]) - 1] = 0; }
+      if (strlen(a) && strlen(a) < sizeof(next[0])) { strncpy(next[i], a, sizeof(next[0]) - 1); next[i][sizeof(next[0]) - 1] = 0; }
     }
-    saveKeys(); sendKeys();
-    Serial.printf("[KEYS] %s %s %s %s\n", keyAct[0], keyAct[1], keyAct[2], keyAct[3]);
+    // 规则：K1-K4 中必须含一个 offwork——违反则整个写入拒绝（不动现有映射），回当前快照
+    bool anyOff = false;
+    for (int i = 0; i < 4; i++) anyOff = anyOff || !strcmp(next[i], "offwork");
+    if (anyOff) { memcpy(keyAct, next, sizeof keyAct); saveKeys(); }
+    else Serial.println("[KEYS] rejected: no offwork among K1-K4");
+    sendKeys();
+    Serial.printf("[KEYS] %s %s %s %s t=%s\n", keyAct[0], keyAct[1], keyAct[2], keyAct[3], keyAct[4]);
   } else if (!strcmp(type, "led")) {
     // 灯效设置（事实源在设备）：map=每状态档位 / br=亮度 / night=夜间自动关
     if (doc["map"].is<JsonObject>()) {
@@ -1074,15 +1085,16 @@ void setupBle() {
 
 // ===================== 按键 =====================
 
-struct Key { uint8_t pin; const char* ev1; const char* ev2; bool last; uint32_t t0; bool longSent; bool armed; bool sawPress; };
-// ev1=按下即报，ev2=短按报/长按报另一值（K2）；armed=等到过一次真实高电平后才允许上报
+struct Key { uint8_t pin; bool last; uint32_t t0; bool longSent; bool armed; };
+// 4 个实体键：按下触发各自映射；映射为 offwork 的键须按住 1.5s。armed=等到过一次真实高电平后才允许上报
 Key keys[] = {
-  { KEY_OFFWORK,  "offworkKey", nullptr, true, 0, false, false, false },
-  { KEY_SHORTCUT, nullptr,      nullptr, true, 0, false, false, false },  // 特殊处理
-  { KEY_TOUCH_L,  "touchL",     nullptr, true, 0, false, false, false },
-  { KEY_TOUCH_R,  "touchR",     nullptr, true, 0, false, false, false },
+  { KEY_OFFWORK,  true, 0, false, false },   // K1
+  { KEY_SHORTCUT, true, 0, false, false },   // K2
+  { KEY_TOUCH_L,  true, 0, false, false },   // K3
+  { KEY_TOUCH_R,  true, 0, false, false },   // K4
 };
-constexpr uint32_t DEBOUNCE_MS = 30, LONG_MS = 600, OFFWORK_HOLD_MS = 1500;  // K1 收工须按住 1.5s（对齐网页按住收工，防误触）
+constexpr uint32_t DEBOUNCE_MS = 30, OFFWORK_HOLD_MS = 1500;  // 收工须按住 1.5s（对齐网页按住收工，防误触）
+bool ttpLast; uint32_t ttpT0 = 0; bool ttpSent = false;       // TTP223 触摸键状态
 
 void applyKeyAction(const char* act) {
   if (!strcmp(act, "offwork"))         { setLocalStatus("off");   registerManualOverride("off"); }
@@ -1094,40 +1106,35 @@ void applyKeyAction(const char* act) {
 }
 
 void pollKeys() {
-  for (auto& k : keys) {
+  for (int i = 0; i < 4; i++) {
+    Key& k = keys[i];
     bool v = digitalRead(k.pin);           // 低=按下
     uint32_t now = millis();
     if (!k.armed) {                        // 上电/复位瞬间可能读到低电平抖动，先等一次释放
       if (v) { k.armed = true; k.last = true; }
       continue;
     }
-    if (v != k.last) { k.t0 = now; k.last = v; if (v) k.longSent = false; else k.sawPress = true; }
+    if (v != k.last) { k.t0 = now; k.last = v; if (v) k.longSent = false; }
     bool pressed = !k.last;
-    if (k.pin == KEY_SHORTCUT) {
-      if (pressed && !k.longSent && now - k.t0 > LONG_MS) {
-        sendLine(F("{\"type\":\"shortcut\",\"press\":\"long\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0; timerNoticeUntil = 0;
-        if (!bleConnected) { setLocalStatus("focus"); registerManualOverride("focus"); }   // 离线：长按固定 = 专注中
-      } else if (!pressed && !k.longSent && k.sawPress && now - k.t0 > DEBOUNCE_MS) {
-        sendLine(F("{\"type\":\"shortcut\",\"press\":\"single\"}")); k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0; timerNoticeUntil = 0;
-        if (!bleConnected) applyKeyAction(keyAct[1]);    // 离线：短按按网页下发的 K2 映射执行
-      }
-    } else if (k.pin == KEY_OFFWORK) {
-      // K1：按住 1.5s 才触发收工动作（与网页按住收工一致，防误触）；松早了取消
-      if (pressed && !k.longSent && now - k.t0 > OFFWORK_HOLD_MS) {
-        k.longSent = true; k.sawPress = false; breakNoticeUntil = 0; remindUntil = 0; timerNoticeUntil = 0;
-        sendLine(F("{\"type\":\"offworkKey\"}"));
-        if (!bleConnected) applyKeyAction(keyAct[0]);
-      } else if (!pressed) {
-        k.sawPress = false;
-      }
-    } else if (pressed && now - k.t0 > DEBOUNCE_MS && !k.longSent) {
+    // 映射为收工的键：按住 1.5s 才触发（与网页按住收工一致，防误触）；其余键按下即触发
+    const uint32_t need = !strcmp(keyAct[i], "offwork") ? OFFWORK_HOLD_MS : DEBOUNCE_MS;
+    if (pressed && !k.longSent && now - k.t0 > need) {
       k.longSent = true;
-      breakNoticeUntil = 0; remindUntil = 0; timerNoticeUntil = 0;  // 任意按键提前关闭提醒画面
-      if (!strcmp(k.ev1, "touchL")) sendLine(F("{\"type\":\"touch\",\"zone\":\"left\"}"));
-      else if (!strcmp(k.ev1, "touchR")) sendLine(F("{\"type\":\"touch\",\"zone\":\"right\"}"));
-      // 离线：K3/K4 按网页下发的映射执行（出厂默认 = 上一个/下一个状态循环）
-      if (!bleConnected) applyKeyAction(k.pin == KEY_TOUCH_L ? keyAct[2] : keyAct[3]);
+      breakNoticeUntil = 0; remindUntil = 0; timerNoticeUntil = 0;   // 任意按键提前关闭提醒画面
+      char buf[32]; snprintf(buf, sizeof buf, "{\"type\":\"key\",\"k\":%d}", i + 1);
+      sendLine(buf);
+      if (!bleConnected) applyKeyAction(keyAct[i]);                  // 离线：按设备本地映射执行
     }
+  }
+  // TTP223 触摸键：高电平=摸到；映射为收工时同样按住 1.5s 触发
+  bool t = digitalRead(PIN_TTP_SIG);
+  uint32_t now = millis();
+  if (t != ttpLast) { ttpLast = t; ttpT0 = now; ttpSent = false; }
+  if (t && !ttpSent && now - ttpT0 > (!strcmp(keyAct[4], "offwork") ? OFFWORK_HOLD_MS : DEBOUNCE_MS)) {
+    ttpSent = true;
+    breakNoticeUntil = 0; remindUntil = 0; timerNoticeUntil = 0;
+    sendLine(F("{\"type\":\"touch\"}"));
+    if (!bleConnected) applyKeyAction(keyAct[4]);
   }
 }
 
@@ -1486,7 +1493,6 @@ void pollTouch() {}
 // A=GPIO1 B=GPIO40 KEY=GPIO42（上拉，按住=0）；B 悬空/断线时单相兜底：按住 KEY 转=反向。
 // 交互：空闲旋转进选择态实时上屏；旋转按 knobStepMin 调整；按下确认开始倒计时；
 // 运行中/选择态长按取消；选择态 10s 无操作退出；到点 OLED 提醒 + RGB 闪 3s，不改状态。
-bool ttpLast;                                        // TTP223 引脚保留（setup 初始化用）
 int8_t   encAcc = 0;
 uint8_t  encLast = 0;
 bool     encQuadAlive = false;                       // 双相是否真解出过步（B 毛刺锁不死单相兜底）

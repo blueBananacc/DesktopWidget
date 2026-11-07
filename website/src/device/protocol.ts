@@ -16,7 +16,7 @@ export type OutboundMessage =
   | { type: "stdef"; op: "list" }                      // 请求设备回 stdefs（hello 后设备也主动推）
   | { type: "time"; epoch: number; tzOffsetMin: number }
   | { type: "break"; minutes: number; enabled: boolean; offToday: boolean; accumMs?: number } // 休息提醒设置；accumMs 仅在明确要求重置时携带，设备保持计时权威
-  | { type: "keys"; k1: KeyAction; k2: KeyAction; k3: KeyAction; k4: KeyAction; ts: number } // 按键映射写入设备 /keys.json（K1 仍需按住 1.5s）；设备持久化后回 keys 快照
+  | { type: "keys"; k1: KeyAction; k2: KeyAction; k3: KeyAction; k4: KeyAction; t: KeyAction; ts: number } // 按键映射写入设备 /keys.json：K1–K4 实体键 + t 触摸键；K1–K4 中必须含一个 offwork（映射为收工的键需按住 1.5s）；设备持久化后回 keys 快照
   | { type: "led"; op: "set"; map?: Record<string, LedMode>; br?: number; night?: boolean } // 灯效写入设备 /led.json：map=每状态档位，br=亮度，night=夜间自动关；设备持久化后回 led 快照
   | { type: "timerCfg"; step: number; max: number } // 旋钮快速定时配置写入设备 /knob.json：step=每格分钟，max=最长时间；设备持久化后回 timerCfg 快照
   | { type: "timer"; op: "start"; minutes: number } // 让设备启动快速倒计时（计时本体在设备自治，网页只是触发入口）
@@ -51,9 +51,10 @@ export interface AgentMessage {
 }
 
 export type InboundMessage =
-  | { type: "touch"; zone: "left" | "right" }
-  | { type: "shortcut"; press: "single" | "long" }
-  | { type: "offworkKey" }
+  | { type: "touch" } // TTP223 触摸键触发（动作由网页 keys.t 映射决定）
+  | { type: "key"; k: 1 | 2 | 3 | 4 } // 实体键 K1–K4 触发（动作由 keys.k1–k4 映射决定）
+  | { type: "shortcut"; press: "single" | "long" } // 旧固件兼容
+  | { type: "offworkKey" } // 旧固件兼容
   | { type: "knob"; minutes: number }              // 旧版旋钮消息（兼容）：等同 timer st:run
   | { type: "timer"; st: "idle" | "select" | "run" | "done"; minutes?: number; remain?: number } // 设备旋钮快速定时镜像：select=选择中(分钟)；run=运行中(remain=剩余ms)；done=到点；idle=无计时
   | { type: "timerCfg"; step: number; max: number } // 设备旋钮配置快照（hello 后/timerCfg 写入后推送）。事实源在设备 /knob.json
@@ -76,7 +77,7 @@ export type InboundMessage =
   | { type: "schedErr"; msg: string }
   | { type: "stdefs"; list: DevStdef[] }               // 设备自定义状态注册表快照（v0.9 起；hello 后/ops 后推送）。事实源在设备，网页整表替换镜像
   | { type: "stdefErr"; msg: string }
-  | { type: "keys"; k1: string; k2: string; k3: string; k4: string } // 设备按键映射快照（v1.0 起；hello 后/keys 写入后推送）。事实源在设备 /keys.json
+  | { type: "keys"; k1: string; k2: string; k3: string; k4: string; t?: string } // 设备按键映射快照（v1.0 起；hello 后/keys 写入后推送；v1.4 起含 t=触摸键，旧固件无此字段）。事实源在设备 /keys.json
   | { type: "led"; map: Record<string, LedMode>; br: number; night: boolean } // 设备灯效设置快照（v1.0 起；hello 后/led 写入后推送）。事实源在设备 /led.json
 
 /** 设备侧自定义状态（事实源在设备）：id ≤7 字符以 c 开头；zh=屏显名（wqy16 大字，建议≤4汉字）；c=0xRRGGBB；work=该状态计入工作时长/休息提醒 */

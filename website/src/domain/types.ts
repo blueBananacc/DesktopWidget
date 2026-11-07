@@ -93,14 +93,15 @@ export type ScreenLayout = "full" | "clock" | "status";
 
 export type LedMode = "solid" | "breath" | "off";
 
-/** 实体按键动作：收工流程 / 25 分钟专注 / 暂停或恢复今日计划 / 直接切换状态 */
-export type KeyAction = "offwork" | "focus25" | "pauseToday" | StatusId;
+/** 实体按键动作：收工流程 / 25 分钟专注 / 暂停或恢复今日计划 / 状态循环 / 直接切换状态 */
+export type KeyAction = "offwork" | "focus25" | "pauseToday" | "cycleL" | "cycleR" | StatusId;
 
 export interface KeyMap {
-  k1: KeyAction; // 收工键
-  k2: KeyAction; // 快捷键
-  k3: KeyAction; // 触摸区·左
-  k4: KeyAction; // 触摸区·右
+  k1: KeyAction; // 实体键 K1
+  k2: KeyAction; // 实体键 K2
+  k3: KeyAction; // 实体键 K3
+  k4: KeyAction; // 实体键 K4
+  t: KeyAction;  // TTP223 触摸键
 }
 
 /** 自定义屏幕来源：wat = 页面里编辑的 WAT 源码（wabt 编译上传）；wasm = 直接上传的预编译二进制（base64）。wat 的 name/desc 是用户给这个"屏幕块"起的展示名和一句话描述 */

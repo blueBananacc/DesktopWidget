@@ -11,7 +11,7 @@ export const defaultSettings: Settings = {
   ledBrightness: 40,
   ledNightOff: true,
   led: { work: "solid", busy: "solid", focus: "breath", meet: "solid", rest: "solid", off: "off" },
-  keys: { k1: "offwork", k2: "busy", k3: "work", k4: "busy" },
+  keys: { k1: "offwork", k2: "busy", k3: "cycleL", k4: "cycleR", t: "rest" },
   deviceName: "收工牌 A1",
   knobStep: 5,
   knobMax: 180,
