@@ -523,6 +523,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     deviceSend = (m) => transportRef.current?.send(m).catch(() => {});
     return () => { deviceSend = undefined; };
   }, []);
+  // HMR 自愈：模块热替换会重置模块级 activeTransport，但 transportRef 随组件状态保留——每次渲染重新对齐，
+  // 否则会出现"UI 显示已连接但 updateSettings 走离线回滚、设置点了没反应"的偏航
+  useEffect(() => { activeTransport = transportRef.current; });
   const actions = useMemo(() => makeActions(set, () => stateRef.current), [set]);
 
   useEffect(() => {
@@ -846,3 +849,4 @@ export const useStore = () => {
   if (!v) throw new Error("useStore must be used inside AppStoreProvider");
   return v;
 };
+
