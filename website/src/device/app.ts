@@ -1,4 +1,4 @@
-import type { DeviceTransport } from "./protocol";
+import type { DeviceApi } from "./api";
 
 /**
  * 自定义屏幕（WASM）管线：用户/Agent 写 WAT（网页端 wabt 编译）或本地用 clang
@@ -10,7 +10,6 @@ import type { DeviceTransport } from "./protocol";
 export const APP_W = 128;
 export const APP_H = 64;
 export const APP_MAX_BYTES = 48 * 1024; // 与固件 APP_MAX_SIZE 一致
-const CHUNK_BYTES = 1024;                // 每条 chunk 消息解码后的数据量
 
 // ---------- base64 ----------
 
@@ -278,20 +277,15 @@ export async function validateApp(bytes: Uint8Array, status: number): Promise<st
 
 // ---------- 上传 ----------
 
-/** 把 wasm 二进制分片写入设备某状态的存储槽；设备收齐落 flash，进入该状态自动执行。 */
-export async function sendApp(t: DeviceTransport, status: string, bytes: Uint8Array, onProgress?: (sent: number) => void) {
+/** 把 wasm 二进制 PUT 到设备某状态的存储槽；设备收齐落 flash，进入该状态自动执行。 */
+export async function sendApp(api: DeviceApi, status: string, bytes: Uint8Array, onProgress?: (sent: number) => void) {
   if (!bytes.length) throw new Error("空的 wasm 模块");
   if (bytes.length > APP_MAX_BYTES) throw new Error(`wasm 超过 ${APP_MAX_BYTES / 1024}KB 上限（${bytes.length}B）`);
-  await t.send({ type: "app", op: "begin", status, size: bytes.length });
-  for (let off = 0; off < bytes.length; off += CHUNK_BYTES) {
-    await t.send({ type: "app", op: "chunk", data: u8ToB64(bytes.subarray(off, off + CHUNK_BYTES)) });
-    onProgress?.(Math.min(off + CHUNK_BYTES, bytes.length) / bytes.length);
-  }
-  await t.send({ type: "app", op: "run" });
+  await api.putApp(status, bytes, onProgress);
 }
 
-export const stopApp = (t: DeviceTransport) => t.send({ type: "app", op: "stop" });
-export const clearApp = (t: DeviceTransport, status: string) => t.send({ type: "app", op: "clear", status });
+export const stopApp = (api: DeviceApi) => api.stopApp();
+export const clearApp = (api: DeviceApi, status: string) => api.deleteApp(status);
 
 /** 二进制指纹（FNV-1a）：判断设备上的版本是否就是当前预览的这份 */
 export function hashBytes(u8: Uint8Array) {

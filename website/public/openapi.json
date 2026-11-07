@@ -1,0 +1,2870 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "收工牌 Device HTTP API",
+    "version": "1.0.0",
+    "description": "收工牌（Shougongpai）设备 HTTP API。设备本身不跑 TCP/IP：报文按\n[SGP-HTTP 隧道规范](../tunnel.md) 在 BLE / USB 串口字节流上传输；\n电脑侧本地桥把它暴露为真实 HTTP（`http://127.0.0.1:8787`）。\n\n- 设备是全部设置与状态的事实源；写接口只回 `SuccessResponse`，变化以事件广播（见 `GET /api/events` 与 [events.md](../events.md)）。\n- 读接口返回的资源对象都带 `type` 判别字段，与同名事件的 `data` 结构一致。\n- 错误统一为 `Error` 结构，`error_code` 取自 `ErrorCode` 枚举。\n",
+    "license": {
+      "name": "Proprietary"
+    },
+    "x-api-semver-header": "X-Api-Sem-Ver"
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8787",
+      "description": "电脑侧本地桥（bridge/），转发到 USB 串口隧道"
+    },
+    {
+      "url": "sgp-tunnel://device",
+      "description": "浏览器 Web Bluetooth / Web Serial 直连隧道（非 IP，见 tunnel.md）"
+    }
+  ],
+  "security": [],
+  "paths": {
+    "/api/apps": {
+      "get": {
+        "tags": [
+          "Screens"
+        ],
+        "summary": "列出设备上已安装的屏幕程序",
+        "operationId": "getApps",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Apps"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/apps/stop": {
+      "post": {
+        "tags": [
+          "Screens"
+        ],
+        "summary": "停止当前运行的屏幕程序，回到默认状态屏",
+        "operationId": "stopApp",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/apps/{status}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        },
+        {
+          "name": "status",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/StatusId"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Screens"
+        ],
+        "summary": "读回屏幕程序二进制",
+        "operationId": "getApp",
+        "responses": {
+          "200": {
+            "description": "wasm 模块原始字节",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Screens"
+        ],
+        "summary": "安装 / 替换屏幕程序",
+        "description": "报文体是完整的 wasm 模块（必须以 `\\0asm` 开头）。安装会清除该状态的崩溃禁用标记；\n如果是当前状态，设备立即重新加载执行。超过 48 KiB 返回 413。\n",
+        "operationId": "putApp",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "maxLength": 49152
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "已写入",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "result",
+                    "size"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "description": "报文体不是 application/octet-stream（unsupported_media_type）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "description": "写入闪存失败（storage）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Screens"
+        ],
+        "summary": "删除屏幕程序（恢复默认屏）",
+        "description": "幂等：程序不存在也返回 200。同时清除崩溃禁用标记。",
+        "operationId": "deleteApp",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          }
+        }
+      }
+    },
+    "/api/break": {
+      "get": {
+        "tags": [
+          "Break"
+        ],
+        "summary": "获取休息提醒状态",
+        "operationId": "getBreak",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BreakState"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Break"
+        ],
+        "summary": "修改休息提醒设置",
+        "description": "省略的字段保持不变。`accumMs` 只在需要重置当前累计时携带，设备是计时权威。",
+        "operationId": "patchBreak",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "minutes": {
+                    "type": "integer",
+                    "minimum": 5,
+                    "maximum": 240
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "offToday": {
+                    "type": "boolean",
+                    "description": "今日停用（午夜自动恢复）"
+                  },
+                  "accumMs": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/events": {
+      "get": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "订阅事件流",
+        "description": "设备先回开流帧（200，`Content-Length: 0`），随后推送订阅快照（events.md §2），再推送增量事件。\n隧道上每个事件是一个独立的 200 帧（`X-Request-Id` 与本请求相同，报文体为一个 SSE 事件）；\n经本地桥访问时表现为标准的 `text/event-stream` 长连接。每个通道同时只有一个订阅。\n",
+        "operationId": "subscribeEvents",
+        "parameters": [
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "text/event-stream"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "事件流已建立",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "SSE：`event: <name>` + `data: <JSON>`，JSON 结构见 DeviceEvent"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Events"
+        ],
+        "summary": "结束本通道的事件订阅",
+        "operationId": "unsubscribeEvents",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/schedules": {
+      "get": {
+        "tags": [
+          "Schedules"
+        ],
+        "summary": "获取全部计划表与执行态",
+        "operationId": "getSchedules",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedules"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Schedules"
+        ],
+        "summary": "新建计划表（设备分配 id）",
+        "operationId": "createSchedule",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Created"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/schedules/control": {
+      "patch": {
+        "tags": [
+          "Schedules"
+        ],
+        "summary": "今日暂停 / 手动干预恢复策略",
+        "description": "`paused`=true 只暂停当天（跨天自动失效，需已校时）。`mode`：next=手动干预后挂起到下个节点；today=手动干预后今日暂停。\n静态段 `control` 优先于 `{id}` 匹配；该 id 为保留字。\n",
+        "operationId": "patchScheduleControl",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "paused": {
+                    "type": "boolean"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "next",
+                      "today"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/schedules/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        },
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "maxLength": 11
+          }
+        }
+      ],
+      "put": {
+        "tags": [
+          "Schedules"
+        ],
+        "summary": "新建或整张替换指定 id 的计划表",
+        "operationId": "putSchedule",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Schedules"
+        ],
+        "summary": "删除计划表",
+        "description": "删除当前启用的表后不再启用任何表。",
+        "operationId": "deleteSchedule",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/schedules/{id}/activate": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        },
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "Schedules"
+        ],
+        "summary": "设为当前启用的重复计划",
+        "description": "只对 kind=repeat 生效（422 not_repeat）；含已删除状态的表不可启用（422 bad_status）。",
+        "operationId": "activateSchedule",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          }
+        }
+      }
+    },
+    "/api/keys": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "获取按键映射",
+        "operationId": "getKeys",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Keys"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "写入按键映射",
+        "description": "K1–K4 实体键 + `t` 触摸键（`t` 可省略，保持原值）。K1–K4 中**必须**至少一个为 `offwork`，否则整次写入被拒绝（422 no_offwork），现有映射不变。\n映射为 `offwork` 的键需按住 1.5 s 才触发。\n",
+        "operationId": "putKeys",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "k1": {
+                    "$ref": "#/components/schemas/KeyAction"
+                  },
+                  "k2": {
+                    "$ref": "#/components/schemas/KeyAction"
+                  },
+                  "k3": {
+                    "$ref": "#/components/schemas/KeyAction"
+                  },
+                  "k4": {
+                    "$ref": "#/components/schemas/KeyAction"
+                  },
+                  "t": {
+                    "$ref": "#/components/schemas/KeyAction"
+                  }
+                },
+                "required": [
+                  "k1",
+                  "k2",
+                  "k3",
+                  "k4"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/led": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "获取灯效设置",
+        "operationId": "getLed",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Led"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "修改灯效设置",
+        "description": "`map` 只合并给出的状态；省略的字段保持不变。夜间关灯 22:00–07:00 需设备已校时。",
+        "operationId": "patchLed",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "map": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "$ref": "#/components/schemas/LedMode"
+                    }
+                  },
+                  "br": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "night": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/timer": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "获取旋钮快速定时的当前状态",
+        "operationId": "getTimer",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Timer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/timer/start": {
+      "post": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "启动设备倒计时",
+        "description": "计时本体在设备上，网页断开照常到点提醒；到点不改变当前状态。分钟数按 [step, max] 钳制。",
+        "operationId": "startTimer",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "minutes": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 600
+                  }
+                },
+                "required": [
+                  "minutes"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/timer/cancel": {
+      "post": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "取消倒计时 / 关闭到点提醒",
+        "operationId": "cancelTimer",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/timer/config": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "获取旋钮配置",
+        "operationId": "getTimerConfig",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimerConfig"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "修改旋钮配置",
+        "description": "step 钳制到 1–30，max 钳制到 step–600。",
+        "operationId": "patchTimerConfig",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "step": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 30
+                  },
+                  "max": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 600
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/share": {
+      "get": {
+        "tags": [
+          "Board"
+        ],
+        "summary": "获取分享设置",
+        "operationId": "getShare",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Share"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Board"
+        ],
+        "summary": "修改分享设置",
+        "description": "`en` 默认 false——未显式开启不广播。修改后立即广播一次（关闭时只停止广播）。\nESP-NOW 是明文广播，只当同房间信标使用，不承载私密信息。\n",
+        "operationId": "patchShare",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "en": {
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "type": "string",
+                    "x-max-bytes": 16
+                  },
+                  "zone": {
+                    "type": "string",
+                    "x-max-bytes": 8
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/peers": {
+      "get": {
+        "tags": [
+          "Board"
+        ],
+        "summary": "获取同区域成员表",
+        "description": "只包含当前状态；成员 10 分钟未再听到即移除。`at` 用于客户端标记“可能已过期”。",
+        "operationId": "getPeers",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Peers"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/state": {
+      "get": {
+        "tags": [
+          "State"
+        ],
+        "summary": "获取当前状态与屏幕显示",
+        "operationId": "getState",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/State"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "State"
+        ],
+        "summary": "切换当前状态 / 更新屏幕文字",
+        "description": "与当前完全一致时设备不重绘。状态 id 改变时设备开新区间并记一次手动干预（计划表按 mode 挂起或今日暂停）。\n`led` / `brightness` 只覆盖本次显示，不改写 `/api/led` 的持久设置。`layout` 持久保存。\n",
+        "operationId": "putState",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StateWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/time": {
+      "get": {
+        "tags": [
+          "State"
+        ],
+        "summary": "获取设备时钟",
+        "operationId": "getTime",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceTime"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "State"
+        ],
+        "summary": "校时",
+        "description": "设备以此为基准自治运行计划表、待办到点、夜间关灯；校时后才会推送今日区间。",
+        "operationId": "putTime",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "epoch": {
+                    "type": "integer",
+                    "description": "UTC epoch 毫秒",
+                    "example": 1763600000000
+                  },
+                  "tzOffsetMin": {
+                    "type": "integer",
+                    "description": "本地时区相对 UTC 的分钟偏移",
+                    "example": 480
+                  }
+                },
+                "required": [
+                  "epoch"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/segments": {
+      "get": {
+        "tags": [
+          "State"
+        ],
+        "summary": "获取今日状态区间",
+        "description": "未校时返回空表。断电期间不记录（列表中的空档即“未知”），不推断。",
+        "operationId": "getSegments",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Segments"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/stdefs": {
+      "get": {
+        "tags": [
+          "Statuses"
+        ],
+        "summary": "获取自定义状态注册表",
+        "operationId": "getStdefs",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stdefs"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Statuses"
+        ],
+        "summary": "新建自定义状态（设备分配 id）",
+        "operationId": "createStdef",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StdefWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Created"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/stdefs/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        },
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^c[a-z0-9]{1,6}$"
+          }
+        }
+      ],
+      "put": {
+        "tags": [
+          "Statuses"
+        ],
+        "summary": "新建或替换指定 id 的自定义状态",
+        "description": "改的是当前状态时设备立即刷新屏幕文字。",
+        "operationId": "putStdef",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StdefWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Statuses"
+        ],
+        "summary": "删除自定义状态",
+        "description": "连带删除该状态的屏幕程序；正在使用则设备退回 work。引用它的计划表不可再启用。",
+        "operationId": "deleteStdef",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/version": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "获取 API 与固件版本",
+        "description": "无副作用，可用作连通性探测。主版本号不同的客户端应拒绝继续通信。",
+        "operationId": "getVersion",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Version"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/todos": {
+      "get": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "获取全部待办",
+        "operationId": "getTodos",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Todos"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "新建待办",
+        "operationId": "createTodo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TodoWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Created"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "清空全部待办",
+        "operationId": "clearTodos",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/todos/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        },
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "patch": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "部分更新待办",
+        "description": "`at`=-1 清除定时；`trig`=at 改回定时触发。",
+        "operationId": "patchTodo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "x-max-bytes": 39
+                  },
+                  "at": {
+                    "type": "integer"
+                  },
+                  "trig": {
+                    "type": "string",
+                    "enum": [
+                      "offwork",
+                      "at"
+                    ]
+                  },
+                  "show": {
+                    "type": "boolean"
+                  },
+                  "done": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "删除待办",
+        "operationId": "deleteTodo",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/reminders": {
+      "post": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "立即在设备上弹出提醒",
+        "description": "OLED 显示 15 s + RGB 闪烁 3 s，任意按键提前关闭。`text` 仅在用户允许正文上屏时携带，否则只给 `count`。",
+        "operationId": "postReminder",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "x-max-bytes": 47
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/stt/start": {
+      "post": {
+        "tags": [
+          "Voice"
+        ],
+        "summary": "开始录音",
+        "description": "设备 I2S 采音（16 kHz）→ IMA-ADPCM → `aud` 事件流（需已订阅 /api/events）。60 s 自动停止。",
+        "operationId": "startStt",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "500": {
+            "description": "麦克风初始化失败（mic_failed）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/stt/stop": {
+      "post": {
+        "tags": [
+          "Voice"
+        ],
+        "summary": "停止录音",
+        "operationId": "stopStt",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/stt/result": {
+      "post": {
+        "tags": [
+          "Voice"
+        ],
+        "summary": "回传识别文字，启动设备端 Agent 循环",
+        "description": "设备组装 system + user 消息后以 `agentReq` 事件请求 LLM。已有循环在进行时返回 409 busy。",
+        "operationId": "postSttResult",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/agent/response": {
+      "post": {
+        "tags": [
+          "Voice"
+        ],
+        "summary": "回传 LLM 的 assistant 消息",
+        "description": "含 `tool_calls` 时设备执行工具、回填结果并发起下一轮 `agentReq`（≤4 轮）；否则以 `agentDone` 收尾。设备没有在等回复时返回 409 not_waiting。",
+        "operationId": "postAgentResponse",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "message": {
+                    "$ref": "#/components/schemas/AgentMessage"
+                  }
+                },
+                "required": [
+                  "message"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    },
+    "/api/agent/cancel": {
+      "post": {
+        "tags": [
+          "Voice"
+        ],
+        "summary": "中止进行中的 Agent 循环",
+        "operationId": "cancelAgent",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Ok"
+          }
+        }
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/XRequestId"
+        }
+      ]
+    }
+  },
+  "components": {
+    "parameters": {
+      "XRequestId": {
+        "name": "X-Request-Id",
+        "in": "header",
+        "required": true,
+        "description": "隧道请求关联 id（1–24 个 `[A-Za-z0-9._-]`），设备在响应中原样回带。本地桥会自动补齐。",
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]{1,24}$",
+          "example": "17"
+        }
+      }
+    },
+    "responses": {
+      "Ok": {
+        "description": "写入成功；资源变化以快照事件广播",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SuccessResponse"
+            }
+          }
+        }
+      },
+      "Created": {
+        "description": "创建成功，返回设备分配的 id",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/CreatedResponse"
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "语法或参数错误（bad_request / bad_json / invalid_parameter / incompatible_api_version）",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "资源不存在",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "schedule not found",
+              "error_code": "not_found"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "与设备当前状态冲突（full / busy / not_waiting）",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unprocessable": {
+        "description": "违反业务规则",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "PayloadTooLarge": {
+        "description": "报文体超出隧道上限",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "SuccessResponse": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "type": "string",
+            "const": "OK"
+          }
+        },
+        "required": [
+          "result"
+        ]
+      },
+      "CreatedResponse": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "type": "string",
+            "const": "OK"
+          },
+          "id": {
+            "type": "string",
+            "description": "设备分配的资源 id",
+            "example": "s3"
+          }
+        },
+        "required": [
+          "result",
+          "id"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "人类可读的说明"
+          },
+          "error_code": {
+            "$ref": "#/components/schemas/ErrorCode"
+          }
+        },
+        "required": [
+          "error",
+          "error_code"
+        ],
+        "example": {
+          "error": "K1-K4 must keep one offwork key",
+          "error_code": "no_offwork"
+        }
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "bad_request",
+          "bad_json",
+          "invalid_parameter",
+          "incompatible_api_version",
+          "not_found",
+          "method_not_allowed",
+          "full",
+          "busy",
+          "not_waiting",
+          "payload_too_large",
+          "unsupported_media_type",
+          "no_offwork",
+          "bad_status",
+          "not_repeat",
+          "invalid_wasm",
+          "internal",
+          "mic_failed",
+          "storage"
+        ]
+      },
+      "StatusId": {
+        "type": "string",
+        "description": "内建状态 work/busy/focus/meet/rest/off，或自定义状态 id（`c` 开头，≤7 字符）",
+        "pattern": "^(work|busy|focus|meet|rest|off|c[a-z0-9]{1,6})$",
+        "example": "focus"
+      },
+      "LedMode": {
+        "type": "string",
+        "enum": [
+          "solid",
+          "breath",
+          "off"
+        ]
+      },
+      "KeyAction": {
+        "type": "string",
+        "description": "按键动作：offwork 收工 / focus25 专注 25 分钟 / pauseToday 暂停今日计划 / cycleL cycleR 上/下一个状态 / 任意 StatusId",
+        "example": "offwork"
+      },
+      "AppInfo": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/StatusId"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "bad": {
+            "type": "boolean",
+            "description": "曾导致设备复位，已被自动禁用；重新安装即解除"
+          }
+        },
+        "required": [
+          "status",
+          "size"
+        ]
+      },
+      "Apps": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "apps"
+          },
+          "list": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AppInfo"
+            }
+          }
+        },
+        "required": [
+          "type",
+          "list"
+        ]
+      },
+      "AppErrEvent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "appErr"
+          },
+          "status": {
+            "type": "string"
+          },
+          "msg": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "status",
+          "msg"
+        ]
+      },
+      "BreakState": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "breakState"
+          },
+          "minutes": {
+            "type": "integer"
+          },
+          "accumMs": {
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "offToday": {
+            "type": "boolean"
+          },
+          "due": {
+            "type": "boolean",
+            "description": "本帧是否为到点事件"
+          }
+        },
+        "required": [
+          "type",
+          "minutes",
+          "accumMs",
+          "enabled",
+          "offToday",
+          "due"
+        ]
+      },
+      "DeviceEvent": {
+        "description": "事件流中 `data` 的 JSON；`type` 等于 SSE `event` 名",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/Hello"
+          },
+          {
+            "$ref": "#/components/schemas/State"
+          },
+          {
+            "$ref": "#/components/schemas/KeyEvent"
+          },
+          {
+            "$ref": "#/components/schemas/TouchEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WantTimeEvent"
+          },
+          {
+            "$ref": "#/components/schemas/SegmentsMarker"
+          },
+          {
+            "$ref": "#/components/schemas/Segment"
+          },
+          {
+            "$ref": "#/components/schemas/BreakState"
+          },
+          {
+            "$ref": "#/components/schemas/Apps"
+          },
+          {
+            "$ref": "#/components/schemas/AppErrEvent"
+          },
+          {
+            "$ref": "#/components/schemas/Todos"
+          },
+          {
+            "$ref": "#/components/schemas/TodoFiredEvent"
+          },
+          {
+            "$ref": "#/components/schemas/Schedules"
+          },
+          {
+            "$ref": "#/components/schemas/Stdefs"
+          },
+          {
+            "$ref": "#/components/schemas/Keys"
+          },
+          {
+            "$ref": "#/components/schemas/Led"
+          },
+          {
+            "$ref": "#/components/schemas/Timer"
+          },
+          {
+            "$ref": "#/components/schemas/TimerConfig"
+          },
+          {
+            "$ref": "#/components/schemas/Share"
+          },
+          {
+            "$ref": "#/components/schemas/Peers"
+          },
+          {
+            "$ref": "#/components/schemas/SttStateEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AudEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AgentReqEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AgentDoneEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AgentErrEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ErrEvent"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type"
+        }
+      },
+      "KeyEvent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "key"
+          },
+          "k": {
+            "type": "integer",
+            "enum": [
+              1,
+              2,
+              3,
+              4
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "k"
+        ]
+      },
+      "TouchEvent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "touch"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "WantTimeEvent": {
+        "type": "object",
+        "description": "设备请求校时，客户端回 PUT /api/time",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "wantTime"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "ErrEvent": {
+        "type": "object",
+        "description": "非请求上下文产生的计划表/自定义状态错误（schedErr / stdefErr）",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "schedErr",
+              "stdefErr"
+            ]
+          },
+          "msg": {
+            "type": "string",
+            "example": "full"
+          }
+        },
+        "required": [
+          "type",
+          "msg"
+        ]
+      },
+      "ScheduleNode": {
+        "type": "object",
+        "properties": {
+          "t": {
+            "type": "string",
+            "pattern": "^\\d{2}:\\d{2}$",
+            "example": "09:00"
+          },
+          "st": {
+            "$ref": "#/components/schemas/StatusId"
+          },
+          "n": {
+            "type": "string",
+            "x-max-bytes": 16,
+            "description": "备注"
+          }
+        },
+        "required": [
+          "t",
+          "st"
+        ]
+      },
+      "ScheduleWrite": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "x-max-bytes": 24
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "repeat",
+              "date"
+            ]
+          },
+          "wd": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 6
+            },
+            "description": "kind=repeat 的星期（0=周日），空=每天"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "description": "kind=date 的日期"
+          },
+          "ns": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/ScheduleNode"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "ns"
+        ]
+      },
+      "Schedule": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ScheduleWrite"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        ]
+      },
+      "Schedules": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "schedules"
+          },
+          "act": {
+            "type": "string",
+            "description": "当前启用的重复计划 id，空=未启用"
+          },
+          "paused": {
+            "type": "boolean",
+            "description": "今日是否暂停"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "next",
+              "today"
+            ]
+          },
+          "list": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Schedule"
+            }
+          }
+        },
+        "required": [
+          "type",
+          "act",
+          "paused",
+          "mode",
+          "list"
+        ]
+      },
+      "Keys": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "keys"
+          },
+          "k1": {
+            "$ref": "#/components/schemas/KeyAction"
+          },
+          "k2": {
+            "$ref": "#/components/schemas/KeyAction"
+          },
+          "k3": {
+            "$ref": "#/components/schemas/KeyAction"
+          },
+          "k4": {
+            "$ref": "#/components/schemas/KeyAction"
+          },
+          "t": {
+            "$ref": "#/components/schemas/KeyAction"
+          }
+        },
+        "required": [
+          "type",
+          "k1",
+          "k2",
+          "k3",
+          "k4",
+          "t"
+        ]
+      },
+      "Led": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "led"
+          },
+          "map": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LedMode"
+            }
+          },
+          "br": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "night": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "type",
+          "map",
+          "br",
+          "night"
+        ]
+      },
+      "Timer": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "timer"
+          },
+          "st": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "select",
+              "run",
+              "done"
+            ]
+          },
+          "minutes": {
+            "type": "integer"
+          },
+          "remain": {
+            "type": "integer",
+            "description": "run 态剩余毫秒"
+          }
+        },
+        "required": [
+          "type",
+          "st"
+        ]
+      },
+      "TimerConfig": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "timerCfg"
+          },
+          "step": {
+            "type": "integer"
+          },
+          "max": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "step",
+          "max"
+        ]
+      },
+      "Share": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "share"
+          },
+          "en": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "zone": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "en",
+          "name",
+          "zone"
+        ]
+      },
+      "Peer": {
+        "type": "object",
+        "properties": {
+          "i": {
+            "type": "string",
+            "description": "MAC 尾 6 位十六进制",
+            "example": "1adbe8"
+          },
+          "n": {
+            "type": "string",
+            "description": "共享昵称"
+          },
+          "st": {
+            "$ref": "#/components/schemas/StatusId"
+          },
+          "at": {
+            "type": "integer",
+            "description": "最后听到的 epoch 毫秒（任一方未校时可能缺省）"
+          }
+        },
+        "required": [
+          "i",
+          "n",
+          "st"
+        ]
+      },
+      "Peers": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "peers"
+          },
+          "list": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "$ref": "#/components/schemas/Peer"
+            }
+          }
+        },
+        "required": [
+          "type",
+          "list"
+        ]
+      },
+      "ScreenLayout": {
+        "type": "string",
+        "enum": [
+          "full",
+          "clock",
+          "status"
+        ]
+      },
+      "State": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "state"
+          },
+          "status": {
+            "$ref": "#/components/schemas/StatusId"
+          },
+          "screen": {
+            "type": "string",
+            "description": "屏幕主文字"
+          },
+          "sub": {
+            "type": "string",
+            "description": "屏幕说明行"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/ScreenLayout"
+          },
+          "led": {
+            "$ref": "#/components/schemas/LedMode"
+          },
+          "brightness": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "type",
+          "status",
+          "screen",
+          "sub",
+          "layout",
+          "led",
+          "brightness"
+        ]
+      },
+      "StateWrite": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/StatusId"
+          },
+          "screen": {
+            "type": "string"
+          },
+          "sub": {
+            "type": "string"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/ScreenLayout"
+          },
+          "led": {
+            "$ref": "#/components/schemas/LedMode"
+          },
+          "brightness": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "DeviceTime": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "time"
+          },
+          "synced": {
+            "type": "boolean"
+          },
+          "epoch": {
+            "type": "integer",
+            "description": "当前 UTC epoch 毫秒；未校时为 -1"
+          },
+          "tzOffsetMin": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "synced",
+          "epoch",
+          "tzOffsetMin"
+        ]
+      },
+      "Segment": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "seg"
+          },
+          "status": {
+            "$ref": "#/components/schemas/StatusId"
+          },
+          "start": {
+            "type": "integer",
+            "description": "epoch 毫秒"
+          },
+          "end": {
+            "type": "integer",
+            "description": "epoch 毫秒；缺省 = 进行中"
+          }
+        },
+        "required": [
+          "type",
+          "status",
+          "start"
+        ]
+      },
+      "SegmentsMarker": {
+        "type": "object",
+        "description": "事件流中逐段推送的起止帧",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "segments"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "begin",
+              "end"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "phase"
+        ]
+      },
+      "Segments": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "segments"
+          },
+          "list": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Segment"
+            }
+          }
+        },
+        "required": [
+          "type",
+          "list"
+        ]
+      },
+      "StdefWrite": {
+        "type": "object",
+        "properties": {
+          "zh": {
+            "type": "string",
+            "x-max-bytes": 20,
+            "description": "屏显名（建议 ≤4 个汉字）"
+          },
+          "hint": {
+            "type": "string",
+            "x-max-bytes": 32
+          },
+          "c": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 16777215,
+            "description": "颜色 0xRRGGBB，网页/RGB/OLED 共用"
+          },
+          "work": {
+            "type": "boolean",
+            "description": "计入工作时长与休息提醒"
+          }
+        },
+        "required": [
+          "zh",
+          "c"
+        ]
+      },
+      "Stdef": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/StdefWrite"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        ]
+      },
+      "Stdefs": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "stdefs"
+          },
+          "list": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Stdef"
+            }
+          }
+        },
+        "required": [
+          "type",
+          "list"
+        ]
+      },
+      "Version": {
+        "type": "object",
+        "properties": {
+          "api_semver": {
+            "type": "string",
+            "example": "1.0.0"
+          },
+          "firmware": {
+            "type": "string",
+            "example": "0.8.0"
+          },
+          "name": {
+            "type": "string",
+            "description": "设备显示名",
+            "example": "收工牌 A1"
+          }
+        },
+        "required": [
+          "api_semver",
+          "firmware",
+          "name"
+        ]
+      },
+      "Hello": {
+        "type": "object",
+        "description": "订阅快照第 1 帧（events.md §2）",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "hello"
+          },
+          "name": {
+            "type": "string"
+          },
+          "firmware": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "name",
+          "firmware"
+        ]
+      },
+      "TodoWrite": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "x-max-bytes": 39
+          },
+          "at": {
+            "type": "integer",
+            "description": "到点时刻 epoch 毫秒；缺省 = 仅清单"
+          },
+          "trig": {
+            "type": "string",
+            "enum": [
+              "offwork"
+            ],
+            "description": "offwork = 进入收工状态时触发"
+          },
+          "show": {
+            "type": "boolean",
+            "default": true,
+            "description": "触发时正文可否上屏"
+          },
+          "src": {
+            "type": "string",
+            "maxLength": 5,
+            "example": "web"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "Todo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "t3"
+          },
+          "at": {
+            "type": "integer"
+          },
+          "trig": {
+            "type": "string",
+            "enum": [
+              "offwork"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "show": {
+            "type": "boolean"
+          },
+          "created": {
+            "type": "integer"
+          },
+          "src": {
+            "type": "string"
+          },
+          "done": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "done"
+        ]
+      },
+      "Todos": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "todos"
+          },
+          "list": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Todo"
+            }
+          }
+        },
+        "required": [
+          "type",
+          "list"
+        ]
+      },
+      "TodoFiredEvent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "todoFired"
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "ids",
+          "count"
+        ]
+      },
+      "AgentMessage": {
+        "type": "object",
+        "description": "OpenAI Chat Completions 消息对象",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "system",
+              "user",
+              "assistant",
+              "tool"
+            ]
+          },
+          "content": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tool_calls": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "function": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "arguments": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "tool_call_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ]
+      },
+      "SttStateEvent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "sttState"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "recording",
+              "idle",
+              "error"
+            ]
+          },
+          "rate": {
+            "type": "integer",
+            "example": 16000
+          },
+          "codec": {
+            "type": "string",
+            "enum": [
+              "adpcm"
+            ]
+          },
+          "ms": {
+            "type": "integer"
+          },
+          "msg": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "state",
+          "rate",
+          "codec",
+          "ms"
+        ]
+      },
+      "AudEvent": {
+        "type": "object",
+        "description": "帧 = [pred_lo, pred_hi, stepIdx, nibbles…]（base64），帧内自带解码状态，丢帧只留缺口",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "aud"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "data": {
+            "type": "string",
+            "format": "byte"
+          }
+        },
+        "required": [
+          "type",
+          "seq",
+          "data"
+        ]
+      },
+      "AgentReqEvent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "agentReq"
+          },
+          "round": {
+            "type": "integer"
+          },
+          "msgs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentMessage"
+            }
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "type",
+          "round",
+          "msgs"
+        ]
+      },
+      "AgentDoneEvent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "agentDone"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "text"
+        ]
+      },
+      "AgentErrEvent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "agentErr"
+          },
+          "msg": {
+            "type": "string",
+            "enum": [
+              "timeout",
+              "disconnected",
+              "cancelled",
+              "bad_response"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "msg"
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Screens",
+      "description": "按状态自定义屏幕程序（WASM，存 LittleFS /app_<status>.wasm，≤48 KiB，进入该状态自动运行）"
+    },
+    {
+      "name": "Break",
+      "description": "休息提醒（设备自治累计工作时长）"
+    },
+    {
+      "name": "Events",
+      "description": "设备主动推送的事件流（隧道分帧见 tunnel.md §6，事件目录见 events.md）"
+    },
+    {
+      "name": "Schedules",
+      "description": "计划表（事实源 /schedules.json，≤8 张，每张 ≤20 个节点，设备自治执行）"
+    },
+    {
+      "name": "Settings",
+      "description": "按键映射、灯效、旋钮定时配置（事实源分别为 /keys.json、/led.json、/knob.json，断电保留）"
+    },
+    {
+      "name": "Board",
+      "description": "共享看板（ESP-NOW 局域广播，只共享当前状态；本设备兼任网关转发成员表）"
+    },
+    {
+      "name": "State",
+      "description": "当前工作状态、屏幕文字、设备时钟、今日状态区间"
+    },
+    {
+      "name": "Statuses",
+      "description": "自定义状态注册表（事实源 /stdefs.json，≤8 个）"
+    },
+    {
+      "name": "System",
+      "description": "设备信息与版本"
+    },
+    {
+      "name": "Todos",
+      "description": "待办与提醒（事实源 /todos.json，≤16 条，设备到点自治触发）"
+    },
+    {
+      "name": "Voice",
+      "description": "设备麦克风录音（音频以 aud 事件上行）与设备端 Agent 循环（LLM 由客户端代理调用）"
+    }
+  ]
+}

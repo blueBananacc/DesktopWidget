@@ -1,26 +1,20 @@
-import { BLE_NAME_PREFIX, BLE_RX_UUID, BLE_SERVICE_UUID, BLE_TX_UUID } from "./protocol";
-import type { DeviceTransport, InboundMessage, OutboundMessage } from "./protocol";
+import { BLE_NAME_PREFIX, BLE_RX_UUID, BLE_SERVICE_UUID, BLE_TX_UUID } from "../protocol";
+import type { ByteLink } from "./link";
 
 export const bleSupported = () => typeof navigator !== "undefined" && "bluetooth" in navigator && window.isSecureContext;
 
-const CHUNK = 180;
+const CHUNK = 180;   // ATT MTU 内安全分片
 
-/** Web Bluetooth 传输：仅 Chrome / Edge 等支持，且需 HTTPS 或 localhost，并由用户点击触发 */
-export class BleTransport implements DeviceTransport {
+/** Web Bluetooth 字节通道：仅 Chrome / Edge 等支持，且需 HTTPS 或 localhost，并由用户点击触发 */
+export class BleLink implements ByteLink {
   readonly kind = "ble" as const;
   private device?: BluetoothDevice;
   private rx?: BluetoothRemoteGATTCharacteristic;
-  private msgCb?: (m: InboundMessage) => void;
-  private discCb?: () => void;
-  private buffer = "";
-  private queue: InboundMessage[] = []; // onMessage 挂载前收到的消息排队（订阅 TX 后设备立刻回推 hello+区间）
+  private dataCb?: (b: Uint8Array) => void;
+  private closeCb?: () => void;
+  private queue: Uint8Array[] = []; // onData 挂载前收到的数据排队（订阅 notify 后设备可能立刻回帧）
 
-  private emit(m: InboundMessage) {
-    if (this.msgCb) this.msgCb(m);
-    else this.queue.push(m);
-  }
-
-  async connect() {
+  async open() {
     if (!bleSupported()) throw new Error("当前浏览器不支持网页蓝牙，请使用电脑版 Chrome 或 Edge");
     return this.attach(await navigator.bluetooth.requestDevice({
       filters: [{ namePrefix: BLE_NAME_PREFIX }, { services: [BLE_SERVICE_UUID] }],
@@ -29,7 +23,7 @@ export class BleTransport implements DeviceTransport {
   }
 
   /** 静默重连：只用浏览器已授权的设备，不弹选择框（页面刷新后自动恢复连接用；已授权设备的 gatt.connect 不需要用户手势） */
-  async connectGranted() {
+  async openGranted() {
     if (!bleSupported()) throw new Error("当前浏览器不支持网页蓝牙");
     const dev = (await navigator.bluetooth.getDevices()).find((d) => d.name?.startsWith(BLE_NAME_PREFIX));
     if (!dev) throw new Error("没有已授权的蓝牙设备");
@@ -38,7 +32,7 @@ export class BleTransport implements DeviceTransport {
 
   private async attach(device: BluetoothDevice) {
     this.device = device;
-    device.addEventListener("gattserverdisconnected", () => this.discCb?.());
+    device.addEventListener("gattserverdisconnected", () => this.closeCb?.());
     const server = await device.gatt!.connect();
     const service = await server.getPrimaryService(BLE_SERVICE_UUID);
     this.rx = await service.getCharacteristic(BLE_RX_UUID);
@@ -46,38 +40,27 @@ export class BleTransport implements DeviceTransport {
     await tx.startNotifications();
     tx.addEventListener("characteristicvaluechanged", (e) => {
       const value = (e.target as BluetoothRemoteGATTCharacteristic).value;
-      if (!value) return;
-      this.buffer += new TextDecoder().decode(value);
-      let i: number;
-      while ((i = this.buffer.indexOf("\n")) >= 0) {
-        const line = this.buffer.slice(0, i);
-        this.buffer = this.buffer.slice(i + 1);
-        try {
-          this.emit(JSON.parse(line));
-        } catch {
-          /* 忽略无法解析的帧 */
-        }
-      }
+      if (!value?.byteLength) return;
+      const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+      if (this.dataCb) this.dataCb(bytes);
+      else this.queue.push(bytes);
     });
     return this.device.name ?? "收工牌";
   }
 
-  async disconnect() {
+  async close() {
     this.device?.gatt?.disconnect();
   }
 
-  async send(msg: OutboundMessage) {
+  async write(bytes: Uint8Array) {
     if (!this.rx) throw new Error("设备未连接");
-    const bytes = new TextEncoder().encode(JSON.stringify(msg) + "\n");
     for (let i = 0; i < bytes.length; i += CHUNK) await this.rx.writeValueWithResponse(bytes.slice(i, i + CHUNK));
   }
 
-  onMessage(cb: (m: InboundMessage) => void) {
-    this.msgCb = cb;
-    for (const m of this.queue) cb(m);
+  onData(cb: (b: Uint8Array) => void) {
+    this.dataCb = cb;
+    for (const b of this.queue) cb(b);
     this.queue = [];
   }
-  onDisconnect(cb: () => void) {
-    this.discCb = cb;
-  }
+  onClose(cb: () => void) { this.closeCb = cb; }
 }

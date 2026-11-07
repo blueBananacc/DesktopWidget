@@ -1,0 +1,139 @@
+tags:
+- name: Voice
+  description: 设备麦克风录音（音频以 aud 事件上行）与设备端 Agent 循环（LLM 由客户端代理调用）
+
+paths:
+  /api/stt/start:
+    post:
+      tags: [Voice]
+      summary: 开始录音
+      description: 设备 I2S 采音（16 kHz）→ IMA-ADPCM → `aud` 事件流（需已订阅 /api/events）。60 s 自动停止。
+      operationId: startStt
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "500":
+          description: 麦克风初始化失败（mic_failed）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/stt/stop:
+    post:
+      tags: [Voice]
+      summary: 停止录音
+      operationId: stopStt
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+
+  /api/stt/result:
+    post:
+      tags: [Voice]
+      summary: 回传识别文字，启动设备端 Agent 循环
+      description: 设备组装 system + user 消息后以 `agentReq` 事件请求 LLM。已有循环在进行时返回 409 busy。
+      operationId: postSttResult
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text: { type: string, minLength: 1 }
+              required: [text]
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/agent/response:
+    post:
+      tags: [Voice]
+      summary: 回传 LLM 的 assistant 消息
+      description: 含 `tool_calls` 时设备执行工具、回填结果并发起下一轮 `agentReq`（≤4 轮）；否则以 `agentDone` 收尾。设备没有在等回复时返回 409 not_waiting。
+      operationId: postAgentResponse
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message: { $ref: "#/components/schemas/AgentMessage" }
+              required: [message]
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/agent/cancel:
+    post:
+      tags: [Voice]
+      summary: 中止进行中的 Agent 循环
+      operationId: cancelAgent
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+
+schemas:
+  AgentMessage:
+    type: object
+    description: OpenAI Chat Completions 消息对象
+    properties:
+      role: { type: string, enum: [system, user, assistant, tool] }
+      content: { type: [string, "null"] }
+      tool_calls:
+        type: array
+        items:
+          type: object
+          properties:
+            id: { type: string }
+            type: { type: string }
+            function:
+              type: object
+              properties:
+                name: { type: string }
+                arguments: { type: string }
+      tool_call_id: { type: string }
+    required: [role]
+
+  SttStateEvent:
+    type: object
+    properties:
+      type: { type: string, const: sttState }
+      state: { type: string, enum: [recording, idle, error] }
+      rate: { type: integer, example: 16000 }
+      codec: { type: string, enum: [adpcm] }
+      ms: { type: integer }
+      msg: { type: string }
+    required: [type, state, rate, codec, ms]
+
+  AudEvent:
+    type: object
+    description: "帧 = [pred_lo, pred_hi, stepIdx, nibbles…]（base64），帧内自带解码状态，丢帧只留缺口"
+    properties:
+      type: { type: string, const: aud }
+      seq: { type: integer }
+      data: { type: string, format: byte }
+    required: [type, seq, data]
+
+  AgentReqEvent:
+    type: object
+    properties:
+      type: { type: string, const: agentReq }
+      round: { type: integer }
+      msgs: { type: array, items: { $ref: "#/components/schemas/AgentMessage" } }
+      tools: { type: array, items: { type: object } }
+    required: [type, round, msgs]
+
+  AgentDoneEvent:
+    type: object
+    properties:
+      type: { type: string, const: agentDone }
+      text: { type: string }
+    required: [type, text]
+
+  AgentErrEvent:
+    type: object
+    properties:
+      type: { type: string, const: agentErr }
+      msg: { type: string, enum: [timeout, disconnected, cancelled, bad_response] }
+    required: [type, msg]

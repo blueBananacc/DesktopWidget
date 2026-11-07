@@ -1,0 +1,43 @@
+tags:
+- name: System
+  description: 设备信息与版本
+
+paths:
+  /api/version:
+    get:
+      tags: [System]
+      summary: 获取 API 与固件版本
+      description: 无副作用，可用作连通性探测。主版本号不同的客户端应拒绝继续通信。
+      operationId: getVersion
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Version"
+
+schemas:
+  Version:
+    type: object
+    properties:
+      api_semver:
+        type: string
+        example: "1.0.0"
+      firmware:
+        type: string
+        example: "0.8.0"
+      name:
+        type: string
+        description: 设备显示名
+        example: 收工牌 A1
+    required: [api_semver, firmware, name]
+
+  Hello:
+    type: object
+    description: 订阅快照第 1 帧（events.md §2）
+    properties:
+      type: { type: string, const: hello }
+      name: { type: string }
+      firmware: { type: string }
+    required: [type, name, firmware]

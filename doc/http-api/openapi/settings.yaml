@@ -1,0 +1,180 @@
+tags:
+- name: Settings
+  description: 按键映射、灯效、旋钮定时配置（事实源分别为 /keys.json、/led.json、/knob.json，断电保留）
+
+paths:
+  /api/keys:
+    get:
+      tags: [Settings]
+      summary: 获取按键映射
+      operationId: getKeys
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Keys" }
+    put:
+      tags: [Settings]
+      summary: 写入按键映射
+      description: |
+        K1–K4 实体键 + `t` 触摸键（`t` 可省略，保持原值）。K1–K4 中**必须**至少一个为 `offwork`，否则整次写入被拒绝（422 no_offwork），现有映射不变。
+        映射为 `offwork` 的键需按住 1.5 s 才触发。
+      operationId: putKeys
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                k1: { $ref: "#/components/schemas/KeyAction" }
+                k2: { $ref: "#/components/schemas/KeyAction" }
+                k3: { $ref: "#/components/schemas/KeyAction" }
+                k4: { $ref: "#/components/schemas/KeyAction" }
+                t: { $ref: "#/components/schemas/KeyAction" }
+              required: [k1, k2, k3, k4]
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+
+  /api/led:
+    get:
+      tags: [Settings]
+      summary: 获取灯效设置
+      operationId: getLed
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Led" }
+    patch:
+      tags: [Settings]
+      summary: 修改灯效设置
+      description: "`map` 只合并给出的状态；省略的字段保持不变。夜间关灯 22:00–07:00 需设备已校时。"
+      operationId: patchLed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                map:
+                  type: object
+                  additionalProperties: { $ref: "#/components/schemas/LedMode" }
+                br: { type: integer, minimum: 0, maximum: 100 }
+                night: { type: boolean }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/timer:
+    get:
+      tags: [Settings]
+      summary: 获取旋钮快速定时的当前状态
+      operationId: getTimer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Timer" }
+
+  /api/timer/start:
+    post:
+      tags: [Settings]
+      summary: 启动设备倒计时
+      description: 计时本体在设备上，网页断开照常到点提醒；到点不改变当前状态。分钟数按 [step, max] 钳制。
+      operationId: startTimer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                minutes: { type: integer, minimum: 1, maximum: 600 }
+              required: [minutes]
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/timer/cancel:
+    post:
+      tags: [Settings]
+      summary: 取消倒计时 / 关闭到点提醒
+      operationId: cancelTimer
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+
+  /api/timer/config:
+    get:
+      tags: [Settings]
+      summary: 获取旋钮配置
+      operationId: getTimerConfig
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TimerConfig" }
+    patch:
+      tags: [Settings]
+      summary: 修改旋钮配置
+      description: step 钳制到 1–30，max 钳制到 step–600。
+      operationId: patchTimerConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                step: { type: integer, minimum: 1, maximum: 30 }
+                max: { type: integer, minimum: 1, maximum: 600 }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+schemas:
+  Keys:
+    type: object
+    properties:
+      type: { type: string, const: keys }
+      k1: { $ref: "#/components/schemas/KeyAction" }
+      k2: { $ref: "#/components/schemas/KeyAction" }
+      k3: { $ref: "#/components/schemas/KeyAction" }
+      k4: { $ref: "#/components/schemas/KeyAction" }
+      t: { $ref: "#/components/schemas/KeyAction" }
+    required: [type, k1, k2, k3, k4, t]
+
+  Led:
+    type: object
+    properties:
+      type: { type: string, const: led }
+      map:
+        type: object
+        additionalProperties: { $ref: "#/components/schemas/LedMode" }
+      br: { type: integer, minimum: 0, maximum: 100 }
+      night: { type: boolean }
+    required: [type, map, br, night]
+
+  Timer:
+    type: object
+    properties:
+      type: { type: string, const: timer }
+      st: { type: string, enum: [idle, select, run, done] }
+      minutes: { type: integer }
+      remain: { type: integer, description: run 态剩余毫秒 }
+    required: [type, st]
+
+  TimerConfig:
+    type: object
+    properties:
+      type: { type: string, const: timerCfg }
+      step: { type: integer }
+      max: { type: integer }
+    required: [type, step, max]

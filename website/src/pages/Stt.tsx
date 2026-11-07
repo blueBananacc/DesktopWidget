@@ -101,7 +101,7 @@ function Step({ icon, title, body, mono, pending, done, error }: { icon: ReactNo
 }
 
 export function SttPage() {
-  const { s, device, transport, onDeviceMessage } = useStore();
+  const { s, device, api, onDeviceMessage } = useStore();
   const toast = useToast();
   const [cfg, setCfg] = useState<AsrCfg>(loadCfg);
   const [llm, setLlm] = useState<LlmCfg>(loadLlmCfg);
@@ -223,12 +223,12 @@ export function SttPage() {
   }, []);
 
   const start = async () => {
-    if (!transport || !connected) { toast({ message: "先连接设备", seconds: 4 }); return; }
+    if (!api || !connected) { toast({ message: "先连接设备", seconds: 4 }); return; }
     partsRef.current = []; seqRef.current = -1; lostRef.current = 0;
     setStats({ frames: 0, lost: 0, ms: 0 });
     setErr(""); setText(""); setAudioUrl("");
     try {
-      await transport.send({ type: "stt", op: "start" });
+      await api.sttStart();
     } catch (e) {
       toast({ message: `发送失败：${e instanceof Error ? e.message : e}`, seconds: 5 });
       return;
@@ -243,7 +243,7 @@ export function SttPage() {
   const stop = async () => {
     recordingRef.current = false;
     window.clearInterval(timerRef.current);
-    try { await transport?.send({ type: "stt", op: "stop" }); } catch { /* 断开也能本地收尾 */ }
+    try { await api?.sttStop(); } catch { /* 断开也能本地收尾 */ }
     await delay(350);                          // 等在途的音频帧
     const parts = partsRef.current;
     partsRef.current = [];
@@ -269,7 +269,7 @@ export function SttPage() {
       setText(t);
       setPhase("done");
       // 识别文字回传设备 → 设备上的 agent 循环接管（经本页代理调 LLM，可建设备待办）
-      if (t && handoff && transport && connected) transport.send({ type: "sttResult", text: t }).catch(() => {});
+      if (t && handoff && api && connected) api.sttResult(t).catch(() => {});
     } catch (e) {
       setPhase("error");
       setErr(`识别失败：${e instanceof Error ? e.message : e}（录音仍可回放重试）`);

@@ -1,0 +1,82 @@
+tags:
+- name: Statuses
+  description: 自定义状态注册表（事实源 /stdefs.json，≤8 个）
+
+paths:
+  /api/stdefs:
+    get:
+      tags: [Statuses]
+      summary: 获取自定义状态注册表
+      operationId: getStdefs
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Stdefs" }
+    post:
+      tags: [Statuses]
+      summary: 新建自定义状态（设备分配 id）
+      operationId: createStdef
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StdefWrite" }
+      responses:
+        "200": { $ref: "#/components/responses/Created" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/stdefs/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, pattern: "^c[a-z0-9]{1,6}$" } }
+    put:
+      tags: [Statuses]
+      summary: 新建或替换指定 id 的自定义状态
+      description: 改的是当前状态时设备立即刷新屏幕文字。
+      operationId: putStdef
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StdefWrite" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [Statuses]
+      summary: 删除自定义状态
+      description: 连带删除该状态的屏幕程序；正在使用则设备退回 work。引用它的计划表不可再启用。
+      operationId: deleteStdef
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+schemas:
+  StdefWrite:
+    type: object
+    properties:
+      zh: { type: string, x-max-bytes: 20, description: 屏显名（建议 ≤4 个汉字） }
+      hint: { type: string, x-max-bytes: 32 }
+      c: { type: integer, minimum: 0, maximum: 16777215, description: 颜色 0xRRGGBB，网页/RGB/OLED 共用 }
+      work: { type: boolean, description: 计入工作时长与休息提醒 }
+    required: [zh, c]
+
+  Stdef:
+    allOf:
+      - $ref: "#/components/schemas/StdefWrite"
+      - type: object
+        properties:
+          id: { type: string }
+        required: [id]
+
+  Stdefs:
+    type: object
+    properties:
+      type: { type: string, const: stdefs }
+      list:
+        type: array
+        items: { $ref: "#/components/schemas/Stdef" }
+    required: [type, list]

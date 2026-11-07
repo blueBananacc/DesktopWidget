@@ -1,20 +1,21 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Bluetooth, Monitor, Radio, Unplug, Hand, Keyboard, Gauge, WifiOff, RefreshCw, Usb } from "lucide-react";
-import { useStore, toOutbound } from "../store/AppStore";
-import { bleSupported } from "../device/bleTransport";
-import { serialSupported } from "../device/serialTransport";
-import { MockTransport } from "../device/mockTransport";
+import { useStore, toStateWrite } from "../store/AppStore";
+import { bleSupported } from "../device/http/bleLink";
+import { serialSupported } from "../device/http/serialLink";
+import { MockLink } from "../device/http/mockLink";
 import { ago } from "../domain/time";
 import { Banner, Card, CardHeader, ConnBadge, EmptyState, PageHeader, SettingRow, Tile } from "../ui/Primitives";
 import { useToast } from "../ui/Toast";
 
 export function DevicePage() {
-  const { s, now, device, transport, connect, disconnect, actions } = useStore();
+  const { s, now, device, link, connect, disconnect, actions } = useStore();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const ble = bleSupported();
   const ser = serialSupported();
-  const mock = transport instanceof MockTransport ? transport : undefined;
+  const mock = link instanceof MockLink ? link : undefined;
 
   const doConnect = async (kind: "mock" | "ble" | "serial") => {
     setBusy(true);
@@ -70,16 +71,16 @@ export function DevicePage() {
               <div className="card-b form">
                 <p className="hint" style={{ margin: 0 }}>模拟在桌牌上的操作，用来检查网页和设备之间的同步逻辑。</p>
                 <div className="row">
-                  <button className="btn btn-secondary" onClick={() => mock.emit({ type: "touch" })}><Hand />触摸键</button>
+                  <button className="btn btn-secondary" onClick={() => mock.device.inject({ type: "touch" })}><Hand />触摸键</button>
                   {([1, 2, 3, 4] as const).map((k) => (
-                    <button key={k} className="btn btn-secondary" onClick={() => mock.emit({ type: "key", k })}><Keyboard />按 K{k}</button>
+                    <button key={k} className="btn btn-secondary" onClick={() => mock.device.inject({ type: "key", k })}><Keyboard />按 K{k}</button>
                   ))}
-                  <button className="btn btn-secondary" onClick={() => mock.emit({ type: "knob", minutes: 15 })}><Gauge />旋钮 15 分钟</button>
+                  <button className="btn btn-secondary" onClick={() => mock.device.knobStart(15)}><Gauge />旋钮 15 分钟</button>
                   <button className="btn btn-ghost" onClick={() => mock.drop()}><WifiOff />模拟断线</button>
                 </div>
                 <div className="code-box">
-                  <div className="hint">最近发送给设备的状态消息</div>
-                  <pre>{JSON.stringify(mock.lastState ?? toOutbound(s), null, 2)}</pre>
+                  <div className="hint">设备当前看到的状态</div>
+                  <pre>{JSON.stringify(mock.device.lastState ?? toStateWrite(s), null, 2)}</pre>
                 </div>
               </div>
             </Card>
@@ -90,7 +91,7 @@ export function DevicePage() {
             <b>网页蓝牙的限制</b>需要电脑版 Chrome 或 Edge，并且由你点击按钮才能连接。iPhone 上的 Safari 不支持网页蓝牙。网页关闭后不会保持连接，设备会按最近同步的计划表继续自动切换。
           </Banner>
           <Banner tone="info" icon={<Radio className="i" />}>
-            <b>协议说明</b>网页和设备之间用 JSON 消息通信，字段草案见源码 <code>src/device/protocol.ts</code>，需要和固件一起确认后定稿。
+            <b>协议说明</b>网页和设备之间在蓝牙/串口字节流上跑 HTTP 隧道（报文规范见 <code>doc/http-api/tunnel.md</code>，接口定义见同目录 OpenAPI）。连上设备后可到 <Link to="/api">API 调试页</Link> 直接调接口。
           </Banner>
         </div>
       </div>

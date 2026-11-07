@@ -34,9 +34,48 @@
 
 // ===================== 配置 =====================
 
-#define FIRMWARE_VER   "0.7.0"
+#define FIRMWARE_VER   "0.9.0"
+#define API_SEMVER     "1.0.0"   // 设备 HTTP API 版本：与 doc/http-api/openapi/openapi.yaml info.version 同步
+#define API_MAJOR      1
 #define DEVICE_NAME    "Shougong-A1"
+#define DEVICE_DISPLAY "收工牌 A1"
 #define ENABLE_CAPSENSE 0   // 有铜箔电极接 GPIO13/14 后改为 1
+
+// ===================== HTTP 隧道类型（doc/http-api/tunnel.md） =====================
+// 放在任何函数定义之前：.ino 自动生成的函数原型会引用这些类型
+constexpr uint8_t  CH_SERIAL = 0, CH_BLE = 1, CH_COUNT = 2;
+constexpr size_t   HTTP_LINE_MAX = 256;          // 起始行 / 单个头部行上限（tunnel.md §3.4）
+constexpr uint8_t  HTTP_HDR_MAX = 16;
+constexpr uint32_t HTTP_BODY_MAX = 8192;
+constexpr uint32_t HTTP_APP_BODY_MAX = 48 * 1024;
+
+struct HttpReq {
+  uint8_t  ch;
+  char     method[8];
+  char     path[96];
+  char     query[64];
+  char     reqId[25];
+  char     ctype[40];
+  char     semver[16];
+  bool     chunked;
+  uint32_t len;
+  uint8_t* body;                // len+1 字节，末尾补 0 便于按 JSON 解析
+  char     params[2][24];       // 路由模式中 {x} 段的取值
+};
+struct HttpRx {                 // 每通道一个接收状态机：0=起始行 1=头部 2=收报文体 3=丢弃超限报文体
+  uint8_t  phase;
+  char     line[HTTP_LINE_MAX + 1];
+  uint16_t lineLen;
+  bool     lineOver;
+  uint8_t  hdrCount;
+  uint32_t got;
+  uint16_t errStatus;
+  const char* errCode;
+  const char* errMsg;
+  HttpReq  req;
+};
+typedef void (*HttpHandler)(HttpReq& r);
+struct HttpRoute { const char* method; const char* pattern; HttpHandler fn; };
 
 // 引脚分配（与 HARDWARE.md 一致）
 constexpr uint8_t PIN_SDA = 5, PIN_SCL = 9;        // OLED I2C（SDA 2026-11-03 由 8 改 5，原 K2 脚）
@@ -105,9 +144,17 @@ NimBLECharacteristic* txChar = nullptr;
 
 // ===================== 运行状态 =====================
 
-String  rxBuf;                    // BLE 分包累积缓冲（\n 分帧）
 bool    bleConnected = false;
-bool    wantHello = false;        // 客户端订阅 TX 后发 hello
+bool    wantHello = false;        // 客户端订阅 /api/events 后推送订阅快照（events.md §2）
+volatile bool bleDropped = false; // BLE 断连：由 loop 收尾（停录音 / 中止 agent），避免在 BLE 任务里发事件
+SemaphoreHandle_t bleRxLock = nullptr;
+String  bleRxQ;                   // BLE write 回调只把字节放进队列，由 loop 线程统一解析与处理
+HttpRx  httpRx[CH_COUNT];
+struct EvSub { bool on; char id[25]; } evSub[CH_COUNT];
+String* evCapture = nullptr;      // 非空：读接口正在收集快照函数的输出（不广播）
+bool    inRequest = false;        // 正在处理写请求：*Err 事件改为 HTTP 错误响应
+int     reqErrStatus = 0;
+char    reqErrCode[24] = "";
 
 String  curStatusId = "work";     // 开机默认工作中：不连接也可用
 String  scrMain = "工作中", scrSub = "可以找我";
@@ -179,12 +226,12 @@ void sendTimer() {  // 上行镜像：网页据此展示，不参与计时
   else if (timerPhase == 2) snprintf(buf, sizeof buf, "{\"type\":\"timer\",\"st\":\"run\",\"minutes\":%u,\"remain\":%lu}", (unsigned)timerMin, (unsigned long)max((uint32_t)0, timerEndsMs - millis()));
   else if (timerPhase == 3) snprintf(buf, sizeof buf, "{\"type\":\"timer\",\"st\":\"done\",\"minutes\":%u}", (unsigned)timerMin);
   else                      snprintf(buf, sizeof buf, "{\"type\":\"timer\",\"st\":\"idle\"}");
-  sendLine(buf);
+  emitEvent(buf);
 }
 void sendTimerCfg() {
   char buf[72];
   snprintf(buf, sizeof buf, "{\"type\":\"timerCfg\",\"step\":%u,\"max\":%u}", (unsigned)knobStepMin, (unsigned)knobMaxMin);
-  sendLine(buf);
+  emitEvent(buf);
 }
 void saveKnob() {
   JsonDocument doc; doc["step"] = knobStepMin; doc["max"] = knobMaxMin;
@@ -243,18 +290,7 @@ uint16_t appOkFrames = 0;                 // 稳定帧计数：跑满即解除�
 char     appFor[12] = "";                 // 当前已加载 app 对应的状态
 uint8_t* wasmBytes = nullptr;
 size_t   wasmLen = 0;
-// 上传中（写文件阶段；与运行中 app 互不干扰——上传不中断当前屏幕）
-File     appFile;
-char     appUpStatus[12] = "";
-uint32_t appUpSize = 0, appUpGot = 0;
-uint8_t  rxChunk[1408];                   // base64 解码缓冲（>1024B 数据）
-// dump：把设备上的 app 读回给网页（网页"以设备为准"渲染 / 取回没有源码的程序）。
-// 一条 ~1.1KB JSON 在 115200 波特约阻塞 100ms，摊到每次循环只发一行，避免长时间卡顿。
-File     appDumpFile;
-char     appDumpStatus[12] = "";
-uint32_t appDumpSeq = 0;
-uint8_t  dumpBuf[768];
-char     dumpB64[1100], dumpLine[1240];
+// 安装与读回走 PUT/GET /api/apps/{status}（二进制报文体，见 doc/http-api/openapi/apps.yaml）
 RTC_DATA_ATTR char crashedApp[12] = "";   // 崩溃防护：复位前正在运行的 app 状态名
 
 // 按键映射（/keys.json 持久化；网页 keys 消息修改）：4 个实体键 K1-K4 + 触摸键 T
@@ -277,7 +313,7 @@ void loadKeys() {
 }
 void sendKeys() {  // 全量上行：按键映射以设备为准
   JsonDocument doc; doc["type"] = "keys"; doc["k1"] = keyAct[0]; doc["k2"] = keyAct[1]; doc["k3"] = keyAct[2]; doc["k4"] = keyAct[3]; doc["t"] = keyAct[4];
-  String out; serializeJson(doc, out); sendLine(out);
+  String out; serializeJson(doc, out); emitEvent(out);
 }
 
 // 灯效设置（/led.json 持久化）：每状态一档 solid/breath/off + 全局亮度 + 夜间自动关
@@ -312,7 +348,7 @@ void sendLed() {  // 全量上行：灯效设置以设备为准
   JsonDocument doc; doc["type"] = "led"; doc["br"] = ledBrightness; doc["night"] = ledNightOff;
   JsonObject m = doc["map"].to<JsonObject>();
   for (int i = 0; i < ledMapCount; i++) m[ledMap[i].id] = ledMap[i].mode;
-  String out; serializeJson(doc, out); sendLine(out);
+  String out; serializeJson(doc, out); emitEvent(out);
 }
 void ledSetMode(const char* id, const char* mode) {  // 写某状态灯效档
   for (int i = 0; i < ledMapCount; i++) if (!strcmp(ledMap[i].id, id)) { strncpy(ledMap[i].mode, mode, sizeof(ledMap[0].mode) - 1); return; }
@@ -369,7 +405,7 @@ void loadShare() {
 }
 void sendShare() {  // 分享设置快照（事实源在设备）
   JsonDocument doc; doc["type"] = "share"; doc["en"] = shareEn; doc["name"] = shareName; doc["zone"] = shareZone;
-  String out; serializeJson(doc, out); sendLine(out);
+  String out; serializeJson(doc, out); emitEvent(out);
 }
 void sendPeers() {  // 成员表快照：at=各自最后一次被听到的 epoch（校时后可用；网页据它标过期）
   JsonDocument doc; doc["type"] = "peers";
@@ -381,7 +417,7 @@ void sendPeers() {  // 成员表快照：at=各自最后一次被听到的 epoch
     if (sharePeers[i].t > 0) p["at"] = (double)sharePeers[i].t;
     else if (epochBase >= 0) p["at"] = (double)(utcEpochMs() - (int64_t)(millis() - sharePeers[i].seen)); // 对方未校时：用我方时钟换算"最后听到"时刻
   }
-  String out; serializeJson(doc, out); sendLine(out);
+  String out; serializeJson(doc, out); emitEvent(out);
 }
 void espnowBroadcast(const char* st) {  // 广播指定状态（仅分享开启时；调用方传"生效中的状态 id"——markStatus 内 curStatusId 尚未更新）
   if (!espnowReady || !shareEn) return;
@@ -544,7 +580,7 @@ void sendSchedules() {
       if (s.ns[j].note[0]) nn["n"] = s.ns[j].note;
     }
   }
-  String out; serializeJson(doc, out); sendLine(out);
+  String out; serializeJson(doc, out); emitEvent(out);
 }
 int schedFind(const char* id) { for (int i = 0; i < schedListCount; i++) if (!strcmp(scheds[i].id, id)) return i; return -1; }
 void handleSchedMsg(JsonDocument& doc) {
@@ -577,7 +613,7 @@ void handleSchedMsg(JsonDocument& doc) {
     int i = schedFind(tmp.id);
     if (i >= 0) scheds[i] = tmp;
     else if (schedListCount < 8) scheds[schedListCount++] = tmp;
-    else { sendLine(F("{\"type\":\"schedErr\",\"msg\":\"full\"}")); return; }
+    else { emitEvent(F("{\"type\":\"schedErr\",\"msg\":\"full\"}")); return; }
     schedLastMin = -1;
     saveSchedules(); sendSchedules();
   } else if (!strcmp(op, "del")) {
@@ -594,7 +630,7 @@ void handleSchedMsg(JsonDocument& doc) {
     if (i >= 0 && scheds[i].kind == 0) {
       bool bad = false;                                        // 含已删状态的表不可启用：需先在网页修正状态
       for (int k = 0; k < scheds[i].n && !bad; k++) bad = !statusKnown(scheds[i].ns[k].status);
-      if (bad) { sendLine(F("{\"type\":\"schedErr\",\"msg\":\"badStatus\"}")); }
+      if (bad) { emitEvent(F("{\"type\":\"schedErr\",\"msg\":\"badStatus\"}")); }
       else { strncpy(schedAct, id, sizeof(schedAct) - 1); schedAct[sizeof(schedAct) - 1] = 0; schedLastMin = -1; saveSchedules(); sendSchedules(); }
     }
   } else if (!strcmp(op, "pause")) {
@@ -659,7 +695,7 @@ void sendStdefs() {
     o["c"] = ((uint32_t)custs[i].r << 16) | ((uint32_t)custs[i].g << 8) | custs[i].b;
     if (custs[i].work) o["work"] = true;
   }
-  String out; serializeJson(doc, out); sendLine(out);
+  String out; serializeJson(doc, out); emitEvent(out);
 }
 void handleStdefMsg(JsonDocument& doc) {
   const char* op = doc["op"] | "";
@@ -676,8 +712,8 @@ void handleStdefMsg(JsonDocument& doc) {
     int i = custIdx(tmp.id);
     if (i >= 0) custs[i] = tmp;
     else if (custCount < 8) custs[custCount++] = tmp;
-    else { sendLine(F("{\"type\":\"stdefErr\",\"msg\":\"full\"}")); return; }
-    if (!strcmp(curStatusId.c_str(), tmp.id)) { scrMain = tmp.zh; scrSub = tmp.hint; oledDirty = true; } // 改的是当前状态：立即刷新屏幕
+    else { emitEvent(F("{\"type\":\"stdefErr\",\"msg\":\"full\"}")); return; }
+    if (!strcmp(curStatusId.c_str(), tmp.id)) { scrMain = tmp.zh; scrSub = tmp.hint; oledDirty = true; sendState(); } // 改的是当前状态：立即刷新屏幕+广播 state 快照
     saveStdefs(); sendStdefs();
   } else if (!strcmp(op, "del")) {
     const char* id = doc["id"] | "";
@@ -773,7 +809,7 @@ void adoptPendSegs() {
 void sendSegments() {
   if (epochBase < 0 || segCount == 0) return;
   saveSegs();                                        // 每次推送顺带落盘：切换即存 + 10min 误差界
-  sendLine(F("{\"type\":\"segments\",\"phase\":\"begin\"}"));
+  emitEvent(F("{\"type\":\"segments\",\"phase\":\"begin\"}"));
   for (int i = 0; i < pendCount; i++) {              // 断电恢复的段：epoch 域原样直发
     char buf[128];
     if (pendSegs[i].e > 0)
@@ -782,7 +818,7 @@ void sendSegments() {
     else
       snprintf(buf, sizeof buf, "{\"type\":\"seg\",\"status\":\"%s\",\"start\":%lld}",
         pendSegs[i].status, pendSegs[i].s);
-    sendLine(buf);
+    emitEvent(buf);
   }
   for (int i = 0; i < segCount; i++) {
     char buf[128];
@@ -792,27 +828,214 @@ void sendSegments() {
         segs[i].status, start, epochBase + (int64_t)segs[i].endMs - epochBaseMs);
     else
       snprintf(buf, sizeof buf, "{\"type\":\"seg\",\"status\":\"%s\",\"start\":%lld}", segs[i].status, start);
-    sendLine(buf);
+    emitEvent(buf);
   }
-  sendLine(F("{\"type\":\"segments\",\"phase\":\"end\"}"));
+  emitEvent(F("{\"type\":\"segments\",\"phase\":\"end\"}"));
   segDirty = false;
   lastSegPush = millis();
 }
 
-// ===================== 发送事件给网页 =====================
+// ===================== HTTP 隧道：帧输出 / 事件流（doc/http-api/tunnel.md） =====================
+// 设备与网页之间只有 HTTP/1.1 报文：请求 → 响应（X-Request-Id 关联），设备推送 = 订阅请求上的事件帧。
+// 所有处理都在 loop 线程：BLE 回调只入队字节，避免读接口的快照收集与其他任务的事件发送交错。
 
-void sendLine(const String& json) {
-  Serial.println(json);                      // 串口通道（与日志同口，网页只解析 JSON 行）
-  if (txChar) {
-    String out = json + "\n";
-    // 单条 notify 上限 = MTU-3；agentReq/appData 等长消息按 200B 分片，网页按 \n 重组
-    for (size_t i = 0; i < out.length(); i += 200) {
-      txChar->setValue((const uint8_t*)out.c_str() + i, min((size_t)200, out.length() - i));
-      txChar->notify();
-      delay(2);                              // 给 BLE 栈喘息，防连续 notify 丢包
+const char* httpReason(int code) {
+  switch (code) {
+    case 200: return "OK";
+    case 400: return "Bad Request";
+    case 404: return "Not Found";
+    case 405: return "Method Not Allowed";
+    case 409: return "Conflict";
+    case 413: return "Payload Too Large";
+    case 415: return "Unsupported Media Type";
+    case 422: return "Unprocessable Entity";
+    default:  return "Internal Server Error";
+  }
+}
+
+void httpWrite(uint8_t ch, const uint8_t* data, size_t n) {
+  if (ch == CH_SERIAL) { Serial.write(data, n); return; }   // 一次写出整帧：日志不会插进帧内部（tunnel.md §7.2）
+  if (!txChar || !bleConnected) return;
+  for (size_t i = 0; i < n; i += 200) {                      // notify ≤200B，接收方按字节流重组
+    txChar->setValue(data + i, min((size_t)200, n - i));
+    txChar->notify();
+    if (i + 200 < n) delay(2);                               // 连续 notify 之间给 BLE 栈喘息，防丢包
+  }
+}
+
+// 一个完整响应帧：起始行 + X-Request-Id + Content-Type + Content-Length + 报文体，合成一块后单次写出
+void httpRespond(uint8_t ch, const char* reqId, int status, const char* ctype, const uint8_t* body, size_t len) {
+  char hdr[192];
+  const int hl = snprintf(hdr, sizeof hdr, "HTTP/1.1 %d %s\r\nX-Request-Id: %s\r\nContent-Type: %s\r\nContent-Length: %u\r\n\r\n",
+                          status, httpReason(status), reqId[0] ? reqId : "-", ctype, (unsigned)len);
+  uint8_t* frame = (uint8_t*)malloc(hl + len);
+  if (!frame) { httpWrite(ch, (const uint8_t*)hdr, hl); if (len) httpWrite(ch, body, len); return; }
+  memcpy(frame, hdr, hl);
+  if (len) memcpy(frame + hl, body, len);
+  httpWrite(ch, frame, hl + len);
+  free(frame);
+}
+
+void replyJson(HttpReq& r, int status, const String& json) {
+  httpRespond(r.ch, r.reqId, status, "application/json", (const uint8_t*)json.c_str(), json.length());
+}
+void replyOk(HttpReq& r) { replyJson(r, 200, F("{\"result\":\"OK\"}")); }
+void replyCreated(HttpReq& r, const char* id) { replyJson(r, 200, String("{\"result\":\"OK\",\"id\":\"") + id + "\"}"); }
+void replyErr(HttpReq& r, int status, const char* code, const char* msg) {
+  JsonDocument d; d["error"] = msg; d["error_code"] = code;
+  String out; serializeJson(d, out); replyJson(r, status, out);
+}
+
+// 设备事件：所有快照/通知函数产出 {"type":"<名>",...} JSON，这里按订阅分发为事件帧
+void emitEvent(const String& json) {
+  if (evCapture) { *evCapture += json; *evCapture += '\n'; return; }
+  const char* s = json.c_str();
+  char name[16] = "";
+  if (!strncmp(s, "{\"type\":\"", 9)) {
+    const char* e = strchr(s + 9, '"');
+    const size_t n = e ? (size_t)(e - (s + 9)) : 0;
+    if (n && n < sizeof name) { memcpy(name, s + 9, n); name[n] = 0; }
+  }
+  if (!name[0]) return;
+  if (inRequest && (!strcmp(name, "schedErr") || !strcmp(name, "stdefErr"))) {   // 请求内的业务错误走 HTTP 状态码（events.md §1）
+    JsonDocument d; deserializeJson(d, json);
+    const char* m = d["msg"] | "";
+    reqErrStatus = !strcmp(m, "full") ? 409 : 422;
+    strncpy(reqErrCode, !strcmp(m, "badStatus") ? "bad_status" : m, sizeof reqErrCode - 1);
+    reqErrCode[sizeof reqErrCode - 1] = 0;
+    return;
+  }
+  bool any = false;
+  for (uint8_t ch = 0; ch < CH_COUNT; ch++) any = any || evSub[ch].on;
+  if (!any) return;
+  String body;
+  body.reserve(json.length() + 26);
+  body = "event: "; body += name; body += "\ndata: "; body += json; body += "\n\n";
+  for (uint8_t ch = 0; ch < CH_COUNT; ch++)
+    if (evSub[ch].on) httpRespond(ch, evSub[ch].id, 200, "text/event-stream", (const uint8_t*)body.c_str(), body.length());
+}
+
+// 读接口复用快照函数：把它本该广播的 JSON 收集起来作为响应体
+String captureEvents(void (*fn)()) {
+  String out;
+  evCapture = &out; fn(); evCapture = nullptr;
+  if (out.endsWith("\n")) out.remove(out.length() - 1);
+  return out;
+}
+
+// ---------- 请求解析（每通道一个状态机，容忍报文之间的杂散字节） ----------
+
+void httpRxReset(uint8_t ch) {
+  HttpRx& x = httpRx[ch];
+  if (x.req.body) free(x.req.body);
+  memset(&x, 0, sizeof x);
+  x.req.ch = ch;
+}
+
+void httpFail(uint8_t ch, uint16_t status, const char* code, const char* msg) {
+  HttpRx& x = httpRx[ch];
+  if (!x.errStatus) { x.errStatus = status; x.errCode = code; x.errMsg = msg; }
+}
+
+bool httpTokenOk(const char* s) {                   // X-Request-Id：1–24 个 [A-Za-z0-9._-]
+  const size_t n = strlen(s);
+  if (!n || n > 24) return false;
+  for (const char* p = s; *p; p++) if (!isalnum((unsigned char)*p) && *p != '.' && *p != '_' && *p != '-') return false;
+  return true;
+}
+
+void httpStartLine(uint8_t ch, char* l) {
+  HttpRx& x = httpRx[ch];
+  char* sp1 = strchr(l, ' ');
+  char* sp2 = sp1 ? strchr(sp1 + 1, ' ') : nullptr;
+  if (!sp1 || !sp2 || strcmp(sp2 + 1, "HTTP/1.1")) return;   // 不是请求起始行：当杂散字节丢弃，继续找下一行（重同步）
+  *sp1 = 0; *sp2 = 0;
+  const char* target = sp1 + 1;
+  if (strlen(l) >= sizeof x.req.method || target[0] != '/') return;
+  strcpy(x.req.method, l);
+  strcpy(x.req.reqId, "-");
+  const char* q = strchr(target, '?');
+  const size_t pl = q ? (size_t)(q - target) : strlen(target);
+  if (pl >= sizeof x.req.path || (q && strlen(q + 1) >= sizeof x.req.query)) httpFail(ch, 400, "bad_request", "request target too long");
+  else {
+    memcpy(x.req.path, target, pl); x.req.path[pl] = 0;
+    if (q) strcpy(x.req.query, q + 1);
+  }
+  x.phase = 1;
+}
+
+void httpHeaderLine(uint8_t ch, char* l) {
+  HttpRx& x = httpRx[ch];
+  if (++x.hdrCount > HTTP_HDR_MAX) { httpFail(ch, 413, "payload_too_large", "too many header fields"); return; }
+  char* c = strchr(l, ':');
+  if (!c) { httpFail(ch, 400, "bad_request", "malformed header line"); return; }
+  *c = 0;
+  char* v = c + 1;
+  while (*v == ' ' || *v == '\t') v++;
+  for (char* e = v + strlen(v); e > v && (e[-1] == ' ' || e[-1] == '\t'); ) *--e = 0;
+  if (!strcasecmp(l, "Content-Length")) {
+    char* end; const unsigned long n = strtoul(v, &end, 10);
+    if (!*v || *end) httpFail(ch, 400, "bad_request", "invalid Content-Length");
+    else x.req.len = n;
+  } else if (!strcasecmp(l, "X-Request-Id")) {
+    if (httpTokenOk(v)) strcpy(x.req.reqId, v);
+    else httpFail(ch, 400, "bad_request", "invalid X-Request-Id");
+  } else if (!strcasecmp(l, "Content-Type")) {
+    strncpy(x.req.ctype, v, sizeof x.req.ctype - 1);
+    for (char* p = x.req.ctype; *p; p++) *p = tolower((unsigned char)*p);
+  } else if (!strcasecmp(l, "X-Api-Sem-Ver")) {
+    strncpy(x.req.semver, v, sizeof x.req.semver - 1);
+  } else if (!strcasecmp(l, "Transfer-Encoding")) {
+    x.req.chunked = true;
+  }
+}
+
+void httpDispatch(uint8_t ch);
+
+void httpHeadersDone(uint8_t ch) {
+  HttpRx& x = httpRx[ch];
+  if (x.req.chunked) { httpFail(ch, 400, "bad_request", "Transfer-Encoding is not supported"); x.req.len = 0; }
+  const bool isApp = !strcmp(x.req.method, "PUT") && !strncmp(x.req.path, "/api/apps/", 10);
+  const uint32_t limit = isApp ? HTTP_APP_BODY_MAX : HTTP_BODY_MAX;
+  if (x.req.len > limit) { httpFail(ch, 413, "payload_too_large", "request body exceeds device limit"); x.phase = 3; x.got = 0; return; }
+  if (x.req.len && !x.errStatus) {
+    x.req.body = (uint8_t*)(psramFound() ? ps_malloc(x.req.len + 1) : malloc(x.req.len + 1));
+    if (!x.req.body) { httpFail(ch, 500, "internal", "out of memory"); x.phase = 3; x.got = 0; return; }
+    x.req.body[x.req.len] = 0;
+  } else if (x.req.len) { x.phase = 3; x.got = 0; return; }
+  if (!x.req.len) { httpDispatch(ch); return; }
+  x.phase = 2; x.got = 0;
+}
+
+void httpFeed(uint8_t ch, const uint8_t* data, size_t n) {
+  HttpRx& x = httpRx[ch];
+  for (size_t i = 0; i < n; i++) {
+    if (x.phase == 2 || x.phase == 3) {
+      const size_t take = min((size_t)(x.req.len - x.got), n - i);
+      if (x.phase == 2) memcpy(x.req.body + x.got, data + i, take);
+      x.got += take; i += take - 1;
+      if (x.got >= x.req.len) httpDispatch(ch);
+      continue;
+    }
+    const char c = (char)data[i];
+    if (c == '\r') continue;                                 // 接受 CRLF 与裸 LF（tunnel.md §2.2）
+    if (c != '\n') {
+      if (x.lineLen < HTTP_LINE_MAX) x.line[x.lineLen++] = c; else x.lineOver = true;
+      continue;
+    }
+    x.line[x.lineLen] = 0;
+    const bool over = x.lineOver;
+    x.lineLen = 0; x.lineOver = false;
+    if (x.phase == 0) {
+      if (!over && x.line[0]) httpStartLine(ch, x.line);
+    } else if (!x.line[0]) {
+      httpHeadersDone(ch);
+    } else if (over) {
+      httpFail(ch, 413, "payload_too_large", "header line too long");
+    } else {
+      httpHeaderLine(ch, x.line);
     }
   }
-  Serial.printf("[TX] %.60s%s\n", json.c_str(), json.length() > 60 ? "..." : "");   // aud 帧截断，防日志刷屏
 }
 
 void removeIfExists(const String& path) { if (LittleFS.exists(path)) LittleFS.remove(path); }
@@ -833,7 +1056,7 @@ void sendApps() {
     f.close();
   }
   out += "]}";
-  sendLine(out);
+  emitEvent(out);
 }
 
 // app 运行失败（trap / 加载失败）上报给网页提示用户修代码
@@ -842,7 +1065,7 @@ void sendAppErr(const char* st, const char* msg) {
   strncpy(m, msg, 100); m[100] = 0;
   for (char* p = m; *p; p++) if (*p == '"' || *p == '\\') *p = '\'';   // 防御：引号/反斜杠会破坏 JSON
   snprintf(buf, sizeof buf, "{\"type\":\"appErr\",\"status\":\"%s\",\"msg\":\"%s\"}", st, m);
-  sendLine(buf);
+  emitEvent(buf);
 }
 
 // 上报休息提醒计时：网页据此镜像进度环
@@ -852,7 +1075,7 @@ void sendBreakState(bool due) {
     "{\"type\":\"breakState\",\"minutes\":%u,\"accumMs\":%lu,\"enabled\":%s,\"offToday\":%s,\"due\":%s}",
     (unsigned)breakMinutes, (unsigned long)breakAccumMs,
     breakEnabled ? "true" : "false", breakOffToday ? "true" : "false", due ? "true" : "false");
-  sendLine(buf);
+  emitEvent(buf);
 }
 
 // ===================== 显示 =====================
@@ -949,11 +1172,9 @@ void updateLed() {
 
 // ===================== 消息处理 =====================
 
-void handleLine(const String& line) {
-  // 回显截断：完整打印 1.4KB 的 anim 帧会阻塞 Serial 数百毫秒，导致串口 RX 溢出丢字节
-  Serial.printf("[BLE←] %.100s%s\n", line.c_str(), line.length() > 100 ? "..." : "");
-  JsonDocument doc;
-  if (deserializeJson(doc, line)) return;
+// 设备内部命令：HTTP 路由处理函数完成参数校验后，把请求体整理成 {type, op?, ...} 交给这里执行既有逻辑。
+// 不再直接暴露在传输通道上（线上只有 HTTP 报文）。
+void applyCommand(JsonDocument& doc) {
   const char* type = doc["type"] | "";
   if (!strcmp(type, "state")) {
     const char* st = doc["status"] | "work";
@@ -973,7 +1194,7 @@ void handleLine(const String& line) {
     if (nId != curStatusId || nm != scrMain || ns != scrSub || lm != ledMode || br != ledBrightness) {
       if (nId != curStatusId) { markStatus(st); registerManualOverride(st); }
       curStatusId = nId; scrMain = nm; scrSub = ns; ledMode = lm; ledBrightness = br;
-      oledDirty = true;
+      oledDirty = true; sendState();           // state 快照广播：写入方与旁路订阅者同步看到新状态
     }
   } else if (!strcmp(type, "time")) {
     epochBase = (int64_t)doc["epoch"];
@@ -1016,7 +1237,11 @@ void handleLine(const String& line) {
     bool anyOff = false;
     for (int i = 0; i < 4; i++) anyOff = anyOff || !strcmp(next[i], "offwork");
     if (anyOff) { memcpy(keyAct, next, sizeof keyAct); saveKeys(); }
-    else Serial.println("[KEYS] rejected: no offwork among K1-K4");
+    else {
+      Serial.println("[KEYS] rejected: no offwork among K1-K4");
+      reqErrStatus = 422; strcpy(reqErrCode, "no_offwork");
+      return;
+    }
     sendKeys();
     Serial.printf("[KEYS] %s %s %s %s t=%s\n", keyAct[0], keyAct[1], keyAct[2], keyAct[3], keyAct[4]);
   } else if (!strcmp(type, "led")) {
@@ -1030,7 +1255,7 @@ void handleLine(const String& line) {
     if (!doc["br"].isNull())    ledBrightness = doc["br"];
     if (!doc["night"].isNull()) ledNightOff = doc["night"];
     ledMode = ledModeOf(curStatusId.c_str());
-    saveLed(); sendLed();
+    saveLed(); sendLed(); sendState();           // led/brightness 也在 state 快照里
   } else if (!strcmp(type, "timerCfg")) {
     // 旋钮快速定时配置（事实源在设备 /knob.json）：step=每格分钟，max=最长时间
     if (!doc["step"].isNull()) knobStepMin = constrain((int)(doc["step"] | 5), 1, 30);
@@ -1051,59 +1276,19 @@ void handleLine(const String& line) {
     if (!strcmp(op, "start")) timerStart((uint16_t)(doc["minutes"] | knobStepMin));
     else if (!strcmp(op, "cancel")) timerStop();
   } else if (!strcmp(type, "app")) {
-    // 按状态自定义屏幕（WASM）：begin{status,size} 开文件 → chunk{base64}×N → run 收尾
-    // （收齐且目标是当前状态则立即重载执行）/ stop 停掉当前 app / clear{status} 删除恢复默认
+    // 按状态自定义屏幕（WASM）：安装/读回是二进制报文体，由 /api/apps/{status} 路由直接处理；这里只剩 stop / clear
     const char* op = doc["op"] | "";
-    if (!strcmp(op, "begin")) {
-      const char* st = doc["status"] | "";
-      strncpy(appUpStatus, st, sizeof(appUpStatus) - 1); appUpStatus[sizeof(appUpStatus) - 1] = 0;
-      appUpSize = doc["size"] | 0; appUpGot = 0;
-      if (appFile) appFile.close();
-      removeIfExists("/app_" + String(appUpStatus) + ".wasm.bad");   // 重新上传 = 用户已修复，解除崩溃禁用
-      appFile = (appUpSize > 0 && appUpSize <= APP_MAX_SIZE)
-                ? LittleFS.open("/app_" + String(appUpStatus) + ".wasm", "w") : File();
-      Serial.printf("[APP] begin %s size=%u\n", appUpStatus, appUpSize);
-    } else if (!strcmp(op, "chunk")) {
-      const char* d = doc["data"] | "";
-      size_t olen = 0;
-      if (appFile && mbedtls_base64_decode(rxChunk, sizeof rxChunk, &olen, (const uint8_t*)d, strlen(d)) == 0 && olen) {
-        appFile.write(rxChunk, olen); appUpGot += olen;
-      }
-    } else if (!strcmp(op, "run")) {
-      if (appFile) appFile.close();
-      if (appUpSize && appUpGot == appUpSize) {
-        if (!strcmp(appUpStatus, curStatusId.c_str())) appFor[0] = 0; // 上传的是当前状态 → 强制重载立即执行
-        Serial.printf("[APP] saved %s (%u)\n", appUpStatus, appUpGot);
-      } else {
-        Serial.printf("[APP] incomplete %u/%u\n", appUpGot, appUpSize);
-        removeIfExists("/app_" + String(appUpStatus) + ".wasm");      // 半截文件不留：避免加载失败或误报"已安装"
-      }
-      sendApps();
-    } else if (!strcmp(op, "stop")) {
+    if (!strcmp(op, "stop")) {
       if (appPlaying) appUnload();
       oledDirty = true;
       Serial.println("[APP] stop");
     } else if (!strcmp(op, "clear")) {
       const char* st = doc["status"] | "";
-      if (appFile && !strcmp(st, appUpStatus)) { appFile.close(); appUpGot = 0; appUpSize = 0; } // 上传中清除：先关句柄否则 remove 失败
       removeIfExists("/app_" + String(st) + ".wasm");
       removeIfExists("/app_" + String(st) + ".wasm.bad");
       if (!strcmp(st, appFor)) { appUnload(); appFor[0] = 0; oledDirty = true; }
       Serial.printf("[APP] clear %s\n", st);
       sendApps();
-    } else if (!strcmp(op, "list")) {
-      sendApps();
-    } else if (!strcmp(op, "dump")) {
-      const char* st = doc["status"] | "";
-      if (appDumpFile) appDumpFile.close();
-      appDumpFile = LittleFS.open("/app_" + String(st) + ".wasm", "r");
-      strncpy(appDumpStatus, st, sizeof(appDumpStatus) - 1); appDumpStatus[sizeof(appDumpStatus) - 1] = 0;
-      appDumpSeq = 0;
-      if (!appDumpFile) {
-        snprintf(dumpLine, sizeof dumpLine, "{\"type\":\"appData\",\"status\":\"%s\",\"last\":true,\"missing\":true}", st);
-        sendLine(dumpLine);
-      }
-      Serial.printf("[APP] dump %s\n", st);
     }
   } else if (!strcmp(type, "stt")) {
     // 语音转文字：网页起停；设备 I2S 采音 → IMA-ADPCM → aud 帧上行
@@ -1120,8 +1305,6 @@ void handleLine(const String& line) {
     if (!strcmp(doc["op"] | "", "cancel")) agentAbort("cancelled");
   } else if (!strcmp(type, "todo")) {
     handleTodoMsg(doc);
-  } else if (!strcmp(type, "sync")) {
-    wantHello = true;                        // 网页握手 → 回 hello
   }
 }
 
@@ -1130,19 +1313,9 @@ void handleLine(const String& line) {
 class RxCb : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo&) override {
     const auto& v = c->getValue();      // data()/size() 在 1.x/2.x 都可用
-    rxBuf.concat((const char*)v.data(), v.size());
-    int i;
-    while ((i = rxBuf.indexOf('\n')) >= 0) {
-      String line = rxBuf.substring(0, i);
-      rxBuf.remove(0, i + 1);
-      if (line.length()) handleLine(line);
-    }
-  }
-};
-
-class TxCb : public NimBLECharacteristicCallbacks {
-  void onSubscribe(NimBLECharacteristic*, NimBLEConnInfo&, uint16_t subValue) override {
-    if (subValue) wantHello = true;
+    xSemaphoreTake(bleRxLock, portMAX_DELAY);
+    bleRxQ.concat((const char*)v.data(), v.size());   // 只入队：HTTP 解析与处理统一在 loop 线程
+    xSemaphoreGive(bleRxLock);
   }
 };
 
@@ -1153,8 +1326,8 @@ class SrvCb : public NimBLEServerCallbacks {
   }
   void onDisconnect(NimBLEServer*, NimBLEConnInfo&, int) override {
     bleConnected = false; oledDirty = true;
-    if (micOn) micStop();                        // 录音发起方掉线 → 停录收尾
-    agentAbort("disconnected");                  // LLM 只能经网页调，断连即中止 agent
+    evSub[CH_BLE].on = false;                    // 通道断开即结束订阅（tunnel.md §6.6）
+    bleDropped = true;                           // 停录音 / 中止 agent 由 loop 收尾
     Serial.println("[BLE] disconnected, re-advertising");
     NimBLEDevice::startAdvertising();
   }
@@ -1169,7 +1342,6 @@ void setupBle() {
   NimBLECharacteristic* rx = svc->createCharacteristic(RX_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
   txChar = svc->createCharacteristic(TX_UUID, NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ);
   rx->setCallbacks(new RxCb());
-  txChar->setCallbacks(new TxCb());
   svc->start();
   NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
   adv->setName(DEVICE_NAME);
@@ -1217,7 +1389,7 @@ void pollKeys() {
       k.longSent = true;
       breakNoticeUntil = 0; remindUntil = 0; timerNoticeUntil = 0;   // 任意按键提前关闭提醒画面
       char buf[32]; snprintf(buf, sizeof buf, "{\"type\":\"key\",\"k\":%d}", i + 1);
-      sendLine(buf);
+      emitEvent(buf);
       if (!bleConnected) applyKeyAction(keyAct[i]);                  // 离线：按设备本地映射执行
     }
   }
@@ -1228,7 +1400,7 @@ void pollKeys() {
   if (t && !ttpSent && now - ttpT0 > (!strcmp(keyAct[4], "offwork") ? OFFWORK_HOLD_MS : DEBOUNCE_MS)) {
     ttpSent = true;
     breakNoticeUntil = 0; remindUntil = 0; timerNoticeUntil = 0;
-    sendLine(F("{\"type\":\"touch\"}"));
+    emitEvent(F("{\"type\":\"touch\"}"));
     if (!bleConnected) applyKeyAction(keyAct[4]);
   }
 }
@@ -1478,7 +1650,7 @@ void setLocalStatus(const char* id) {
   if (curStatusId != nid) markStatus(nid.c_str());
   curStatusId = nid; scrMain = st.zh; scrSub = st.hint;
   ledMode = ledModeOf(nid.c_str());              // 灯效跟随设备配置（事实源 /led.json）
-  oledDirty = true;
+  oledDirty = true; sendState();                 // 本地/计划表切换同样广播 state 快照
 }
 void cycleLocal(int dir) {
   // 循环顺序：内建（off 除外——由收工键单独触发）+ 自定义状态
@@ -1560,7 +1732,7 @@ void pollBreak() {
   // 校时：未校时每 10s 请求 time（连上即恢复时钟）；已校时每 10 分钟重新校时一次消除漂移
   if (now - lastWantTime > (epochBase < 0 ? 10000UL : 600000UL)) {
     lastWantTime = now;
-    sendLine(F("{\"type\":\"wantTime\"}"));
+    emitEvent(F("{\"type\":\"wantTime\"}"));
   }
   // 区间同步：变化 2s 内推送一次（合并连续切换）；无变化则每 10 分钟兜底同步
   if (epochBase >= 0 && ((segDirty && now - lastSegPush > 2000) || now - lastSegPush > 600000)) {
@@ -1577,8 +1749,8 @@ void pollTouch() {
   static uint32_t t = 0;
   if (millis() - t < 60) return;
   t = millis();
-  if (l < baseL * 0.8f) { sendLine(F("{\"type\":\"touch\",\"zone\":\"left\"}"));  delay(300); }
-  if (r < baseR * 0.8f) { sendLine(F("{\"type\":\"touch\",\"zone\":\"right\"}")); delay(300); }
+  if (l < baseL * 0.8f) { emitEvent(F("{\"type\":\"touch\",\"zone\":\"left\"}"));  delay(300); }
+  if (r < baseR * 0.8f) { emitEvent(F("{\"type\":\"touch\",\"zone\":\"right\"}")); delay(300); }
 }
 #else
 void pollTouch() {}
@@ -1689,7 +1861,7 @@ void sendSttState(const char* state, const char* msg = nullptr) {
   snprintf(buf, sizeof buf, "{\"type\":\"sttState\",\"state\":\"%s\",\"rate\":%u,\"codec\":\"adpcm\",\"ms\":%lu%s%s%s}",
     state, (unsigned)MIC_RATE, (unsigned long)micLastMs,
     msg ? ",\"msg\":\"" : "", msg ? msg : "", msg ? "\"" : "");
-  sendLine(buf);
+  emitEvent(buf);
 }
 
 void adpcmFrameBegin() {                                      // 帧头写当前预测器 → 每帧可独立解码
@@ -1707,7 +1879,7 @@ void adpcmFlush() {
   b64[olen] = 0;
   char line[224];
   snprintf(line, sizeof line, "{\"type\":\"aud\",\"seq\":%u,\"data\":\"%s\"}", (unsigned)audSeq, b64);
-  sendLine(line);
+  emitEvent(line);
   audSeq++;
   adpcmFrameBegin();
 }
@@ -1842,7 +2014,7 @@ void sendTodos() {
     if (todos[i].src[0]) t["src"] = todos[i].src;
     t["done"] = todos[i].done;
   }
-  String out; serializeJson(d, out); sendLine(out);
+  String out; serializeJson(d, out); emitEvent(out);
 }
 int todoFind(const char* id) { for (int i = 0; i < todoCount; i++) if (!strcmp(todos[i].id, id)) return i; return -1; }
 
@@ -1871,7 +2043,7 @@ void fireTodos(int n, const char* firstShown, const char* idsJson) {
   oledDirty = true;
   char buf[220];
   snprintf(buf, sizeof buf, "{\"type\":\"todoFired\",\"ids\":[%s],\"count\":%d}", idsJson ? idsJson : "", n);
-  sendLine(buf);
+  emitEvent(buf);
   saveTodos(); sendTodos();
 }
 
@@ -1965,7 +2137,7 @@ void agentSendReq() {
   req["msgs"] = agentMsgs;
   req["tools"] = tools;
   String out; serializeJson(req, out);
-  sendLine(out);
+  emitEvent(out);
   agentWaiting = true;
   agentDeadline = millis() + AG_TIMEOUT_MS;
   oledDirty = true;
@@ -1982,14 +2154,14 @@ void agentDone(const char* reply) {
   String out = F("{\"type\":\"agentDone\",\"text\":\"");
   for (const char* p = agentReply; *p; p++) out += (*p == '"' || *p == '\\') ? '\'' : *p;   // 防引号破坏 JSON
   out += "\"}";
-  sendLine(out);
+  emitEvent(out);
   Serial.printf("[AGENT] done: %s\n", agentReply);
 }
 void agentAbort(const char* why) {
   if (!agentWaiting && !agentMsgs.size()) return;
   agentWaiting = false; agentMsgs.clear(); oledDirty = true;
   char buf[128]; snprintf(buf, sizeof buf, "{\"type\":\"agentErr\",\"msg\":\"%s\"}", why);
-  sendLine(buf);
+  emitEvent(buf);
   Serial.printf("[AGENT] abort: %s\n", why);
 }
 
@@ -2085,10 +2257,337 @@ void agentStart(const char* text) {
   agentSendReq();
 }
 
+// ===================== HTTP 路由（doc/http-api/openapi/*.yaml，一行一个 operation） =====================
+// 处理函数只做参数校验，然后调用既有逻辑（applyCommand / 快照函数）；资源变化由快照事件广播。
+
+const char* errMsgFor(const char* code) {
+  if (!strcmp(code, "full")) return "device storage for this resource is full";
+  if (!strcmp(code, "bad_status")) return "schedule references a deleted status";
+  if (!strcmp(code, "no_offwork")) return "K1-K4 must keep one offwork key";
+  return code;
+}
+
+bool reqJson(HttpReq& r, JsonDocument& doc) {
+  if (r.ctype[0] && strncmp(r.ctype, "application/json", 16)) { replyErr(r, 415, "unsupported_media_type", "expected application/json"); return false; }
+  if (!r.len || deserializeJson(doc, (const char*)r.body, r.len) || !doc.is<JsonObject>()) {
+    replyErr(r, 400, "bad_json", "request body must be a JSON object");
+    return false;
+  }
+  return true;
+}
+
+// 写接口统一出口：执行内部命令，请求内业务错误（容量满 / 规则违反）转成 HTTP 错误
+void runCommand(HttpReq& r, JsonDocument& doc, const char* createdId) {
+  inRequest = true; reqErrStatus = 0; reqErrCode[0] = 0;
+  applyCommand(doc);
+  inRequest = false;
+  if (reqErrStatus) replyErr(r, reqErrStatus, reqErrCode, errMsgFor(reqErrCode));
+  else if (createdId) replyCreated(r, createdId);
+  else replyOk(r);
+}
+
+bool isNumber(JsonVariantConst v) { return v.is<long long>() || v.is<double>(); }
+bool badField(HttpReq& r, const char* msg) { replyErr(r, 400, "invalid_parameter", msg); return true; }
+
+bool statusIdOk(const char* s) {                      // 状态 id：1–7 个小写字母数字（与 /app_<id>.wasm 文件名一致）
+  const size_t n = strlen(s);
+  if (!n || n > 7) return false;
+  for (const char* p = s; *p; p++) if (!islower((unsigned char)*p) && !isdigit((unsigned char)*p)) return false;
+  return true;
+}
+
+bool schedBodyBad(HttpReq& r, JsonDocument& d) {
+  const char* k = d["kind"] | "";
+  if (strcmp(k, "repeat") && strcmp(k, "date")) return badField(r, "kind must be repeat or date");
+  if (!d["ns"].is<JsonArray>()) return badField(r, "ns must be an array");
+  if (!d["name"].is<const char*>()) return badField(r, "name is required");
+  if (!strcmp(k, "date") && !d["date"].is<const char*>()) return badField(r, "date is required for kind=date");
+  return false;
+}
+
+String snapState() {
+  JsonDocument d;
+  d["type"] = "state"; d["status"] = curStatusId; d["screen"] = scrMain; d["sub"] = scrSub;
+  d["layout"] = scrLayout == 1 ? "clock" : scrLayout == 2 ? "status" : "full";
+  d["led"] = ledMode; d["brightness"] = ledBrightness;
+  String o; serializeJson(d, o); return o;
+}
+void sendState() { emitEvent(snapState()); }   // 状态资源变更 → 快照事件广播（events.md §1）
+
+String snapTime() {
+  JsonDocument d;
+  d["type"] = "time"; d["synced"] = epochBase >= 0;
+  d["epoch"] = (double)(epochBase >= 0 ? utcEpochMs() : -1);
+  d["tzOffsetMin"] = tzOffsetMin;
+  String o; serializeJson(d, o); return o;
+}
+
+// 今日区间：复用逐段推送的快照函数，收集 seg 行拼成数组；不影响推送节奏
+String snapSegments() {
+  const bool dirty = segDirty; const uint32_t last = lastSegPush;
+  const String raw = captureEvents([] { sendSegments(); });
+  segDirty = dirty; lastSegPush = last;
+  String out = F("{\"type\":\"segments\",\"list\":[");
+  bool first = true;
+  for (int s = 0; s < (int)raw.length(); ) {
+    int e = raw.indexOf('\n', s);
+    if (e < 0) e = raw.length();
+    if (raw.startsWith("{\"type\":\"seg\",", s)) { if (!first) out += ','; first = false; out += raw.substring(s, e); }
+    s = e + 1;
+  }
+  return out + "]}";
+}
+
+void appGet(HttpReq& r) {
+  const char* st = r.params[0];
+  if (!statusIdOk(st)) { badField(r, "invalid status id"); return; }
+  File f = LittleFS.open("/app_" + String(st) + ".wasm", "r");
+  if (!f) { replyErr(r, 404, "not_found", "no screen program for this status"); return; }
+  const size_t n = f.size();
+  uint8_t* buf = (uint8_t*)(psramFound() ? ps_malloc(n ? n : 1) : malloc(n ? n : 1));
+  if (!buf) { f.close(); replyErr(r, 500, "internal", "out of memory"); return; }
+  const size_t got = f.read(buf, n);
+  f.close();
+  httpRespond(r.ch, r.reqId, 200, "application/octet-stream", buf, got);
+  free(buf);
+}
+
+void appPut(HttpReq& r) {
+  const char* st = r.params[0];
+  if (!statusIdOk(st)) { badField(r, "invalid status id"); return; }
+  if (strncmp(r.ctype, "application/octet-stream", 24)) { replyErr(r, 415, "unsupported_media_type", "expected application/octet-stream"); return; }
+  if (r.len < 8 || memcmp(r.body, "\0asm", 4)) { replyErr(r, 422, "invalid_wasm", "body is not a wasm module"); return; }
+  const String path = "/app_" + String(st) + ".wasm";
+  removeIfExists(path + ".bad");                       // 重新安装 = 用户已修复，解除崩溃禁用
+  File f = LittleFS.open(path, "w");
+  const size_t wrote = f ? f.write(r.body, r.len) : 0;
+  if (f) f.close();
+  if (wrote != r.len) { removeIfExists(path); replyErr(r, 500, "storage", "failed to write flash"); return; }
+  if (!strcmp(st, curStatusId.c_str())) appFor[0] = 0; // 当前状态 → 强制重载立即执行
+  Serial.printf("[APP] saved %s (%u)\n", st, (unsigned)r.len);
+  sendApps();
+  replyJson(r, 200, String("{\"result\":\"OK\",\"size\":") + (unsigned)r.len + "}");
+}
+
+const HttpRoute HTTP_ROUTES[] = {
+  // ---- System / Events ----
+  { "GET", "/api/version", [](HttpReq& r) {
+      replyJson(r, 200, F("{\"api_semver\":\"" API_SEMVER "\",\"firmware\":\"" FIRMWARE_VER "\",\"name\":\"" DEVICE_DISPLAY "\"}")); } },
+  { "GET", "/api/events", [](HttpReq& r) {
+      evSub[r.ch].on = true;
+      strcpy(evSub[r.ch].id, r.reqId);
+      httpRespond(r.ch, r.reqId, 200, "text/event-stream", nullptr, 0);   // 开流帧
+      wantHello = true; } },                                               // 随后推送订阅快照
+  { "DELETE", "/api/events", [](HttpReq& r) { evSub[r.ch].on = false; replyOk(r); } },
+
+  // ---- State ----
+  { "GET", "/api/state", [](HttpReq& r) { replyJson(r, 200, snapState()); } },
+  { "PUT", "/api/state", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d)) return;
+      if (!d["status"].is<const char*>()) { badField(r, "status is required"); return; }
+      d["type"] = "state"; runCommand(r, d, nullptr); } },
+  { "GET", "/api/time", [](HttpReq& r) { replyJson(r, 200, snapTime()); } },
+  { "PUT", "/api/time", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d)) return;
+      if (!isNumber(d["epoch"])) { badField(r, "epoch is required"); return; }
+      d["type"] = "time"; runCommand(r, d, nullptr); } },
+  { "GET", "/api/segments", [](HttpReq& r) { replyJson(r, 200, snapSegments()); } },
+
+  // ---- Break ----
+  { "GET", "/api/break", [](HttpReq& r) { replyJson(r, 200, captureEvents([] { sendBreakState(false); })); } },
+  { "PATCH", "/api/break", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d)) return;
+      if (!d["minutes"].isNull() && !d["minutes"].is<int>()) { badField(r, "minutes must be an integer"); return; }
+      d["type"] = "break"; runCommand(r, d, nullptr); } },
+
+  // ---- Schedules（静态段 control 在 {id} 之前） ----
+  { "GET", "/api/schedules", [](HttpReq& r) { replyJson(r, 200, captureEvents([] { sendSchedules(); })); } },
+  { "POST", "/api/schedules", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d) || schedBodyBad(r, d)) return;
+      if (schedListCount >= 8) { replyErr(r, 409, "full", errMsgFor("full")); return; }
+      char id[12]; snprintf(id, sizeof id, "s%lu", (unsigned long)nextSchedId++);
+      d["type"] = "sched"; d["op"] = "set"; d["id"] = id; runCommand(r, d, id); } },
+  { "PATCH", "/api/schedules/control", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d)) return;
+      const bool hasP = !d["paused"].isNull(), hasM = !d["mode"].isNull();
+      if (hasP && !d["paused"].is<bool>()) { badField(r, "paused must be a boolean"); return; }
+      const char* m = d["mode"] | "";
+      if (hasM && strcmp(m, "next") && strcmp(m, "today")) { badField(r, "mode must be next or today"); return; }
+      if (!hasP && !hasM) { badField(r, "paused or mode is required"); return; }
+      if (hasP) { JsonDocument c; c["type"] = "sched"; c["op"] = "pause"; c["paused"] = d["paused"]; applyCommand(c); }
+      if (hasM) { JsonDocument c; c["type"] = "sched"; c["op"] = "mode"; c["mode"] = m; applyCommand(c); }
+      replyOk(r); } },
+  { "PUT", "/api/schedules/{id}", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d) || schedBodyBad(r, d)) return;
+      if (strlen(r.params[0]) > 11) { badField(r, "id too long"); return; }
+      d["type"] = "sched"; d["op"] = "set"; d["id"] = r.params[0]; runCommand(r, d, nullptr); } },
+  { "DELETE", "/api/schedules/{id}", [](HttpReq& r) {
+      if (schedFind(r.params[0]) < 0) { replyErr(r, 404, "not_found", "schedule not found"); return; }
+      JsonDocument d; d["type"] = "sched"; d["op"] = "del"; d["id"] = r.params[0]; runCommand(r, d, nullptr); } },
+  { "POST", "/api/schedules/{id}/activate", [](HttpReq& r) {
+      const int i = schedFind(r.params[0]);
+      if (i < 0) { replyErr(r, 404, "not_found", "schedule not found"); return; }
+      if (scheds[i].kind != 0) { replyErr(r, 422, "not_repeat", "only repeat schedules can be activated"); return; }
+      JsonDocument d; d["type"] = "sched"; d["op"] = "use"; d["id"] = r.params[0]; runCommand(r, d, nullptr); } },
+
+  // ---- Statuses ----
+  { "GET", "/api/stdefs", [](HttpReq& r) { replyJson(r, 200, captureEvents([] { sendStdefs(); })); } },
+  { "POST", "/api/stdefs", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d)) return;
+      if (!d["zh"].is<const char*>()) { badField(r, "zh is required"); return; }
+      if (custCount >= 8) { replyErr(r, 409, "full", errMsgFor("full")); return; }
+      char id[8]; snprintf(id, sizeof id, "c%lu", (unsigned long)nextCustId++);
+      d["type"] = "stdef"; d["op"] = "set"; d["id"] = id; runCommand(r, d, id); } },
+  { "PUT", "/api/stdefs/{id}", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d)) return;
+      if (r.params[0][0] != 'c' || !statusIdOk(r.params[0])) { badField(r, "custom status id must be c + 1-6 lowercase alphanumerics"); return; }
+      if (!d["zh"].is<const char*>()) { badField(r, "zh is required"); return; }
+      d["type"] = "stdef"; d["op"] = "set"; d["id"] = r.params[0]; runCommand(r, d, nullptr); } },
+  { "DELETE", "/api/stdefs/{id}", [](HttpReq& r) {
+      if (custIdx(r.params[0]) < 0) { replyErr(r, 404, "not_found", "custom status not found"); return; }
+      JsonDocument d; d["type"] = "stdef"; d["op"] = "del"; d["id"] = r.params[0]; runCommand(r, d, nullptr); } },
+
+  // ---- Todos ----
+  { "GET", "/api/todos", [](HttpReq& r) { replyJson(r, 200, captureEvents([] { sendTodos(); })); } },
+  { "POST", "/api/todos", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d)) return;
+      const char* text = d["text"] | "";
+      if (!text[0]) { badField(r, "text is required"); return; }
+      if (!d["at"].isNull() && !isNumber(d["at"])) { badField(r, "at must be epoch milliseconds"); return; }
+      char id[12];
+      if (!todoAdd(d["at"] | (int64_t)-1, !strcmp(d["trig"] | "", "offwork") ? 1 : 0, text, d["show"] | true, d["src"] | "web", id)) {
+        replyErr(r, 409, "full", errMsgFor("full")); return;
+      }
+      replyCreated(r, id); } },
+  { "DELETE", "/api/todos", [](HttpReq& r) { JsonDocument d; d["type"] = "todo"; d["op"] = "clear"; runCommand(r, d, nullptr); } },
+  { "PATCH", "/api/todos/{id}", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d)) return;
+      if (todoFind(r.params[0]) < 0) { replyErr(r, 404, "not_found", "todo not found"); return; }
+      d["type"] = "todo"; d["op"] = "set"; d["id"] = r.params[0]; runCommand(r, d, nullptr); } },
+  { "DELETE", "/api/todos/{id}", [](HttpReq& r) {
+      if (todoFind(r.params[0]) < 0) { replyErr(r, 404, "not_found", "todo not found"); return; }
+      JsonDocument d; d["type"] = "todo"; d["op"] = "del"; d["id"] = r.params[0]; runCommand(r, d, nullptr); } },
+  { "POST", "/api/reminders", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d)) return;
+      d["type"] = "reminder"; runCommand(r, d, nullptr); } },
+
+  // ---- Settings ----
+  { "GET", "/api/keys", [](HttpReq& r) { replyJson(r, 200, captureEvents([] { sendKeys(); })); } },
+  { "PUT", "/api/keys", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d)) return;
+      for (const char* k : { "k1", "k2", "k3", "k4" }) if (!(d[k] | "")[0]) { badField(r, "k1-k4 are required"); return; }
+      d["type"] = "keys"; runCommand(r, d, nullptr); } },
+  { "GET", "/api/led", [](HttpReq& r) { replyJson(r, 200, captureEvents([] { sendLed(); })); } },
+  { "PATCH", "/api/led", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d)) return;
+      if (!d["map"].isNull()) {
+        if (!d["map"].is<JsonObject>()) { badField(r, "map must be an object"); return; }
+        for (JsonPair p : d["map"].as<JsonObject>()) {
+          const char* m = p.value() | "";
+          if (strcmp(m, "solid") && strcmp(m, "breath") && strcmp(m, "off")) { badField(r, "map values must be solid, breath or off"); return; }
+        }
+      }
+      if (!d["br"].isNull() && (!d["br"].is<int>() || (int)d["br"] < 0 || (int)d["br"] > 100)) { badField(r, "br must be 0-100"); return; }
+      d["type"] = "led"; runCommand(r, d, nullptr); } },
+  { "GET", "/api/timer", [](HttpReq& r) { replyJson(r, 200, captureEvents([] { sendTimer(); })); } },
+  { "POST", "/api/timer/start", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d)) return;
+      if (!d["minutes"].is<int>() || (int)d["minutes"] < 1) { badField(r, "minutes must be a positive integer"); return; }
+      d["type"] = "timer"; d["op"] = "start"; runCommand(r, d, nullptr); } },
+  { "POST", "/api/timer/cancel", [](HttpReq& r) { JsonDocument d; d["type"] = "timer"; d["op"] = "cancel"; runCommand(r, d, nullptr); } },
+  { "GET", "/api/timer/config", [](HttpReq& r) { replyJson(r, 200, captureEvents([] { sendTimerCfg(); })); } },
+  { "PATCH", "/api/timer/config", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d)) return;
+      if ((!d["step"].isNull() && !d["step"].is<int>()) || (!d["max"].isNull() && !d["max"].is<int>())) { badField(r, "step and max must be integers"); return; }
+      d["type"] = "timerCfg"; runCommand(r, d, nullptr); } },
+
+  // ---- Board ----
+  { "GET", "/api/share", [](HttpReq& r) { replyJson(r, 200, captureEvents([] { sendShare(); })); } },
+  { "PATCH", "/api/share", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d)) return;
+      if (!d["en"].isNull() && !d["en"].is<bool>()) { badField(r, "en must be a boolean"); return; }
+      if (strlen(d["name"] | "") >= sizeof shareName) { badField(r, "name exceeds 16 bytes"); return; }
+      if (strlen(d["zone"] | "") >= sizeof shareZone) { badField(r, "zone exceeds 8 bytes"); return; }
+      d["type"] = "share"; runCommand(r, d, nullptr); } },
+  { "GET", "/api/peers", [](HttpReq& r) { replyJson(r, 200, captureEvents([] { sendPeers(); })); } },
+
+  // ---- Screens（静态段 stop 在 {status} 之前） ----
+  { "GET", "/api/apps", [](HttpReq& r) { replyJson(r, 200, captureEvents([] { sendApps(); })); } },
+  { "POST", "/api/apps/stop", [](HttpReq& r) { JsonDocument d; d["type"] = "app"; d["op"] = "stop"; runCommand(r, d, nullptr); } },
+  { "GET", "/api/apps/{status}", appGet },
+  { "PUT", "/api/apps/{status}", appPut },
+  { "DELETE", "/api/apps/{status}", [](HttpReq& r) {
+      if (!statusIdOk(r.params[0])) { badField(r, "invalid status id"); return; }
+      JsonDocument d; d["type"] = "app"; d["op"] = "clear"; d["status"] = r.params[0]; runCommand(r, d, nullptr); } },
+
+  // ---- Voice ----
+  { "POST", "/api/stt/start", [](HttpReq& r) {
+      if (micStart()) replyOk(r); else replyErr(r, 500, "mic_failed", "I2S microphone init failed"); } },
+  { "POST", "/api/stt/stop", [](HttpReq& r) { micStop(); replyOk(r); } },
+  { "POST", "/api/stt/result", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d)) return;
+      const char* t = d["text"] | "";
+      if (!t[0]) { badField(r, "text is required"); return; }
+      if (agentWaiting || agentMsgs.size()) { replyErr(r, 409, "busy", "an agent loop is already running"); return; }
+      agentStart(t); replyOk(r); } },
+  { "POST", "/api/agent/response", [](HttpReq& r) {
+      JsonDocument d; if (!reqJson(r, d)) return;
+      if (!d["message"].is<JsonObject>()) { badField(r, "message is required"); return; }
+      if (!agentWaiting) { replyErr(r, 409, "not_waiting", "device is not waiting for an LLM response"); return; }
+      handleAgentRes(d); replyOk(r); } },
+  { "POST", "/api/agent/cancel", [](HttpReq& r) { agentAbort("cancelled"); replyOk(r); } },
+};
+
+bool httpMatch(const char* pattern, const char* path, char params[2][24]) {
+  uint8_t np = 0;
+  while (*pattern && *path) {
+    if (*pattern == '{') {
+      const char* pe = strchr(pattern, '}');
+      const char* se = strchr(path, '/');
+      const size_t n = se ? (size_t)(se - path) : strlen(path);
+      if (!pe || !n || n >= 24 || np >= 2) return false;
+      memcpy(params[np], path, n); params[np][n] = 0; np++;
+      pattern = pe + 1; path += n;
+    } else {
+      if (*pattern != *path) return false;
+      pattern++; path++;
+    }
+  }
+  return !*pattern && !*path;
+}
+
+void httpDispatch(uint8_t ch) {
+  HttpRx& x = httpRx[ch];
+  HttpReq& r = x.req;
+  Serial.printf("[HTTP] %s %s %s id=%s len=%u\n", ch == CH_BLE ? "ble" : "ser", r.method, r.path, r.reqId, (unsigned)r.len);
+  if (x.errStatus) {
+    replyErr(r, x.errStatus, x.errCode, x.errMsg);
+  } else if (r.semver[0] && atoi(r.semver) != API_MAJOR) {
+    replyErr(r, 400, "incompatible_api_version", "device API version is " API_SEMVER);
+  } else {
+    const size_t pl = strlen(r.path);
+    if (pl > 5 && r.path[pl - 1] == '/') r.path[pl - 1] = 0;   // 容忍尾斜杠
+    const HttpRoute* hit = nullptr;
+    bool pathHit = false;
+    for (const HttpRoute& rt : HTTP_ROUTES) {
+      if (!httpMatch(rt.pattern, r.path, r.params)) continue;
+      if (!strcmp(rt.method, r.method)) { hit = &rt; break; }
+      pathHit = true;
+    }
+    if (hit) hit->fn(r);
+    else if (pathHit) replyErr(r, 405, "method_not_allowed", "method not allowed on this path");
+    else replyErr(r, 404, "not_found", "no such endpoint");
+  }
+  httpRxReset(ch);
+}
+
 // ===================== 入口 =====================
 
 void setup() {
-  Serial.setRxBufferSize(8192);     // agentRes 等长 JSON 行可达数 KB，默认 256B 会溢出丢字节
+  Serial.setRxBufferSize(16384);    // 屏幕程序 PUT 报文体可达 48KB：loop 偶发 30ms 阻塞时不溢出丢字节
+  Serial.setTxBufferSize(8192);     // 事件帧（aud ~68 帧/秒）入缓冲即返回，不阻塞 loop 等 UART 发完
+  bleRxLock = xSemaphoreCreateMutex();
+  for (uint8_t ch = 0; ch < CH_COUNT; ch++) httpRxReset(ch);
   Serial.begin(460800);             // 音频帧流需要 >11.5KB/s，115200 吃不下 → 460800
   delay(300);
   Serial.printf("\n[BOOT] 收工牌 %s\n", FIRMWARE_VER);
@@ -2137,7 +2636,8 @@ void setup() {
 void loop() {
   if (wantHello) {
     wantHello = false;
-    sendLine(F("{\"type\":\"hello\",\"name\":\"收工牌 A1\",\"firmware\":\"" FIRMWARE_VER "\"}"));
+    emitEvent(F("{\"type\":\"hello\",\"name\":\"" DEVICE_DISPLAY "\",\"firmware\":\"" FIRMWARE_VER "\"}"));
+    sendState();                           // 订阅方立刻拿到当前状态（不等区间/校时）
     sendBreakState(false);                 // 连接后立刻同步计时
     sendApps();                            // 设备上实际安装的自定义屏幕
     sendTodos();                           // 设备待办事实源同步给网页
@@ -2169,28 +2669,25 @@ void loop() {
   if (shareDirty || (sharePeerCount > 0 && millis() - sharePushMs > 30000)) {
     shareDirty = false; sharePushMs = millis(); sendPeers();
   }
-  // 串口通道：与 BLE 共用同一套 JSON 行协议
-  static String serBuf;
-  while (Serial.available()) {
-    char c = (char)Serial.read();
-    if (c == '\n') { if (serBuf.length()) { handleLine(serBuf); serBuf = ""; } }
-    else if (c != '\r') serBuf += c;
+  // HTTP 隧道输入：串口与 BLE 两个字节通道各自喂给自己的解析状态机（tunnel.md §7）
+  static uint8_t serChunk[512];
+  while (const int avail = Serial.available()) {
+    const size_t n = Serial.readBytes(serChunk, min((size_t)avail, sizeof serChunk));
+    httpFeed(CH_SERIAL, serChunk, n);
+  }
+  if (bleRxQ.length()) {
+    xSemaphoreTake(bleRxLock, portMAX_DELAY);
+    String q = bleRxQ; bleRxQ = "";
+    xSemaphoreGive(bleRxLock);
+    httpFeed(CH_BLE, (const uint8_t*)q.c_str(), q.length());
+  }
+  if (bleDropped) {
+    bleDropped = false;
+    httpRxReset(CH_BLE);                         // 半截请求作废
+    if (micOn) micStop();                        // 录音发起方掉线 → 停录收尾
+    agentAbort("disconnected");                  // LLM 只能经网页调，断连即中止 agent
   }
   if (micOn) pollMic();
-  // app 读回：每次循环只发一行（~100ms 串口时间），逐帧摊薄避免阻塞
-  if (appDumpFile) {
-    size_t n = appDumpFile.read(dumpBuf, sizeof dumpBuf);
-    size_t olen = 0;
-    if (n) mbedtls_base64_encode((uint8_t*)dumpB64, sizeof dumpB64, &olen, dumpBuf, n);
-    dumpB64[olen] = 0;
-    const bool last = n == 0 || appDumpFile.position() >= appDumpFile.size();
-    snprintf(dumpLine, sizeof dumpLine,
-      "{\"type\":\"appData\",\"status\":\"%s\",\"seq\":%u,\"last\":%s,\"data\":\"%s\"}",
-      appDumpStatus, (unsigned)appDumpSeq, last ? "true" : "false", dumpB64);
-    sendLine(dumpLine);
-    appDumpSeq++;
-    if (last) appDumpFile.close();
-  }
   updateLed();
   // 状态切换 → 加载该状态的 WASM 屏幕 app（LittleFS 持久）；没有则回到默认状态屏
   if (strcmp(appFor, curStatusId.c_str())) {

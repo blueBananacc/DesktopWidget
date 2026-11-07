@@ -1,0 +1,47 @@
+tags:
+- name: Break
+  description: 休息提醒（设备自治累计工作时长）
+
+paths:
+  /api/break:
+    get:
+      tags: [Break]
+      summary: 获取休息提醒状态
+      operationId: getBreak
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BreakState" }
+    patch:
+      tags: [Break]
+      summary: 修改休息提醒设置
+      description: 省略的字段保持不变。`accumMs` 只在需要重置当前累计时携带，设备是计时权威。
+      operationId: patchBreak
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                minutes: { type: integer, minimum: 5, maximum: 240 }
+                enabled: { type: boolean }
+                offToday: { type: boolean, description: 今日停用（午夜自动恢复） }
+                accumMs: { type: integer, minimum: 0 }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+schemas:
+  BreakState:
+    type: object
+    properties:
+      type: { type: string, const: breakState }
+      minutes: { type: integer }
+      accumMs: { type: integer }
+      enabled: { type: boolean }
+      offToday: { type: boolean }
+      due: { type: boolean, description: 本帧是否为到点事件 }
+    required: [type, minutes, accumMs, enabled, offToday, due]

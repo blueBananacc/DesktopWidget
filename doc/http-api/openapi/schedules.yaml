@@ -1,0 +1,130 @@
+tags:
+- name: Schedules
+  description: 计划表（事实源 /schedules.json，≤8 张，每张 ≤20 个节点，设备自治执行）
+
+paths:
+  /api/schedules:
+    get:
+      tags: [Schedules]
+      summary: 获取全部计划表与执行态
+      operationId: getSchedules
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Schedules" }
+    post:
+      tags: [Schedules]
+      summary: 新建计划表（设备分配 id）
+      operationId: createSchedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduleWrite" }
+      responses:
+        "200": { $ref: "#/components/responses/Created" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/schedules/control:
+    patch:
+      tags: [Schedules]
+      summary: 今日暂停 / 手动干预恢复策略
+      description: |
+        `paused`=true 只暂停当天（跨天自动失效，需已校时）。`mode`：next=手动干预后挂起到下个节点；today=手动干预后今日暂停。
+        静态段 `control` 优先于 `{id}` 匹配；该 id 为保留字。
+      operationId: patchScheduleControl
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                paused: { type: boolean }
+                mode: { type: string, enum: [next, today] }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/schedules/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, maxLength: 11 } }
+    put:
+      tags: [Schedules]
+      summary: 新建或整张替换指定 id 的计划表
+      operationId: putSchedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduleWrite" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [Schedules]
+      summary: 删除计划表
+      description: 删除当前启用的表后不再启用任何表。
+      operationId: deleteSchedule
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/schedules/{id}/activate:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Schedules]
+      summary: 设为当前启用的重复计划
+      description: 只对 kind=repeat 生效（422 not_repeat）；含已删除状态的表不可启用（422 bad_status）。
+      operationId: activateSchedule
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+
+schemas:
+  ScheduleNode:
+    type: object
+    properties:
+      t: { type: string, pattern: "^\\d{2}:\\d{2}$", example: "09:00" }
+      st: { $ref: "#/components/schemas/StatusId" }
+      n: { type: string, x-max-bytes: 16, description: 备注 }
+    required: [t, st]
+
+  ScheduleWrite:
+    type: object
+    properties:
+      name: { type: string, x-max-bytes: 24 }
+      kind: { type: string, enum: [repeat, date] }
+      wd: { type: array, items: { type: integer, minimum: 0, maximum: 6 }, description: kind=repeat 的星期（0=周日），空=每天 }
+      date: { type: string, format: date, description: kind=date 的日期 }
+      ns:
+        type: array
+        maxItems: 20
+        items: { $ref: "#/components/schemas/ScheduleNode" }
+    required: [name, kind, ns]
+
+  Schedule:
+    allOf:
+      - $ref: "#/components/schemas/ScheduleWrite"
+      - type: object
+        properties:
+          id: { type: string }
+        required: [id]
+
+  Schedules:
+    type: object
+    properties:
+      type: { type: string, const: schedules }
+      act: { type: string, description: 当前启用的重复计划 id，空=未启用 }
+      paused: { type: boolean, description: 今日是否暂停 }
+      mode: { type: string, enum: [next, today] }
+      list:
+        type: array
+        items: { $ref: "#/components/schemas/Schedule" }
+    required: [type, act, paused, mode, list]

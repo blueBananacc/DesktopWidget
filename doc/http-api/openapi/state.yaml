@@ -1,0 +1,137 @@
+tags:
+- name: State
+  description: 当前工作状态、屏幕文字、设备时钟、今日状态区间
+
+paths:
+  /api/state:
+    get:
+      tags: [State]
+      summary: 获取当前状态与屏幕显示
+      operationId: getState
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/State" }
+    put:
+      tags: [State]
+      summary: 切换当前状态 / 更新屏幕文字
+      description: |
+        与当前完全一致时设备不重绘。状态 id 改变时设备开新区间并记一次手动干预（计划表按 mode 挂起或今日暂停）。
+        `led` / `brightness` 只覆盖本次显示，不改写 `/api/led` 的持久设置。`layout` 持久保存。
+      operationId: putState
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StateWrite" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/time:
+    get:
+      tags: [State]
+      summary: 获取设备时钟
+      operationId: getTime
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceTime" }
+    put:
+      tags: [State]
+      summary: 校时
+      description: 设备以此为基准自治运行计划表、待办到点、夜间关灯；校时后才会推送今日区间。
+      operationId: putTime
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                epoch: { type: integer, description: UTC epoch 毫秒, example: 1763600000000 }
+                tzOffsetMin: { type: integer, description: 本地时区相对 UTC 的分钟偏移, example: 480 }
+              required: [epoch]
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/segments:
+    get:
+      tags: [State]
+      summary: 获取今日状态区间
+      description: 未校时返回空表。断电期间不记录（列表中的空档即“未知”），不推断。
+      operationId: getSegments
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Segments" }
+
+schemas:
+  ScreenLayout:
+    type: string
+    enum: [full, clock, status]
+
+  State:
+    type: object
+    properties:
+      type: { type: string, const: state }
+      status: { $ref: "#/components/schemas/StatusId" }
+      screen: { type: string, description: 屏幕主文字 }
+      sub: { type: string, description: 屏幕说明行 }
+      layout: { $ref: "#/components/schemas/ScreenLayout" }
+      led: { $ref: "#/components/schemas/LedMode" }
+      brightness: { type: integer, minimum: 0, maximum: 100 }
+    required: [type, status, screen, sub, layout, led, brightness]
+
+  StateWrite:
+    type: object
+    properties:
+      status: { $ref: "#/components/schemas/StatusId" }
+      screen: { type: string }
+      sub: { type: string }
+      layout: { $ref: "#/components/schemas/ScreenLayout" }
+      led: { $ref: "#/components/schemas/LedMode" }
+      brightness: { type: integer, minimum: 0, maximum: 100 }
+    required: [status]
+
+  DeviceTime:
+    type: object
+    properties:
+      type: { type: string, const: time }
+      synced: { type: boolean }
+      epoch: { type: integer, description: 当前 UTC epoch 毫秒；未校时为 -1 }
+      tzOffsetMin: { type: integer }
+    required: [type, synced, epoch, tzOffsetMin]
+
+  Segment:
+    type: object
+    properties:
+      type: { type: string, const: seg }
+      status: { $ref: "#/components/schemas/StatusId" }
+      start: { type: integer, description: epoch 毫秒 }
+      end: { type: integer, description: epoch 毫秒；缺省 = 进行中 }
+    required: [type, status, start]
+
+  SegmentsMarker:
+    type: object
+    description: 事件流中逐段推送的起止帧
+    properties:
+      type: { type: string, const: segments }
+      phase: { type: string, enum: [begin, end] }
+    required: [type, phase]
+
+  Segments:
+    type: object
+    properties:
+      type: { type: string, const: segments }
+      list:
+        type: array
+        items: { $ref: "#/components/schemas/Segment" }
+    required: [type, list]

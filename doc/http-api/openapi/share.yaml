@@ -1,0 +1,78 @@
+tags:
+- name: Board
+  description: 共享看板（ESP-NOW 局域广播，只共享当前状态；本设备兼任网关转发成员表）
+
+paths:
+  /api/share:
+    get:
+      tags: [Board]
+      summary: 获取分享设置
+      operationId: getShare
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Share" }
+    patch:
+      tags: [Board]
+      summary: 修改分享设置
+      description: |
+        `en` 默认 false——未显式开启不广播。修改后立即广播一次（关闭时只停止广播）。
+        ESP-NOW 是明文广播，只当同房间信标使用，不承载私密信息。
+      operationId: patchShare
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                en: { type: boolean }
+                name: { type: string, x-max-bytes: 16 }
+                zone: { type: string, x-max-bytes: 8 }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/peers:
+    get:
+      tags: [Board]
+      summary: 获取同区域成员表
+      description: 只包含当前状态；成员 10 分钟未再听到即移除。`at` 用于客户端标记“可能已过期”。
+      operationId: getPeers
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Peers" }
+
+schemas:
+  Share:
+    type: object
+    properties:
+      type: { type: string, const: share }
+      en: { type: boolean }
+      name: { type: string }
+      zone: { type: string }
+    required: [type, en, name, zone]
+
+  Peer:
+    type: object
+    properties:
+      i: { type: string, description: MAC 尾 6 位十六进制, example: 1adbe8 }
+      n: { type: string, description: 共享昵称 }
+      st: { $ref: "#/components/schemas/StatusId" }
+      at: { type: integer, description: 最后听到的 epoch 毫秒（任一方未校时可能缺省） }
+    required: [i, n, st]
+
+  Peers:
+    type: object
+    properties:
+      type: { type: string, const: peers }
+      list:
+        type: array
+        maxItems: 8
+        items: { $ref: "#/components/schemas/Peer" }
+    required: [type, list]

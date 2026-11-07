@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/openapi-bundle.mjs --check && tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
+    "openapi": "node scripts/openapi-bundle.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
     "@types/web-bluetooth": "0.0.21",
     "@vitejs/plugin-react": "6.1.2",
     "typescript": "7.0.2",
-    "vite": "8.3.5"
+    "vite": "8.3.5",
+    "yaml": "^2.9.1"
   }
 }

@@ -1,0 +1,94 @@
+tags:
+- name: Events
+  description: 设备主动推送的事件流（隧道分帧见 tunnel.md §6，事件目录见 events.md）
+
+paths:
+  /api/events:
+    get:
+      tags: [Events]
+      summary: 订阅事件流
+      description: |
+        设备先回开流帧（200，`Content-Length: 0`），随后推送订阅快照（events.md §2），再推送增量事件。
+        隧道上每个事件是一个独立的 200 帧（`X-Request-Id` 与本请求相同，报文体为一个 SSE 事件）；
+        经本地桥访问时表现为标准的 `text/event-stream` 长连接。每个通道同时只有一个订阅。
+      operationId: subscribeEvents
+      parameters:
+        - name: Accept
+          in: header
+          required: false
+          schema: { type: string, example: text/event-stream }
+      responses:
+        "200":
+          description: 事件流已建立
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: "SSE：`event: <name>` + `data: <JSON>`，JSON 结构见 DeviceEvent"
+    delete:
+      tags: [Events]
+      summary: 结束本通道的事件订阅
+      operationId: unsubscribeEvents
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+
+schemas:
+  DeviceEvent:
+    description: 事件流中 `data` 的 JSON；`type` 等于 SSE `event` 名
+    oneOf:
+      - $ref: "#/components/schemas/Hello"
+      - $ref: "#/components/schemas/State"
+      - $ref: "#/components/schemas/KeyEvent"
+      - $ref: "#/components/schemas/TouchEvent"
+      - $ref: "#/components/schemas/WantTimeEvent"
+      - $ref: "#/components/schemas/SegmentsMarker"
+      - $ref: "#/components/schemas/Segment"
+      - $ref: "#/components/schemas/BreakState"
+      - $ref: "#/components/schemas/Apps"
+      - $ref: "#/components/schemas/AppErrEvent"
+      - $ref: "#/components/schemas/Todos"
+      - $ref: "#/components/schemas/TodoFiredEvent"
+      - $ref: "#/components/schemas/Schedules"
+      - $ref: "#/components/schemas/Stdefs"
+      - $ref: "#/components/schemas/Keys"
+      - $ref: "#/components/schemas/Led"
+      - $ref: "#/components/schemas/Timer"
+      - $ref: "#/components/schemas/TimerConfig"
+      - $ref: "#/components/schemas/Share"
+      - $ref: "#/components/schemas/Peers"
+      - $ref: "#/components/schemas/SttStateEvent"
+      - $ref: "#/components/schemas/AudEvent"
+      - $ref: "#/components/schemas/AgentReqEvent"
+      - $ref: "#/components/schemas/AgentDoneEvent"
+      - $ref: "#/components/schemas/AgentErrEvent"
+      - $ref: "#/components/schemas/ErrEvent"
+    discriminator:
+      propertyName: type
+
+  KeyEvent:
+    type: object
+    properties:
+      type: { type: string, const: key }
+      k: { type: integer, enum: [1, 2, 3, 4] }
+    required: [type, k]
+
+  TouchEvent:
+    type: object
+    properties:
+      type: { type: string, const: touch }
+    required: [type]
+
+  WantTimeEvent:
+    type: object
+    description: 设备请求校时，客户端回 PUT /api/time
+    properties:
+      type: { type: string, const: wantTime }
+    required: [type]
+
+  ErrEvent:
+    type: object
+    description: 非请求上下文产生的计划表/自定义状态错误（schedErr / stdefErr）
+    properties:
+      type: { type: string, enum: [schedErr, stdefErr] }
+      msg: { type: string, example: full }
+    required: [type, msg]

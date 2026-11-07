@@ -41,7 +41,7 @@ export function adpcmFrameToPcm(frame: Uint8Array): Int16Array {
   return out;
 }
 
-/** PCM → 一帧 ADPCM（与固件 adpcmEmit 同算法；MockTransport 模拟设备用）。帧头 = 本帧编码前的状态 */
+/** PCM → 一帧 ADPCM（与固件 adpcmEmit 同算法；MockDevice 模拟设备用）。帧头 = 本帧编码前的状态 */
 export function pcmToAdpcmFrame(samples: Int16Array, st: { pred: number; idx: number }): Uint8Array {
   const u8 = new Uint8Array(3 + Math.ceil(samples.length / 2));
   u8[0] = st.pred & 0xff; u8[1] = (st.pred >> 8) & 0xff; u8[2] = st.idx;   // 帧头：起始状态

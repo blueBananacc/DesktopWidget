@@ -1,0 +1,125 @@
+tags:
+- name: Todos
+  description: 待办与提醒（事实源 /todos.json，≤16 条，设备到点自治触发）
+
+paths:
+  /api/todos:
+    get:
+      tags: [Todos]
+      summary: 获取全部待办
+      operationId: getTodos
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Todos" }
+    post:
+      tags: [Todos]
+      summary: 新建待办
+      operationId: createTodo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TodoWrite" }
+      responses:
+        "200": { $ref: "#/components/responses/Created" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [Todos]
+      summary: 清空全部待办
+      operationId: clearTodos
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+
+  /api/todos/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    patch:
+      tags: [Todos]
+      summary: 部分更新待办
+      description: "`at`=-1 清除定时；`trig`=at 改回定时触发。"
+      operationId: patchTodo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text: { type: string, x-max-bytes: 39 }
+                at: { type: integer }
+                trig: { type: string, enum: [offwork, at] }
+                show: { type: boolean }
+                done: { type: boolean }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Todos]
+      summary: 删除待办
+      operationId: deleteTodo
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/reminders:
+    post:
+      tags: [Todos]
+      summary: 立即在设备上弹出提醒
+      description: OLED 显示 15 s + RGB 闪烁 3 s，任意按键提前关闭。`text` 仅在用户允许正文上屏时携带，否则只给 `count`。
+      operationId: postReminder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text: { type: string, x-max-bytes: 47 }
+                count: { type: integer, minimum: 1, default: 1 }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+
+schemas:
+  TodoWrite:
+    type: object
+    properties:
+      text: { type: string, x-max-bytes: 39 }
+      at: { type: integer, description: 到点时刻 epoch 毫秒；缺省 = 仅清单 }
+      trig: { type: string, enum: [offwork], description: offwork = 进入收工状态时触发 }
+      show: { type: boolean, default: true, description: 触发时正文可否上屏 }
+      src: { type: string, maxLength: 5, example: web }
+    required: [text]
+
+  Todo:
+    type: object
+    properties:
+      id: { type: string, example: t3 }
+      at: { type: integer }
+      trig: { type: string, enum: [offwork] }
+      text: { type: string }
+      show: { type: boolean }
+      created: { type: integer }
+      src: { type: string }
+      done: { type: boolean }
+    required: [id, text, done]
+
+  Todos:
+    type: object
+    properties:
+      type: { type: string, const: todos }
+      list:
+        type: array
+        items: { $ref: "#/components/schemas/Todo" }
+    required: [type, list]
+
+  TodoFiredEvent:
+    type: object
+    properties:
+      type: { type: string, const: todoFired }
+      ids: { type: array, items: { type: string } }
+      count: { type: integer }
+    required: [type, ids, count]

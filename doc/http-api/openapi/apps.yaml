@@ -1,0 +1,107 @@
+tags:
+- name: Screens
+  description: 按状态自定义屏幕程序（WASM，存 LittleFS /app_<status>.wasm，≤48 KiB，进入该状态自动运行）
+
+paths:
+  /api/apps:
+    get:
+      tags: [Screens]
+      summary: 列出设备上已安装的屏幕程序
+      operationId: getApps
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Apps" }
+
+  /api/apps/stop:
+    post:
+      tags: [Screens]
+      summary: 停止当前运行的屏幕程序，回到默认状态屏
+      operationId: stopApp
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+
+  /api/apps/{status}:
+    parameters:
+      - { name: status, in: path, required: true, schema: { $ref: "#/components/schemas/StatusId" } }
+    get:
+      tags: [Screens]
+      summary: 读回屏幕程序二进制
+      operationId: getApp
+      responses:
+        "200":
+          description: wasm 模块原始字节
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Screens]
+      summary: 安装 / 替换屏幕程序
+      description: |
+        报文体是完整的 wasm 模块（必须以 `\0asm` 开头）。安装会清除该状态的崩溃禁用标记；
+        如果是当前状态，设备立即重新加载执行。超过 48 KiB 返回 413。
+      operationId: putApp
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary, maxLength: 49152 }
+      responses:
+        "200":
+          description: 已写入
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result: { type: string, const: OK }
+                  size: { type: integer }
+                required: [result, size]
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415":
+          description: 报文体不是 application/octet-stream（unsupported_media_type）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "500":
+          description: 写入闪存失败（storage）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [Screens]
+      summary: 删除屏幕程序（恢复默认屏）
+      description: 幂等：程序不存在也返回 200。同时清除崩溃禁用标记。
+      operationId: deleteApp
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+
+schemas:
+  AppInfo:
+    type: object
+    properties:
+      status: { $ref: "#/components/schemas/StatusId" }
+      size: { type: integer }
+      bad: { type: boolean, description: 曾导致设备复位，已被自动禁用；重新安装即解除 }
+    required: [status, size]
+
+  Apps:
+    type: object
+    properties:
+      type: { type: string, const: apps }
+      list:
+        type: array
+        items: { $ref: "#/components/schemas/AppInfo" }
+    required: [type, list]
+
+  AppErrEvent:
+    type: object
+    properties:
+      type: { type: string, const: appErr }
+      status: { type: string }
+      msg: { type: string }
+    required: [type, status, msg]

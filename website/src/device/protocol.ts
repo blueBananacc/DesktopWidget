@@ -1,47 +1,10 @@
-import type { KeyAction, LedMode, ScreenLayout, StatusId } from "../domain/types";
+import type { LedMode, StatusId } from "../domain/types";
 
 /**
- * 网页 ⇄ 收工牌 通信协议草案（JSON，UTF-8）。
- * 字段需与固件对齐后再定稿；BLE 下单条消息过长时由传输层分包。
+ * 设备事件的类型定义（旧称 InboundMessage）。
+ * 事件经 GET /api/events 的 SSE 流到达，data 结构与对应读接口返回体相同——
+ * 权威定义在 doc/http-api/openapi/ 与 events.md，这里保留 TS 结构供页面消费。
  */
-export type OutboundMessage =
-  | { type: "state"; status: StatusId; screen: string; sub: string; until?: number; led?: LedMode; brightness?: number; layout: ScreenLayout; ts: number } // led/brightness 可选（灯效事实源在设备 /led.json，缺失时设备按本地配置）；layout 只作用于默认屏，设备持久保存
-  | { type: "sched"; op: "set"; id?: string; name: string; kind: "repeat" | "date"; wd?: number[]; date?: string; ns: { t: string; st: StatusId; n?: string }[] } // 计划表整张 upsert（事实源在设备 /schedules.json；id 缺省=设备分配）
-  | { type: "sched"; op: "del" | "use"; id: string }   // 删表 / 设为当前启用的重复计划
-  | { type: "sched"; op: "pause"; paused: boolean }    // 今日暂停/恢复（只影响当天，跨天自动失效）
-  | { type: "sched"; op: "mode"; mode: "next" | "today" } // 手动干预后恢复策略
-  | { type: "sched"; op: "list" }                      // 请求设备回 schedules（hello 后设备也主动推）
-  | { type: "stdef"; op: "set"; id?: string; zh: string; hint?: string; c: number; work?: boolean } // 自定义状态 upsert（事实源在设备 /stdefs.json；id 缺省=设备分配 c<N>，≤7 字符；c=0xRRGGBB）
-  | { type: "stdef"; op: "del"; id: string }           // 删除自定义状态：连带清它的自定义屏幕；正在使用则设备退回 work
-  | { type: "stdef"; op: "list" }                      // 请求设备回 stdefs（hello 后设备也主动推）
-  | { type: "time"; epoch: number; tzOffsetMin: number }
-  | { type: "break"; minutes: number; enabled: boolean; offToday: boolean; accumMs?: number } // 休息提醒设置；accumMs 仅在明确要求重置时携带，设备保持计时权威
-  | { type: "keys"; k1: KeyAction; k2: KeyAction; k3: KeyAction; k4: KeyAction; t: KeyAction; ts: number } // 按键映射写入设备 /keys.json：K1–K4 实体键 + t 触摸键；K1–K4 中必须含一个 offwork（映射为收工的键需按住 1.5s）；设备持久化后回 keys 快照
-  | { type: "led"; op: "set"; map?: Record<string, LedMode>; br?: number; night?: boolean } // 灯效写入设备 /led.json：map=每状态档位，br=亮度，night=夜间自动关；设备持久化后回 led 快照
-  | { type: "timerCfg"; step: number; max: number } // 旋钮快速定时配置写入设备 /knob.json：step=每格分钟，max=最长时间；设备持久化后回 timerCfg 快照
-  | { type: "timer"; op: "start"; minutes: number } // 让设备启动快速倒计时（计时本体在设备自治，网页只是触发入口）
-  | { type: "timer"; op: "cancel" }                // 取消设备上的快速倒计时/关闭到点提醒
-  | { type: "reminder"; text?: string; count?: number; ts: number } // 提醒触发：text 仅当用户允许上屏时携带；设备 OLED 显示 + RGB 闪烁，任意按键确认
-  | { type: "app"; op: "begin"; status: string; size: number } // 按状态上传自定义屏幕：.wasm 写入 LittleFS /app_<status>.wasm（持久，断电不丢）
-  | { type: "app"; op: "chunk"; data: string } // wasm 二进制 base64 分片（≤~1KB 解码数据/条），按序追加
-  | { type: "app"; op: "run" } // 收尾：收齐落盘；上传的是当前状态则立即重载执行（wasm3 沙箱）
-  | { type: "app"; op: "stop" } // 停掉当前 app 回默认屏
-  | { type: "app"; op: "clear"; status: string } // 删除某状态的自定义屏幕（含被禁用的 .bad），恢复默认显示
-  | { type: "app"; op: "list" } // 请求设备回 apps 清单（hello / run / clear 后设备也会主动上报）
-  | { type: "app"; op: "dump"; status: string } // 把设备上的 wasm 读回来（appData 分片），网页用它渲染"设备上的实际程序"
-  | { type: "stt"; op: "start" } // 让设备开始录音并按 aud 帧上行（codec 见 sttState.codec）
-  | { type: "stt"; op: "stop" }  // 停止录音；设备回 sttState idle 作收尾
-  | { type: "sttResult"; text: string } // ASR 结果回传设备 → 触发设备端 agent 循环（v0.7 起）
-  | { type: "agentRes"; message: AgentMessage } // 网页代理 LLM 的结果回设备（assistant 消息，含 tool_calls 时设备继续循环）
-  | { type: "share"; op: "set"; en?: boolean; name?: string; zone?: string } // 分享设置写设备 /share.json（v1.5 起）：en=ESP-NOW 广播开关 name=共享昵称 zone=区域码；设备保存后回 share 快照
-  | { type: "agent"; op: "cancel" } // 中止设备上进行中的 agent 循环
-  | { type: "todo"; op: "add"; text: string; at?: number; trig?: "offwork"; show?: boolean; src?: string } // 网页→设备建待办（at=epoch ms；trig=offwork 收工触发；show=false 触发时只报数量；src=来源标记）
-  | { type: "todo"; op: "set"; id: string; text?: string; at?: number; trig?: "offwork" | "at"; show?: boolean; done?: boolean } // 部分更新（编辑；at=-1 清定时）
-  | { type: "todo"; op: "done"; id: string; done?: boolean }
-  | { type: "todo"; op: "del"; id: string }
-  | { type: "todo"; op: "clear" }
-  | { type: "todo"; op: "list" } // 请求设备回 todos（hello 后设备也主动推）
-  | { type: "sync" }; // 握手：固件回 hello
 
 /** OpenAI 消息对象：assistant 消息可带 tool_calls；tool 消息带 tool_call_id（与设备 agent 循环一致） */
 export interface AgentMessage {
@@ -52,6 +15,7 @@ export interface AgentMessage {
 }
 
 export type InboundMessage =
+  | { type: "state"; status: StatusId; screen: string; sub: string; layout: string; led: string; brightness: number } // 当前状态快照（v1.6 起；订阅快照第 2 帧 + PUT /api/state / 计划表 / 本地切换后广播）
   | { type: "touch" } // TTP223 触摸键触发（动作由网页 keys.t 映射决定）
   | { type: "key"; k: 1 | 2 | 3 | 4 } // 实体键 K1–K4 触发（动作由 keys.k1–k4 映射决定）
   | { type: "shortcut"; press: "single" | "long" } // 旧固件兼容
@@ -82,6 +46,9 @@ export type InboundMessage =
   | { type: "stdefErr"; msg: string }
   | { type: "keys"; k1: string; k2: string; k3: string; k4: string; t?: string } // 设备按键映射快照（v1.0 起；hello 后/keys 写入后推送；v1.4 起含 t=触摸键，旧固件无此字段）。事实源在设备 /keys.json
   | { type: "led"; map: Record<string, LedMode>; br: number; night: boolean } // 设备灯效设置快照（v1.0 起；hello 后/led 写入后推送）。事实源在设备 /led.json
+
+/** 事件流上的事件 = 原 InboundMessage（doc/http-api/events.md：data 含 "type" 字段） */
+export type DeviceEvent = InboundMessage;
 
 /** 设备侧自定义状态（事实源在设备）：id ≤7 字符以 c 开头；zh=屏显名（wqy16 大字，建议≤4汉字）；c=0xRRGGBB；work=该状态计入工作时长/休息提醒 */
 export interface DevStdef {
@@ -114,16 +81,7 @@ export interface DevSched {
   ns: { t: string; st: StatusId; n?: string }[];
 }
 
-export interface DeviceTransport {
-  readonly kind: "mock" | "ble" | "serial";
-  connect(): Promise<string>;
-  disconnect(): Promise<void>;
-  send(msg: OutboundMessage): Promise<void>;
-  onMessage(cb: (msg: InboundMessage) => void): void;
-  onDisconnect(cb: () => void): void;
-}
-
-/** GATT UUID 占位，需与固件约定后替换 */
+/** GATT UUID，需与固件 setupBle 一致 */
 export const BLE_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 export const BLE_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // 网页 → 设备（write）
 export const BLE_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // 设备 → 网页（notify）

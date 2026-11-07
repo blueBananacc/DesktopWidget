@@ -48,10 +48,11 @@ arduino-cli upload  -p COM8 -b "同上" shougongpai
    - K1 按下 → 网页触发收工键；K2 短按/长按 → 快捷键行为。
 5. 有铜箔电极后：把 `ENABLE_CAPSENSE` 改 1 重烧，K3/K4 自动让位。
 
-## 协议速查
+## 协议速查（v0.9 起：HTTP 隧道，JSON 行协议已废除）
 
-- 下行 `state`：`{type,status,screen,sub,until,led(solid|breath|off),brightness(0-100),ts}`
-- 下行 `time`：`{type,epoch(ms),tzOffsetMin}` —— OLED 右上角时钟
-- 下行 `stt`：`{type,op:"start"|"stop"}` —— 起停录音，上行 aud 帧 + sttState
-- 上行：hello / touch(left|right) / shortcut(single|long) / offworkKey / enc(dir) / sttState / aud(音频帧 base64)
-- 分包：JSON + `\n` 分帧，网页侧按 180 字节切片，固件按行重组
+字节流上跑 HTTP/1.1 子集——规范全文在 `../doc/http-api/`（[tunnel.md](../doc/http-api/tunnel.md) 分帧 / [events.md](../doc/http-api/events.md) 事件目录 / [openapi/](../doc/http-api/openapi/) 资源定义）：
+
+- 请求帧：`GET /api/state HTTP/1.1` + `X-Request-Id` + `X-Api-Sem-Ver` + `Content-Length`，响应按 `X-Request-Id` 关联
+- 事件流：`GET /api/events` 订阅 → 设备推 `text/event-stream` 帧（每事件一个独立 200 帧，body 为一个 SSE 事件）
+- 冒烟脚本：`keytest/serial-http.ps1 -Port COM8`；电脑侧集成用 `../bridge/`（本地真 HTTP + SSE）
+- BLE：NUS 风格 UUID（service `6e400001-…`），RX write（网页→设备）/ TX notify（设备→网页），200B 分片由隧道自行分帧

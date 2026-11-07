@@ -8,6 +8,7 @@ import { RemindersPage } from "./pages/Reminders";
 import { ReviewPage } from "./pages/Review";
 import { BoardPage } from "./pages/Board";
 import { DevicePage } from "./pages/DevicePage";
+import { ApiDebugPage } from "./pages/ApiDebug";
 import { SttPage } from "./pages/Stt";
 import { ProductPage } from "./pages/Product";
 import { AgentPage, ControlsPage, LightingPage, MePage, ScreenPage, SettingsPage } from "./pages/SettingsPages";
@@ -27,6 +28,7 @@ export default function App() {
               <Route path="board" element={<BoardPage />} />
               <Route path="agent" element={<AgentPage />} />
               <Route path="device" element={<DevicePage />} />
+              <Route path="api" element={<ApiDebugPage />} />
               <Route path="stt" element={<SttPage />} />
               <Route path="controls" element={<ControlsPage />} />
               <Route path="screen" element={<ScreenPage />} />

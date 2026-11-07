@@ -1,0 +1,14 @@
+{
+  "name": "sgp-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "收工牌串口 → 本地 HTTP 桥：把 doc/http-api 的隧道报文转成 127.0.0.1 上的真 HTTP + SSE，供 curl/Agent/脚本直接调用",
+  "scripts": {
+    "start": "node bridge.mjs",
+    "com20": "node bridge.mjs --port COM20"
+  },
+  "dependencies": {
+    "serialport": "^13.0.0"
+  }
+}

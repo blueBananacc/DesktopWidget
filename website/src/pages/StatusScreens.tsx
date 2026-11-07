@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { BookmarkPlus, Code2, Copy, Eraser, FileUp, Image, LayoutTemplate, Play, Plus, ShieldCheck, Trash2, Upload, Cpu, TriangleAlert, HardDrive, X } from "lucide-react";
 import { WAT_TEMPLATES } from "../domain/watTemplates";
 import { APP_H, APP_MAX_BYTES, APP_W, clearApp, deployedHashes, drawDefaultScreen, hashBytes, pendingClears, previewScreen, screenBytes, sendApp, setDeployedHash, setPendingClears, u8ToB64, validateApp, type DefaultScreen, type ScreenPreview } from "../device/app";
-import { getTransport, toOutbound, useStore } from "../store/AppStore";
+import { getApi, toStateWrite, useStore } from "../store/AppStore";
 import { allStatusIds, statusApiIndex, statusMeta } from "../domain/statuses";
 import type { DeviceApp, ScreenDef, ScreenPreset, StatusId } from "../domain/types";
 import { atToday, hhmm } from "../domain/time";
@@ -139,7 +139,7 @@ export function StatusScreens() {
 
   const screenFor = (x: StatusId): DefaultScreen => ({
     main: statusMeta(x).screen,
-    sub: x === s.current.id ? toOutbound(s).sub : statusMeta(x).hint,
+    sub: x === s.current.id ? (toStateWrite(s).sub ?? "") : statusMeta(x).hint,
     clock: hhmm(now),
     connected: connected && device.kind === "ble",
     layout: s.settings.screenLayout,
@@ -169,14 +169,14 @@ export function StatusScreens() {
   const select = (x: StatusId) => { setId(x); if (window.innerWidth < 1100) editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); };
 
   const upload = async () => {
-    const t = getTransport();
-    if (!t || !def) return;
+    const api = getApi();
+    if (!api || !def) return;
     setSent(0);
     try {
       const bytes = await screenBytes(def);
       const bad = await validateApp(bytes, statusApiIndex(id)); // 先在本机完整跑约 10 帧，有错不写进设备
       if (bad) { setError(bad); toast({ message: `代码运行出错，没有上传：${bad}`, seconds: 8 }); return; }
-      await sendApp(t, id, bytes, setSent);
+      await sendApp(api, id, bytes, setSent);
       setDeployedHash(id, hashBytes(bytes)); setDeployed(deployedHashes());
       toast({ message: `已写入设备「${statusMeta(id).label}」屏幕：进入该状态自动运行，断电不丢`, seconds: 8 });
     } catch (e) {
@@ -193,9 +193,9 @@ export function StatusScreens() {
 
   const restore = async () => {
     setDef(undefined);
-    const t = getTransport();
-    if (t && connected) {
-      await clearApp(t, id).catch(() => {});
+    const api = getApi();
+    if (api && connected) {
+      await clearApp(api, id).catch(() => {});
     } else {
       setPendingClears([...new Set([...pendingClears(), id])]); // 记住这次清除，连上设备后真正发 clear
     }

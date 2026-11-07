@@ -1,0 +1,159 @@
+openapi: 3.1.0
+info:
+  title: 收工牌 Device HTTP API
+  version: 1.0.0
+  description: |
+    收工牌（Shougongpai）设备 HTTP API。设备本身不跑 TCP/IP：报文按
+    [SGP-HTTP 隧道规范](../tunnel.md) 在 BLE / USB 串口字节流上传输；
+    电脑侧本地桥把它暴露为真实 HTTP（`http://127.0.0.1:8787`）。
+
+    - 设备是全部设置与状态的事实源；写接口只回 `SuccessResponse`，变化以事件广播（见 `GET /api/events` 与 [events.md](../events.md)）。
+    - 读接口返回的资源对象都带 `type` 判别字段，与同名事件的 `data` 结构一致。
+    - 错误统一为 `Error` 结构，`error_code` 取自 `ErrorCode` 枚举。
+  license:
+    name: Proprietary
+  x-api-semver-header: X-Api-Sem-Ver
+
+servers:
+  - url: http://127.0.0.1:8787
+    description: 电脑侧本地桥（bridge/），转发到 USB 串口隧道
+  - url: sgp-tunnel://device
+    description: 浏览器 Web Bluetooth / Web Serial 直连隧道（非 IP，见 tunnel.md）
+
+security: []
+
+paths:
+  # {PATHS}
+
+components:
+  parameters:
+    XRequestId:
+      name: X-Request-Id
+      in: header
+      required: true
+      description: 隧道请求关联 id（1–24 个 `[A-Za-z0-9._-]`），设备在响应中原样回带。本地桥会自动补齐。
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9._-]{1,24}$"
+        example: "17"
+
+  responses:
+    Ok:
+      description: 写入成功；资源变化以快照事件广播
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SuccessResponse"
+    Created:
+      description: 创建成功，返回设备分配的 id
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CreatedResponse"
+    BadRequest:
+      description: 语法或参数错误（bad_request / bad_json / invalid_parameter / incompatible_api_version）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example: { error: "schedule not found", error_code: not_found }
+    Conflict:
+      description: 与设备当前状态冲突（full / busy / not_waiting）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unprocessable:
+      description: 违反业务规则
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    PayloadTooLarge:
+      description: 报文体超出隧道上限
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    SuccessResponse:
+      type: object
+      properties:
+        result:
+          type: string
+          const: OK
+      required: [result]
+
+    CreatedResponse:
+      type: object
+      properties:
+        result:
+          type: string
+          const: OK
+        id:
+          type: string
+          description: 设备分配的资源 id
+          example: s3
+      required: [result, id]
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: 人类可读的说明
+        error_code:
+          $ref: "#/components/schemas/ErrorCode"
+      required: [error, error_code]
+      example:
+        error: "K1-K4 must keep one offwork key"
+        error_code: no_offwork
+
+    ErrorCode:
+      type: string
+      enum:
+        - bad_request
+        - bad_json
+        - invalid_parameter
+        - incompatible_api_version
+        - not_found
+        - method_not_allowed
+        - full
+        - busy
+        - not_waiting
+        - payload_too_large
+        - unsupported_media_type
+        - no_offwork
+        - bad_status
+        - not_repeat
+        - invalid_wasm
+        - internal
+        - mic_failed
+        - storage
+
+    StatusId:
+      type: string
+      description: 内建状态 work/busy/focus/meet/rest/off，或自定义状态 id（`c` 开头，≤7 字符）
+      pattern: "^(work|busy|focus|meet|rest|off|c[a-z0-9]{1,6})$"
+      example: focus
+
+    LedMode:
+      type: string
+      enum: [solid, breath, "off"]
+
+    KeyAction:
+      type: string
+      description: 按键动作：offwork 收工 / focus25 专注 25 分钟 / pauseToday 暂停今日计划 / cycleL cycleR 上/下一个状态 / 任意 StatusId
+      example: offwork
+
+    # {SCHEMAS}
+
+tags:
+  # {TAGS}
