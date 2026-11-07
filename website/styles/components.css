@@ -118,8 +118,11 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
 .preset.on { --c: var(--primary); border-color: var(--c); background: color-mix(in srgb, var(--c) 9%, #fff); color: var(--c); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 14%, transparent); }
 .preset.add { border-style: dashed; color: var(--ink-3); justify-content: center; font-weight: 500; }
 .dev-meta { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line); }
-.dev-meta div { padding: 14px 22px; display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink-2); }
-.dev-meta div + div { border-left: 1px solid var(--line); }
+.dev-meta > div, .dev-meta > a { padding: 14px 22px; display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink-2); }
+.dev-meta > * + * { border-left: 1px solid var(--line); }
+.dev-meta-link { text-decoration: none; transition: background .15s; }
+.dev-meta-link:hover { background: var(--surface-2); }
+.dev-meta-link:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .dev-meta b { display: block; color: var(--ink); font-size: 13px; }
 .swatch-led { width: 18px; height: 18px; border-radius: 50%; background: var(--st-meet); box-shadow: 0 0 10px 1px color-mix(in srgb, var(--st-meet) 60%, transparent); }
 
@@ -197,5 +200,5 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
 
 /* Responsive */
 @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } .device { grid-template-columns: 1fr; } }
-@media (max-width: 860px) { .app { grid-template-columns: 1fr; } .side { display: none; } .main { padding: 20px 16px 90px; } .presets { grid-template-columns: repeat(2, 1fr); } .dev-meta { grid-template-columns: 1fr; } .dev-meta div + div { border-left: 0; border-top: 1px solid var(--line); } }
+@media (max-width: 860px) { .app { grid-template-columns: 1fr; } .side { display: none; } .main { padding: 20px 16px 90px; } .presets { grid-template-columns: repeat(2, 1fr); } .dev-meta { grid-template-columns: 1fr; } .dev-meta > * + * { border-left: 0; border-top: 1px solid var(--line); } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
