@@ -18,6 +18,9 @@
 ```
 arduino-cli compile -b "esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=esp_sr_16" shougongpai
 arduino-cli upload  -p COM8 -b "同上" shougongpai
+
+# 原生 USB 口变体（隧道/日志走原生口，CH343 仅剩供电+烧录）：
+#   追加 ,USBMode=default,CDCOnBoot=cdc；Windows 首次需手动指派 COM 号，见 doc/HARDWARE.md §15
 ```
 
 **分区方案 = `esp_sr_16`**（v0.7 起）：APP 3MB×2（保留 OTA 槽）、SPIFFS/LittleFS 6MB、MODEL 3.9MB（ESP-SR 唤醒/口令模型预留，已烧核心包自带 `srmodels.bin`）。之前默认方案 APP 仅 1.25MB 已用 99%。

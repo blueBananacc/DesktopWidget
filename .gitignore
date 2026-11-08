@@ -10,3 +10,5 @@ example/
 ESP32-S3*/
 INMP441*/
 EC11*/
+
+firmware/shougongpai/build/

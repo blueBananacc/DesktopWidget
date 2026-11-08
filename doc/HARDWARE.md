@@ -279,3 +279,35 @@
 | 麦克风·L/R | 右排 `GND`（底部另一） | 固定左声道 |
 
 4 个 GND 针刚好用完（左 1 右 3）；2 个 3V3 刚好用完（OLED、麦克风各一）。
+
+## 15. 原生 USB 口实测记录（2026-05-22，已验证）
+
+板子**确有第二个 Type-C 口为原生 USB**（非 BOOT 键一侧），D+/D− 直连 GPIO19/20。**HTTP 隧道已在该口实测全通**（version/state/led/PUT/events 全部 200）。
+
+### 15.1 两种固件形态
+
+| | 默认构建 | `USBMode=default,CDCOnBoot=cdc` |
+|---|---|---|
+| `Serial` 绑定 | UART0（GPIO43/44→CH343） | **USB-OTG CDC**（原生口） |
+| 原生口枚举 | `VID_303A&PID_1001`：内建 USB Serial/JTAG 单元（复合设备，MI_00=CDC + MI_02=JTAG），**固件不读它** | `VID_303A&PID_1001`：TinyUSB CDC-ACM（**无 JTAG 接口**，标准串口） |
+| CH343 口 | 隧道+日志+烧录 | 只剩供电+烧录（UART0 无输出） |
+| 原生口供电 | 仅枚举调试 | **可正常供电运行**（OLED/loop 全活） |
+
+CDC 构建 FQBN：
+`esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=esp_sr_16,USBMode=default,CDCOnBoot=cdc`
+
+**坑：不要只写 `CDCOnBoot=cdc`**——esp32s3 板级默认 `usb_mode=1`（hwcdc），会把 `Serial` 绑到 JTAG 单元而非 OTG CDC；必须显式 `USBMode=default`。`Serial.setTxBufferSize` 在 USBCDC 上不存在，固件里用 `#if ARDUINO_USB_CDC_ON_BOOT` 改为 `setTxTimeoutMs(0)`（已做）。
+
+### 15.2 Windows 上的坑与解法（本机 2026-05-22 实测）
+
+- **VID_303A&PID_1001 设备在本机枚举后不自动分配 COM 号**：usbser 绑定成功、设备状态 OK，但 `Device Parameters\PortName` 不生成（JTAG 单元和 OTG-CDC 两种形态都中招，疑本机驱动缓存问题，非设备问题）。设备接口其实已注册，裸路径 `\\?\USB#VID_303A&PID_1001&MI_00#<实例>#{86e0d1e0-...}` 可直接打开——但 Web Serial/serialport 都只认 COM 名。
+- **解法（管理员 PowerShell，一次即可，换 PID/换 USB 口需重做）**：
+  ```powershell
+  $inst='<设备实例路径>'; Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Enum\$inst\Device Parameters" -Name PortName -Value 'COM9'; pnputil /restart-device "$inst"
+  ```
+  或在设备管理器 → 端口 → USB 串行设备 → 属性 → 端口设置 → 高级里手动指派 COM 号。本机已指派 **COM9**，隧道实测通过。
+- **客户端必须断言 DTR（+RTS）**：`USBCDC::write` 有 `tud_cdc_n_connected` 门控，主机不置 DTR 时设备发出的字节全部丢弃（RX 方向不受影响）。串口工具（TeraTerm/PuTTY/Web Serial/`serialport`）默认会做；裸 FileStream 打开则不会。
+
+### 15.3 更远一步（未做，BUSY Bar 路径）
+
+原生口 + TinyUSB NCM/ECM 可把设备变成 USB 虚拟网卡（电脑拿 IP 直接 HTTP 访问），需 TinyUSB NCM + lwIP netif + 内置 DHCP server，属大工程；Windows NCM 驱动兼容性历来有坑。USB-OTG CDC 通道（本节）是其前置验证。

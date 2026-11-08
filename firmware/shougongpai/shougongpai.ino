@@ -2585,7 +2585,11 @@ void httpDispatch(uint8_t ch) {
 
 void setup() {
   Serial.setRxBufferSize(16384);    // 屏幕程序 PUT 报文体可达 48KB：loop 偶发 30ms 阻塞时不溢出丢字节
+#if ARDUINO_USB_CDC_ON_BOOT
+  Serial.setTxTimeoutMs(0);         // USB CDC：无主机读时不阻塞 loop（等价 UART TX 缓冲的"入队即返回"）
+#else
   Serial.setTxBufferSize(8192);     // 事件帧（aud ~68 帧/秒）入缓冲即返回，不阻塞 loop 等 UART 发完
+#endif
   bleRxLock = xSemaphoreCreateMutex();
   for (uint8_t ch = 0; ch < CH_COUNT; ch++) httpRxReset(ch);
   Serial.begin(460800);             // 音频帧流需要 >11.5KB/s，115200 吃不下 → 460800
