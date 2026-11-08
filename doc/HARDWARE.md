@@ -308,6 +308,13 @@ CDC 构建 FQBN：
   或在设备管理器 → 端口 → USB 串行设备 → 属性 → 端口设置 → 高级里手动指派 COM 号。本机已指派 **COM9**，隧道实测通过。
 - **客户端必须断言 DTR（+RTS）**：`USBCDC::write` 有 `tud_cdc_n_connected` 门控，主机不置 DTR 时设备发出的字节全部丢弃（RX 方向不受影响）。串口工具（TeraTerm/PuTTY/Web Serial/`serialport`）默认会做；裸 FileStream 打开则不会。
 
-### 15.3 更远一步（未做，BUSY Bar 路径）
+### 15.3 USB 虚拟网卡（已实现并实机验证，见 [usb-net.md](usb-net.md)）
 
-原生口 + TinyUSB NCM/ECM 可把设备变成 USB 虚拟网卡（电脑拿 IP 直接 HTTP 访问），需 TinyUSB NCM + lwIP netif + 内置 DHCP server，属大工程；Windows NCM 驱动兼容性历来有坑。USB-OTG CDC 通道（本节）是其前置验证。
+原生口 + TinyUSB NCM 已把设备做成 **CDC+NCM 复合设备**（PID `1003`）：Windows 经 **MS OS 1.0**（string `0xEE` + compat-id `WINNCM`）绑 `UsbNcm.sys` 出 `USB NCM Host Device` 网卡；设备 `192.168.55.1/24` 起 DHCP+TCP:80，`curl http://192.168.55.1/api/*` 直达，无需桥。
+
+实测记录（2026-05-23）：
+
+- `bcdUSB=0x0201` 会让本机 Windows 在 SET_CONFIG 前判 DeviceFailedEnumeration——**bcdUSB 保持 hal 默认 0x0200**，WINNCM 走不依赖 BOS 的 MS OS 1.0 通路。
+- 静态 IP `192.168.55.2/24` 端到端全通（ping/`api/version`/`api/state`/`api/peers` 均 200）；DHCP 服务端经注入法验证会发 OFFER，但本机 Windows 的 DHCP 客户端未在该适配器上发 DISCOVER（机器级怪癖），**兜底用静态 IP**。
+- **烧录只需原生口一根线**：CDC 置 1200 波特即触发 ROM 下载模式（`bridge/cdc-1200-touch.ps1`），原生口回落 `PID_1001` 后 esptool 直刷；刷完自动复位。
+- 实现要点、两条 WINNCM 通路、数据面胶水与排错表见 [usb-net.md](usb-net.md)。

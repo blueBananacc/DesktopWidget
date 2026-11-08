@@ -4,7 +4,7 @@
 
 ## 设备接口（HTTP 隧道，v0.9 起）
 
-设备⇄电脑唯一的接口面是 **HTTP/1.1 子集跑在 BLE/串口字节流上**（设备不跑 TCP/IP）。规范文件在 `doc/http-api/`：`tunnel.md`（分帧）、`events.md`（事件目录）、`openapi/`（分资源 OpenAPI 片段 → `website/scripts/openapi-bundle.mjs` 打包成 `website/public/openapi.json`）。新增接口步骤见 `doc/http-api/README.md`；网页/模拟设备/桥都必须与固件路由表保持同步。
+设备⇄电脑唯一的接口面是 **HTTP/1.1 子集**：BLE/串口字节流隧道（`tunnel.md` §7）+ 原生 USB 口 NCM 虚拟网卡上的真 TCP/IP（`192.168.55.1:80`，doc/usb-net.md）。规范文件在 `doc/http-api/`：`tunnel.md`（分帧）、`events.md`（事件目录）、`openapi/`（分资源 OpenAPI 片段 → `website/scripts/openapi-bundle.mjs` 打包成 `website/public/openapi.json`）。新增接口步骤见 `doc/http-api/README.md`；网页/模拟设备/桥都必须与固件路由表保持同步。
 
 ## 部署与服务器连接
 

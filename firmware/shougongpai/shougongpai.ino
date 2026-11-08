@@ -31,6 +31,7 @@
 #include <esp_wifi.h>
 #include <wasm3.h>
 #include "driver/i2s.h"
+#include "usb_net.h"                 // USB NCM 虚拟网卡（doc/usb-net.md）；非 TinyUSB 构建为空实现
 
 // ===================== 配置 =====================
 
@@ -43,7 +44,7 @@
 
 // ===================== HTTP 隧道类型（doc/http-api/tunnel.md） =====================
 // 放在任何函数定义之前：.ino 自动生成的函数原型会引用这些类型
-constexpr uint8_t  CH_SERIAL = 0, CH_BLE = 1, CH_COUNT = 2;
+constexpr uint8_t  CH_SERIAL = 0, CH_BLE = 1, CH_NET0 = 2, CH_COUNT = 2 + SGP_NET_SLOTS;
 constexpr size_t   HTTP_LINE_MAX = 256;          // 起始行 / 单个头部行上限（tunnel.md §3.4）
 constexpr uint8_t  HTTP_HDR_MAX = 16;
 constexpr uint32_t HTTP_BODY_MAX = 8192;
@@ -149,6 +150,10 @@ bool    wantHello = false;        // 客户端订阅 /api/events 后推送订阅
 volatile bool bleDropped = false; // BLE 断连：由 loop 收尾（停录音 / 中止 agent），避免在 BLE 任务里发事件
 SemaphoreHandle_t bleRxLock = nullptr;
 String  bleRxQ;                   // BLE write 回调只把字节放进队列，由 loop 线程统一解析与处理
+// USB 网卡 TCP 通道：连接任务只把字节推进队列，解析/分发与事件仍全部在 loop 线程（同 BLE 模型）
+struct NetRxItem { uint8_t slot; uint16_t len; uint8_t data[224]; };
+QueueHandle_t netRxQ = nullptr;
+volatile bool netClosed[SGP_NET_SLOTS];
 HttpRx  httpRx[CH_COUNT];
 struct EvSub { bool on; char id[25]; } evSub[CH_COUNT];
 String* evCapture = nullptr;      // 非空：读接口正在收集快照函数的输出（不广播）
@@ -855,6 +860,7 @@ const char* httpReason(int code) {
 
 void httpWrite(uint8_t ch, const uint8_t* data, size_t n) {
   if (ch == CH_SERIAL) { Serial.write(data, n); return; }   // 一次写出整帧：日志不会插进帧内部（tunnel.md §7.2）
+  if (ch >= CH_NET0) { sgpUsbNetSend(ch - CH_NET0, data, n); return; }  // USB 网卡 TCP 通道
   if (!txChar || !bleConnected) return;
   for (size_t i = 0; i < n; i += 200) {                      // notify ≤200B，接收方按字节流重组
     txChar->setValue(data + i, min((size_t)200, n - i));
@@ -2559,7 +2565,7 @@ bool httpMatch(const char* pattern, const char* path, char params[2][24]) {
 void httpDispatch(uint8_t ch) {
   HttpRx& x = httpRx[ch];
   HttpReq& r = x.req;
-  Serial.printf("[HTTP] %s %s %s id=%s len=%u\n", ch == CH_BLE ? "ble" : "ser", r.method, r.path, r.reqId, (unsigned)r.len);
+  Serial.printf("[HTTP] %s %s %s id=%s len=%u\n", ch == CH_BLE ? "ble" : ch >= CH_NET0 ? "net" : "ser", r.method, r.path, r.reqId, (unsigned)r.len);
   if (x.errStatus) {
     replyErr(r, x.errStatus, x.errCode, x.errMsg);
   } else if (r.semver[0] && atoi(r.semver) != API_MAJOR) {
@@ -2612,6 +2618,8 @@ void setup() {
   loadKeys();                         // 按键映射
   loadShare();                        // 分享设置（默认不广播）
   espnowInit();                       // ESP-NOW 共享看板：STA + 信道1 + 广播 peer
+  netRxQ = xQueueCreate(16, sizeof(NetRxItem));
+  sgpUsbNetStart();                     // USB NCM 网卡 + DHCP + TCP:80（仅 TinyUSB 构建生效）
   loadLed();                          // 灯效设置
   loadKnob();                         // 旋钮定时配置（每格分钟/最长时间）
   loadSegs();                         // 断电前的今日区间：校时后 adoptPendSegs 回填
@@ -2636,6 +2644,19 @@ void setup() {
   markStatus("work");             // 开机即开始第一段区间记录
   drawOled();
 }
+
+// usb_net.cpp 的连接任务回调（socket 任务上下文）：字节入队，由 loop 统一 httpFeed
+void sgpUsbNetOnRx(uint8_t slot, const uint8_t* d, uint16_t n) {
+  if (!netRxQ) return;
+  while (n) {
+    NetRxItem it; it.slot = slot;
+    it.len = min(n, (uint16_t)sizeof it.data);
+    memcpy(it.data, d, it.len);
+    if (xQueueSend(netRxQ, &it, portMAX_DELAY) != pdTRUE) break;
+    d += it.len; n -= it.len;
+  }
+}
+void sgpUsbNetOnClose(uint8_t slot) { netClosed[slot] = 1; }   // loop 里收尾（同 bleDropped 模型）
 
 void loop() {
   if (wantHello) {
@@ -2685,6 +2706,17 @@ void loop() {
     xSemaphoreGive(bleRxLock);
     httpFeed(CH_BLE, (const uint8_t*)q.c_str(), q.length());
   }
+  if (netRxQ) {
+    NetRxItem it;
+    while (xQueueReceive(netRxQ, &it, 0) == pdTRUE)
+      httpFeed(CH_NET0 + it.slot, it.data, it.len);
+  }
+  for (uint8_t s = 0; s < SGP_NET_SLOTS; s++)
+    if (netClosed[s]) {
+      netClosed[s] = false;
+      evSub[CH_NET0 + s].on = false;             // 通道断开即结束订阅（tunnel.md §6.6）
+      httpRxReset(CH_NET0 + s);                  // 半截请求作废
+    }
   if (bleDropped) {
     bleDropped = false;
     httpRxReset(CH_BLE);                         // 半截请求作废

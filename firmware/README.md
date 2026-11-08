@@ -19,8 +19,13 @@
 arduino-cli compile -b "esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=esp_sr_16" shougongpai
 arduino-cli upload  -p COM8 -b "同上" shougongpai
 
-# 原生 USB 口变体（隧道/日志走原生口，CH343 仅剩供电+烧录）：
+# 原生 USB 口变体（隧道/日志走原生口，CH343 仅剩供电）：
 #   追加 ,USBMode=default,CDCOnBoot=cdc；Windows 首次需手动指派 COM 号，见 doc/HARDWARE.md §15
+#   该变体同时在原生口挂一张 NCM 虚拟网卡（usb_net.cpp，已实机验证）：
+#   插线即出 USB NCM 网卡，curl http://192.168.55.1/api/* 直达设备 API，
+#   无需桥。DHCP 不自动下发时配静态 192.168.55.2/24 兜底——规范见 doc/usb-net.md
+#   烧录也只需原生口一根线：CDC 置 1200 波特触发下载模式，esptool 直刷
+#   （bridge/cdc-1200-touch.ps1 + find-serial-paths.ps1），无需 CH343。
 ```
 
 **分区方案 = `esp_sr_16`**（v0.7 起）：APP 3MB×2（保留 OTA 槽）、SPIFFS/LittleFS 6MB、MODEL 3.9MB（ESP-SR 唤醒/口令模型预留，已烧核心包自带 `srmodels.bin`）。之前默认方案 APP 仅 1.25MB 已用 99%。
@@ -59,3 +64,4 @@ arduino-cli upload  -p COM8 -b "同上" shougongpai
 - 事件流：`GET /api/events` 订阅 → 设备推 `text/event-stream` 帧（每事件一个独立 200 帧，body 为一个 SSE 事件）
 - 冒烟脚本：`keytest/serial-http.ps1 -Port COM8`；电脑侧集成用 `../bridge/`（本地真 HTTP + SSE）
 - BLE：NUS 风格 UUID（service `6e400001-…`），RX write（网页→设备）/ TX notify（设备→网页），200B 分片由隧道自行分帧
+- USB 网卡：原生口 NCM + `192.168.55.1:80` 真 TCP/IP（TinyUSB 构建；通道/语义与隧道完全一致），冒烟 `curl http://192.168.55.1/api/version`

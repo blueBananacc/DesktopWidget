@@ -1,6 +1,6 @@
 # SGP-HTTP 隧道传输规范（v1）
 
-本文件是**规范性文档**：定义收工牌如何在 **BLE / USB 串口这类无 IP 的字节流**上承载 HTTP/1.1 报文。
+本文件是**规范性文档**：定义收工牌如何在 **BLE / USB 串口这类无 IP 的字节流**，以及 **USB 网卡 TCP socket** 上承载 HTTP/1.1 报文。
 接口本身（路径、方法、请求体、响应体）见 [openapi/](openapi/)；设备主动推送的事件目录见 [events.md](events.md)。
 
 关键词 **必须 / 不得 / 应当 / 可以** 分别对应 RFC 2119 的 MUST / MUST NOT / SHOULD / MAY。
@@ -15,11 +15,11 @@
 ├──────────────────────────────────────────────┤
 │ 关联与复用：X-Request-Id、事件流帧              │  ← 本文 §5–§6
 ├──────────────────────────────────────────────┤
-│ 字节通道：BLE NUS / USB 串口 / 本地桥 TCP       │  ← 本文 §7
+│ 字节通道：BLE NUS / USB 串口 / USB 网卡 TCP     │  ← 本文 §7
 └──────────────────────────────────────────────┘
 ```
 
-HTTP 在这里只是**报文格式与语义规范**，不依赖 TCP/IP、Wi-Fi 或 DNS。
+HTTP 在这里只是**报文格式与语义规范**，不依赖 TCP/IP、Wi-Fi 或 DNS——但 USB 网卡通道（§7）会经由真实 TCP/IP 承载同一报文。
 
 ## 2. 报文语法
 
@@ -108,12 +108,14 @@ HTTP/1.1 是请求-响应模型；设备主动推送（按键、状态快照、�
 | BLE | NUS 风格 GATT 服务 `6e400001-…`，设备名前缀 `Shougong` | TX 特征 `6e400003-…` notify，每次 ≤200 B | RX 特征 `6e400002-…` write，每次 ≤180 B |
 | USB 串口 | CH343，460800 8N1（默认构建）**或** ESP32-S3 原生 USB-OTG CDC（`USBMode=default,CDCOnBoot=cdc` 构建，`Serial` 改绑原生口；Windows 首用需手动指派 COM，详见 doc/HARDWARE.md §15） | UART/CDC TX | UART/CDC RX |
 | 本地桥 | TCP（`127.0.0.1:8787`，真 HTTP/1.1） | 见 [bridge/README.md](../../bridge/README.md) | 同左 |
+| USB 网卡 | USB NCM + IPv4 + TCP `192.168.55.1:80`（`USBMode=default,CDCOnBoot=cdc` 构建；真 HTTP/1.1，无杂散字节） | socket 字节流 | socket 字节流；满槽时首响应为 `503` |
 
 1. 报文可以跨越多个 BLE notify / write，接收方**必须**把通道视为连续字节流并重组。
 2. **串口与设备日志共用 UART**。设备日志行**不得**以 `HTTP/` 开头；客户端解析器**必须**在报文之间跳过非报文字节，并以“行首 `HTTP/1.1 `”重新同步。设备**必须**用一次写调用输出一整个帧，避免日志插入帧内部。
 3. 设备对客户端发来的非法字节同样做重同步：丢弃到下一个可解析的请求起始行。
 4. 本地桥把真实 TCP HTTP 请求逐个转成隧道报文（自动补 `X-Request-Id`），把事件流转成标准 SSE 长连接；桥不改变任何资源语义。
 5. **USB-OTG CDC 通道特有**：固件 `write` 有 `tud_cdc_n_connected` 门控——客户端**必须断言 DTR**（串口库/终端工具默认行为），否则设备下行字节全部丢弃；上行不受 DTR 影响。波特率参数被忽略（CDC 无速率概念）。
+6. **USB 网卡通道**（详见 [../usb-net.md](../usb-net.md)）：真正的 TCP/IP 连接——无日志杂散字节、无 DTR 门控、报文边界由 socket 天然保证，每连接一个通道槽；`/api/events` 订阅在该连接上直接发 SSE 帧。并发连接数上限 `SGP_NET_SLOTS`（当前 3）。
 
 ## 8. 示例
 
