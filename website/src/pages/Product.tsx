@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowRight, BatteryCharging, BellOff, Bluetooth, Bot, CalendarClock, Check, ChevronDown, Coffee, Cpu, Eye, Gift, Hand,
+  ArrowRight, BellOff, Bluetooth, Bot, CalendarClock, Check, ChevronDown, Coffee, Cpu, Eye, Gift, Hand,
   Keyboard, LayoutDashboard, Lightbulb, Lock, Mic, MicOff, Moon, Package, Palette, Radio, RotateCcw, ShieldCheck,
-  Smartphone, Sparkles, Sunset, Timer, Truck, Usb, Users, Volume2, Wifi, X,
+  Sparkles, Sunset, Timer, Truck, Usb, Users, Wifi, X,
 } from "lucide-react";
 import { STATUSES } from "../domain/statuses";
 import type { StatusId } from "../domain/types";
@@ -221,14 +221,14 @@ function OffworkMock() {
 }
 
 const FAQ: [string, string][] = [
-  ["收工牌会录音或者监控我吗？", "不会。麦克风只在你按下语音键时工作，录音仅用于把这句话解析成提醒，解析完即丢弃，不保存原始音频。机身有物理静音开关，关掉后麦克风在硬件上断开。收工牌也不检测你是否在座位上、是否真的在工作。"],
-  ["同事能看到我的待办和日程吗？", "看不到。桌牌默认只显示状态名、预计结束时间和一句短提示；待办正文、会议标题、参会人都不会上屏。共享看板也只共享“当前状态”，计划表和历史只有你自己能看。"],
-  ["手机不在身边，计划表还会执行吗？", "会。计划表同步后保存在设备里，按设备本地时钟执行。手机重新连上后，设备会把这段时间实际发生的切换同步回来，不会重复记录。"],
-  ["收工之后，计划表会不会又把我切回“工作中”？", "不会。按下收工后，当天后续的工作节点不再自动生效；除非你自己重新开始工作，系统会提醒你这将开启新的状态区间。"],
-  ["灯光会不会太亮、打扰别人？", "灯光默认低亮度，可以按状态单独设置常亮、呼吸或关闭，也可以设置夜间自动关灯，或者直接开启“无灯光模式”。屏幕文字始终是状态的权威信息。"],
-  ["需要装 App 吗？支持哪些系统？", "Windows、macOS、ChromeOS 上用 Chrome / Edge 打开网页控制台即可，通过蓝牙或 USB 连接，不用安装任何东西。手机端提供 iOS 与 Android App，用于随身切换状态、语音提醒和专注模式联动。"],
-  ["可以自己设计屏幕吗？", "可以。每个状态都能换成自己的屏幕：选模板改文字、上传图片，或者做简短的帧动画。进阶用户还可以用受限的 SDK 编写屏幕程序，装进设备后在沙箱里运行。"],
-  ["团队里每个人都要有一台吗？", "单台就能完整使用。多台收工牌放在同一区域时，可以组成共享看板，彼此看到对方是否方便沟通；是否分享完全由每个人自己决定，默认关闭。"],
+  ["收工牌会录音或者监控我吗？", "不会。麦克风只在你从控制台发起语音输入时工作，录音期间屏幕显示“录音中”、红灯慢呼吸，60 秒自动停止，连接断开也会立即停止。音频只交给你自己配置的语音识别服务转成文字，设备不保存录音。收工牌也不检测你是否在座位上、是否真的在工作。"],
+  ["同事能看到我的待办和日程吗？", "桌牌常规只显示状态名、时间和一句短提示；待办到点时，正文是否上屏由你决定。共享看板也只共享“当前状态”，计划表、待办和历史只有你自己能看。"],
+  ["电脑关了，计划表还会执行吗？", "会。计划表保存在设备里，连上控制台校一次时间后，就按设备本地时钟执行，网页关掉也不影响。设备在断电前会保存今天的状态记录，重新连上后同步回控制台。"],
+  ["收工之后，计划表会不会又把我切回“工作中”？", "不会。按下收工后，当天后续的工作节点不再自动生效，除非你自己重新切换状态。"],
+  ["灯光会不会太亮、打扰别人？", "灯光亮度可调，每个状态都可以单独设成常亮、呼吸或关闭；还可以开启夜间自动关灯（22:00–07:00）。屏幕文字始终是状态的权威信息。"],
+  ["需要装 App 吗？支持哪些系统？", "不需要。在 Windows、macOS、ChromeOS 上用 Chrome / Edge 打开网页控制台，通过蓝牙或 USB 连接即可。插上原生 USB 口，电脑还会多出一张虚拟网卡，脚本可直接访问设备的 HTTP 接口。手机 App 仍在规划中。"],
+  ["可以自己设计屏幕吗？", "可以。默认屏有“状态 + 时间 + 说明”“状态 + 时间”“仅状态”三种布局；也可以给任意状态写一个屏幕程序（WebAssembly），在网页里实时预览，装进设备后在 wasm3 沙箱里运行，程序出错会自动回到默认屏。"],
+  ["团队里每个人都要有一台吗？", "单台就能完整使用。多台收工牌放在同一区域时，通过 ESP-NOW 组成共享看板，彼此看到对方是否方便沟通；是否分享完全由每个人自己决定，默认关闭。"],
 ];
 
 export function ProductPage() {
@@ -253,7 +253,7 @@ export function ProductPage() {
     { name: color === "mist" ? "g-white" : "hero", alt: color === "mist" ? "云雾白配色 3/4 视角" : "收工牌 3/4 视角", hint: "与主图同角度的浅色版本" },
     { name: "g-front", alt: "正面平视", hint: "展示点阵屏与机身比例" },
     { name: "g-top", alt: "顶部俯视", hint: "4 枚按键 + 最右侧旋钮" },
-    { name: "g-side", alt: "侧面与接口", hint: "USB-C 接口、静音开关" },
+    { name: "g-side", alt: "侧面与接口", hint: "双 USB-C 接口" },
     { name: "scene-desk", alt: "桌面场景", hint: "放在显示器下方的工位" },
   ];
 
@@ -305,10 +305,10 @@ export function ProductPage() {
               </div>
             </div>
             <ul className="pd-hi">
-              <li><Eye />大字点阵屏 + 状态灯，3 米外也看得清</li>
-              <li><CalendarClock />时间计划表，到点自动切换状态</li>
-              <li><Sunset />长按一键收工，自动生成当日回顾</li>
-              <li><ShieldCheck />隐私优先：不录音存档，不做效率排名</li>
+              <li><Eye />OLED 状态屏 + RGB 状态灯，抬头一眼看懂</li>
+              <li><CalendarClock />时间计划表存在设备里，到点自动切换</li>
+              <li><Sunset />按住 1.5 秒一键收工，自动生成当日回顾</li>
+              <li><ShieldCheck />隐私优先：不保存录音，不做效率排名</li>
             </ul>
             <div className="pd-buy-btns">
               <button type="button" className="btn btn-primary pd-btn-lg" onClick={() => setReserved(true)} disabled={reserved}>
@@ -331,7 +331,7 @@ export function ProductPage() {
           <div className="pd-demo-txt">
             <span className="pd-eyebrow is-dark">点一点看看</span>
             <h2>你现在方不方便，<br />它替你说。</h2>
-            <p>六种预设状态，每种都有独立的文字、图标与灯色。颜色只是辅助，文字才是答案，色弱的同事也能一眼看懂。</p>
+            <p>六种预设状态，每种都有独立的文字、提示与灯色，还能再自定义 8 个。颜色只是辅助，文字才是答案，色弱的同事也能一眼看懂。</p>
             <div className="pd-demo-tabs" role="tablist">
               {DEMO_ORDER.map((s) => (
                 <button key={s} type="button" role="tab" aria-selected={demo === s} className={demo === s ? "on" : ""}
@@ -359,22 +359,22 @@ export function ProductPage() {
       </Section>
 
       {/* ===== 怎么用 ===== */}
-      <Section id="how" eyebrow="怎么用" title="按一下、旋一下、长按收工" desc="不用打开手机，也不用切到某个软件。三个动作覆盖一整天。" className="pd-alt">
+      <Section id="how" eyebrow="怎么用" title="按一下、旋一下、长按收工" desc="不用打开电脑或手机，也不用切到某个软件。三个动作覆盖一整天。" className="pd-alt">
         <div className="pd-steps">
           <div className="pd-step">
             <span className="pd-step-n">01 · 按</span>
             <h3>按一下，切换状态</h3>
-            <p>顶部四枚实体按键，可以分别设成“工作中”“勿扰”“会议中”或任意自定义状态。按下即刻生效，屏幕与灯光同步变化。</p>
+            <p>四枚实体按键加一枚触摸键，默认是收工、勿扰、上一个 / 下一个状态和休息，也可以设成任意预设或自定义状态。按下即刻生效，屏幕与灯光同步变化。</p>
           </div>
           <div className="pd-step">
             <span className="pd-step-n">02 · 旋</span>
-            <h3>旋一下，开始专注</h3>
-            <p>转动右侧旋钮，每格 5 分钟，按下开始倒计时。屏幕显示剩余时间，结束时灯光轻闪一次提醒你。</p>
+            <h3>旋一下，开始倒计时</h3>
+            <p>转动右侧旋钮，默认每格 5 分钟，按下开始倒计时，长按取消。屏幕显示剩余时间，到点后屏幕提醒、灯光闪烁。</p>
           </div>
           <div className="pd-step">
             <span className="pd-step-n">03 · 长按</span>
-            <h3>长按收工键，结束今天</h3>
-            <p>长按约 2 秒，桌牌显示“已收工”，当天的状态记录随之结束，打开手机就能看到今天的回顾。</p>
+            <h3>按住收工键，结束今天</h3>
+            <p>按住 1.5 秒，桌牌显示“已收工”，当天的状态记录随之结束，打开控制台就能看到今天的回顾。</p>
           </div>
         </div>
         <Shot name="g-top" alt="顶部按键与旋钮特写" hint="俯视角度，标注 4 枚按键和旋钮的功能" ratio="21 / 9" className="pd-wide" />
@@ -385,37 +385,37 @@ export function ProductPage() {
         <Feature icon={<CalendarClock />} eyebrow="时间计划表" title="提前排好，到点自动切换"
           media={<PlanMock />}>
           <p>把一天的节奏写成计划表：9:00 工作中、10:30 会议中、12:00 休息中……到点后桌牌自己切换，你不用记得去改。</p>
-          <Bullets items={["支持重复计划与单日计划，可建多套一键切换", "手动切换默认只覆盖到下一个节点，也可暂停今日计划", "手机离线时按设备本地时钟照常执行"]} />
+          <Bullets items={["支持重复计划与单日计划，最多 8 套一键切换", "手动切换默认只覆盖到下一个节点，也可暂停今日计划", "计划存在设备里，网页关掉也按本地时钟照常执行"]} />
         </Feature>
 
         <Feature flip icon={<Sunset />} eyebrow="一键收工" title="给每一天一个明确的结束"
           media={<div className="pd-stack"><OffworkMock /><VideoShot name="scene-offwork" alt="傍晚收工场景：夕阳下的工位，桌牌显示“已收工”" ratio="16 / 10" /></div>}>
-          <p>长按收工键或在手机上按住 1.5 秒，桌牌切换为“已收工”，今天的状态记录到此为止。误触了？10 秒内可以撤销。</p>
-          <Bullets items={["收工后计划表不会再把你切回工作状态", "可以设置“下班后提醒”，收工时才弹出", "手机没连上也能收工，重连后自动同步"]} />
+          <p>按住收工键或在控制台按住 1.5 秒，桌牌切换为“已收工”，今天的状态记录到此为止。在控制台误触了？10 秒内可以撤销。</p>
+          <Bullets items={["收工后计划表不会再把你切回工作状态", "可以设置“下班后提醒”，收工时才弹出", "没连电脑也能收工，记录存在设备里，重连后同步"]} />
         </Feature>
 
         <Feature icon={<LayoutDashboard />} eyebrow="状态回顾" title="看看今天的时间去了哪里"
           media={<ReviewMock />}>
           <p>每种状态的累计时长、占比、切换次数和起止时间一目了然。没有记录的时段就写“未记录”，不会替你猜是工作还是休息。</p>
-          <Bullets items={["支持修正明显错误的区间", "数据只保存在你自己的设备和浏览器里", "不出现“效率”“绩效”“排名”"]} />
+          <Bullets items={["支持修正明显错误的区间，可导出 CSV", "数据只保存在你自己的设备和浏览器里", "不出现“效率”“绩效”“排名”"]} />
         </Feature>
 
         <Feature flip icon={<Timer />} eyebrow="旋钮定时 · 休息提醒" title="专注有计时，久坐有提醒"
           media={<Shot name="macro-knob" alt="旋钮特写" hint="金属旋钮微距，屏幕显示倒计时 25:00" ratio="4 / 3" />}>
-          <p>旋钮每格 5 分钟，5 到 180 分钟随手设定。累计处于工作状态 45 分钟后，灯光会温和地提醒你起来活动一下。</p>
-          <Bullets items={["计时结束不会擅自改变你的状态", "会议中、已收工时休息计时自动暂停", "可以稍后提醒、今天不再提醒或彻底关闭"]} />
+          <p>旋钮默认每格 5 分钟、最长 180 分钟，步长和上限都能在控制台调整。累计处于工作类状态 45 分钟后，屏幕和灯光会提醒你起来活动一下。</p>
+          <Bullets items={["计时结束不会擅自改变你的状态", "会议中、休息中、已收工时休息计时自动暂停", "提醒间隔可调，也可以今天不再提醒或彻底关闭"]} />
         </Feature>
 
         <Feature icon={<Lightbulb />} eyebrow="RGB 状态灯 · 自定义按键" title="远远看一眼，颜色就告诉你"
-          media={<div className="pd-stack"><Shot name="scene-night" alt="夜间氛围" hint="暗光桌面，状态灯带泛出柔和光晕" ratio="16 / 10" /><AppShot name="app-lighting" alt="灯效设置界面" /></div>}>
-          <p>屏幕下方的 RGB 灯带让状态在远处也能被识别。每个状态都可以单独设置灯色和模式，四枚按键也都可以重新映射。</p>
-          <Bullets items={["常亮 / 呼吸 / 关闭，亮度可调", "夜间自动关灯，或开启无灯光模式", "收工键的长按确认规则不可被覆盖，防止误触"]} />
+          media={<div className="pd-stack"><Shot name="scene-night" alt="夜间氛围" hint="暗光桌面，状态灯泛出柔和光晕" ratio="16 / 10" /><AppShot name="app-lighting" alt="灯效设置界面" /></div>}>
+          <p>RGB 状态灯让状态在远处也能被识别。每个状态都可以单独设置灯光模式，四枚按键和触摸键也都可以重新映射。</p>
+          <Bullets items={["常亮 / 呼吸 / 关闭，亮度可调", "夜间 22:00–07:00 自动关灯", "K1–K4 必须保留一枚收工键，且须按住确认，防止误触"]} />
         </Feature>
 
         <Feature flip icon={<Users />} eyebrow="共享状态看板" title="整个团队谁有空，一屏看清"
           media={<div className="pd-stack"><Shot name="scene-team" alt="团队办公场景：多张相邻工位上各放一台收工牌，分别显示不同状态" ratio="2560 / 1425" /><AppShot name="app-board" alt="共享看板界面" /></div>}>
-          <p>同一区域的收工牌通过 ESP-NOW 彼此同步。加入团队后，在手机或网页上就能看到每位成员的当前状态和最后更新时间。</p>
-          <Bullets items={["分享默认关闭，只分享“当前状态”", "邀请链接 / 二维码加入，随时退出或撤销", "离线成员标记“可能已过期”，不伪装成实时"]} />
+          <p>同一区域的收工牌通过 ESP-NOW 彼此广播状态。连着控制台的那台收工牌充当网关，把听到的成员状态转发到网页看板，附带最后更新时间。</p>
+          <Bullets items={["分享默认关闭，只分享“当前状态”", "无需服务器，同区域设备直接互联", "离线成员标记“可能已过期”，不伪装成实时"]} />
         </Feature>
       </Section>
 
@@ -425,25 +425,25 @@ export function ProductPage() {
           <div className="pd-card">
             <span className="pd-card-ico" style={{ background: "var(--t-pink)", color: "var(--t-pink-i)" }}><Mic /></span>
             <h3>说一句话，创建提醒</h3>
-            <p>“提醒我下班后带狗狗看医生”——AI 解析出时间和内容，你确认后才同步到桌牌。</p>
+            <p>“半小时后提醒我去开会”——设备录音，经你选的语音识别和大模型解析，直接在设备上创建提醒或切换状态。API Key 只存在你的浏览器里。</p>
             <AppShot name="app-reminders" alt="待办与提醒界面" />
           </div>
           <div className="pd-card">
             <span className="pd-card-ico" style={{ background: "var(--t-violet)", color: "var(--t-violet-i)" }}><Palette /></span>
             <h3>屏幕想怎么显示都行</h3>
-            <p>选模板、改文字、放图片、做简单的帧动画；进阶玩家还能写自己的屏幕程序。</p>
+            <p>三种默认布局随手切换；也可以给任意状态写一个 WebAssembly 屏幕程序，网页实时预览，装进设备后沙箱运行。</p>
             <AppShot name="app-screen" alt="屏幕内容编辑界面" />
           </div>
           <div className="pd-card">
             <span className="pd-card-ico" style={{ background: "var(--t-blue)", color: "var(--t-blue-i)" }}><Bot /></span>
-            <h3>AI Agent 状态联动</h3>
-            <p>电脑上的 Agent 在跑、等你输入、已完成还是出错了，抬头看一眼桌牌就知道。不显示任何代码和 Prompt。</p>
+            <h3>AI Agent 状态联动 · 测试版</h3>
+            <p>电脑上的 Agent 在跑、等你输入、已完成还是出错了，抬头看一眼桌牌就知道。设备开放本地 HTTP 接口，脚本和 Agent 可以直接调用。不显示任何代码和 Prompt。</p>
             <AppShot name="app-agent" alt="Agent 联动界面" />
           </div>
           <div className="pd-card">
             <span className="pd-card-ico" style={{ background: "var(--t-teal)", color: "var(--t-teal-i)" }}><BellOff /></span>
-            <h3>手机自动进入专注模式</h3>
-            <p>切到“勿扰”时，已配对手机自动静音或开启专注模式；离开时按你的设置恢复。</p>
+            <h3>手机专注模式联动 · 规划中</h3>
+            <p>随手机 App 推出：切到“勿扰”时，已配对手机在系统授权范围内静音或开启专注模式；离开时按你的设置恢复。</p>
             <Shot name="scene-phone" alt="手机联动" hint="桌牌显示“请勿打扰”，旁边手机进入勿扰模式" ratio="16 / 10" />
           </div>
         </div>
@@ -474,13 +474,13 @@ export function ProductPage() {
       </Section>
 
       {/* ===== 配套软件 ===== */}
-      <Section id="app" eyebrow="配套软件" title="打开浏览器就能用的控制台" desc="用 Chrome / Edge 打开控制台，蓝牙或 USB 连上收工牌即可，不用安装任何东西。手机端 App 同步上线。" className="pd-alt">
+      <Section id="app" eyebrow="配套软件" title="打开浏览器就能用的控制台" desc="用 Chrome / Edge 打开控制台，蓝牙或 USB 连上收工牌即可，不用安装任何东西。手机 App 仍在规划中。" className="pd-alt">
         <AppShot name="app-overview" alt="控制台总览" />
         <div className="pd-app-pts">
-          <div><Bluetooth /><b>蓝牙 / USB 直连</b><span>Web Bluetooth 与 Web Serial，免驱动</span></div>
-          <div><Smartphone /><b>手机 App</b><span>iOS / Android，随身切换状态</span></div>
+          <div><Bluetooth /><b>蓝牙 / USB 直连</b><span>Web Bluetooth 与 Web Serial，免安装</span></div>
+          <div><Usb /><b>开放 HTTP 接口</b><span>USB 虚拟网卡直连，附 OpenAPI 文档</span></div>
           <div><Lock /><b>数据在本地</b><span>计划、待办、回顾都存在设备与浏览器</span></div>
-          <div><Sparkles /><b>持续更新</b><span>固件与屏幕程序可在线升级</span></div>
+          <div><Sparkles /><b>屏幕程序在线装</b><span>写好即装进设备，网页关掉照常运行</span></div>
         </div>
         <div className="pd-center"><Link to="/" className="btn btn-primary pd-btn-lg">打开网页控制台<ArrowRight /></Link></div>
       </Section>
@@ -488,8 +488,8 @@ export function ProductPage() {
       {/* ===== 隐私 ===== */}
       <Section eyebrow="隐私优先" title="它为你工作，不替任何人盯着你">
         <div className="pd-privacy">
-          <div><MicOff /><b>物理静音开关</b><span>关掉就是真的关掉。语音只用于解析提醒，不保存原始音频。</span></div>
-          <div><Eye /><b>屏幕不泄露细节</b><span>会议标题、参会人、待办正文默认都不上屏。</span></div>
+          <div><MicOff /><b>录音看得见</b><span>只在你发起时录音，屏幕显示“录音中”、红灯呼吸，60 秒自动停；设备不保存音频。</span></div>
+          <div><Eye /><b>屏幕不泄露细节</b><span>计划和历史不上屏，待办正文是否显示由你决定。</span></div>
           <div><Users /><b>分享由你决定</b><span>默认不分享；只分享当前状态，不分享计划与历史。</span></div>
           <div><ShieldCheck /><b>没有效率评分</b><span>不检测你是否在座位上，不做绩效统计和排名。</span></div>
         </div>
@@ -502,8 +502,8 @@ export function ProductPage() {
           <div>
             <span className="pd-eyebrow">幕后</span>
             <h2>从一块面包板开始</h2>
-            <p>收工牌最初只是一块面包板：一颗 ESP32-S3、一块小屏幕、几个按键和一个旋钮。我们每天把它放在自己的工位上，改了几十版交互，直到“按一下、旋一下、长按收工”变成不需要思考的动作。</p>
-            <p>现在它有了正式的外壳，但初衷没变：做一个由你自己掌控的小工具，帮你守住专注，也帮你按时下班。</p>
+            <p>收工牌最初只是一块面包板：一颗 ESP32-S3、一块 0.96 寸 OLED、四个按键、一个旋钮和一只麦克风。我们每天把它放在自己的工位上，改了几十版交互，直到“按一下、旋一下、长按收工”变成不需要思考的动作。</p>
+            <p>接下来它会换上正式的外壳，但初衷不变：做一个由你自己掌控的小工具，帮你守住专注，也帮你按时下班。</p>
           </div>
         </div>
       </section>
@@ -511,14 +511,14 @@ export function ProductPage() {
       {/* ===== 规格 ===== */}
       <Section id="specs" eyebrow="技术规格" title="规格参数" className="pd-alt">
         <div className="pd-specs">
-          <div><h4><Eye />屏幕</h4><ul><li>高对比度点阵状态屏</li><li>大字状态名 + 图标 + 预计结束时间</li><li>自动调光、定时熄屏、像素位移防烧屏</li></ul></div>
-          <div><h4><Keyboard />操作</h4><ul><li>4 枚实体按键（收工键 + 3 枚可自定义）</li><li>金属旋钮，带按压确认，每格 5 分钟</li><li>机身电容触摸区</li></ul></div>
-          <div><h4><Lightbulb />灯光</h4><ul><li>RGB 状态灯带</li><li>常亮 / 呼吸 / 闪烁，亮度可调</li><li>夜间关闭时段、无灯光模式</li></ul></div>
-          <div><h4><Volume2 />声音</h4><ul><li>MEMS 数字麦克风</li><li>物理麦克风静音开关 + 录音指示</li><li>提示音扬声器</li></ul></div>
-          <div><h4><Cpu />处理器</h4><ul><li>ESP32-S3 双核 240 MHz</li><li>16 MB Flash · 8 MB PSRAM</li><li>屏幕程序沙箱运行</li></ul></div>
-          <div><h4><Radio />连接</h4><ul><li>Bluetooth LE 5.0</li><li>2.4 GHz Wi-Fi · ESP-NOW 设备互联</li><li>USB-C 数据连接</li></ul></div>
-          <div><h4><BatteryCharging />供电</h4><ul><li>内置可充电锂电池</li><li>USB-C 充电</li><li>低电量时才在屏幕提示</li></ul></div>
-          <div><h4><Wifi />软件</h4><ul><li>网页控制台：Chrome / Edge</li><li>手机 App：iOS / Android</li><li>固件在线升级</li></ul></div>
+          <div><h4><Eye />屏幕</h4><ul><li>0.96 寸 128×64 OLED（原型版，量产尺寸待定）</li><li>状态名 + 时间 + 说明，三种默认布局</li><li>每个状态可装 WebAssembly 屏幕程序</li></ul></div>
+          <div><h4><Keyboard />操作</h4><ul><li>4 枚实体按键（须保留 1 枚收工键，其余可自定义）</li><li>EC11 旋钮，带按压确认，步长 1–30 分钟可调</li><li>1 枚电容触摸键</li></ul></div>
+          <div><h4><Lightbulb />灯光</h4><ul><li>WS2812 RGB 状态灯</li><li>常亮 / 呼吸 / 关闭，亮度可调</li><li>夜间 22:00–07:00 自动关灯</li></ul></div>
+          <div><h4><Mic />麦克风</h4><ul><li>INMP441 I²S 数字麦克风</li><li>16 kHz 采样，ADPCM 压缩上行</li><li>录音指示：屏幕“录音中” + 红灯呼吸</li></ul></div>
+          <div><h4><Cpu />处理器</h4><ul><li>ESP32-S3 双核 240 MHz</li><li>16 MB Flash · 8 MB PSRAM</li><li>屏幕程序在 wasm3 沙箱运行</li></ul></div>
+          <div><h4><Radio />连接</h4><ul><li>Bluetooth LE</li><li>2.4 GHz Wi-Fi · ESP-NOW 设备互联</li><li>原生 USB：串口 + 虚拟网卡（192.168.55.1）</li></ul></div>
+          <div><h4><Usb />供电</h4><ul><li>USB-C 5V 供电</li><li>原型版不含电池</li><li>断电后连上控制台自动校时</li></ul></div>
+          <div><h4><Wifi />软件</h4><ul><li>网页控制台：Chrome / Edge</li><li>设备 HTTP API + OpenAPI 文档</li><li>手机 App：规划中</li></ul></div>
         </div>
       </Section>
 
