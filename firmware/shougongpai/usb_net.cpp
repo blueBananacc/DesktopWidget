@@ -23,10 +23,19 @@
 #include <lwip/netif.h>
 #include <lwip/pbuf.h>
 #include <lwip/etharp.h>
+#include <lwip/ethip6.h>
+#include <netif/ethernet.h>
 #include <lwip/tcpip.h>
 #include <lwip/inet.h>
 #include <lwip/sockets.h>
 #include <lwip/ip4_addr.h>
+#include <lwip/ip6_addr.h>
+#include <lwip/ip6.h>
+#include <lwip/udp.h>
+#include <lwip/igmp.h>
+#include <lwip/mld6.h>
+#include <lwip/def.h>
+#include <ctype.h>
 #include <apps/dhcpserver/dhcpserver.h>
 #include <esp_mac.h>
 #include <freertos/task.h>
@@ -71,6 +80,20 @@ static void buildMsOs20(uint8_t* o) {
 }
 
 static struct netif* g_netif;
+static volatile uint32_t g_dbgRx, g_dbgDns, g_dbgAns, g_dbgRa, g_dbgRaT, g_dbgLo; // TEMP-DEBUG
+static char g_dbgName[12];                              // TEMP-DEBUG: 最后一个查询名
+static char g_dbgWhy;                                   // TEMP-DEBUG: 最后丢弃原因
+static uint8_t g_dbgM;                                  // TEMP-DEBUG: tud_mounted
+RTC_DATA_ATTR static uint32_t g_bootCnt;                // TEMP-DEBUG: 跨软复位计数
+
+size_t sgpUsbNetDebugLine(char* buf, size_t n) {          // TEMP-DEBUG: OLED 底栏一行
+  int w = snprintf(buf, n, "b%lur%lud%lul%lui%lut%lum%u %c%.4s",
+                   (unsigned long)g_bootCnt, (unsigned long)g_dbgRx,
+                   (unsigned long)g_dbgDns, (unsigned long)g_dbgLo,
+                   (unsigned long)g_dbgRa, (unsigned long)g_dbgRaT,
+                   (unsigned)g_dbgM, g_dbgWhy ? g_dbgWhy : '-', g_dbgName);
+  return w > 0 ? (size_t)w : 0;
+}
 
 // ---- MS OS 1.0 通路：bcdUSB 0x0200 下也能工作（不依赖 BOS）----
 // string 0xEE = "MSFT100"+vendor code；Windows 读到后发 vendor 请求 wIndex=0x0004
@@ -187,6 +210,7 @@ static uint16_t sgpNcmDescLoader(uint8_t* dst, uint8_t* itf) {
 #define SGP_NET_DISABLE 0
 #endif
 __attribute__((constructor)) static void sgpUsbNetCtor() {
+  g_bootCnt++;                                                           // TEMP-DEBUG
   esp_read_mac(g_mac, ESP_MAC_WIFI_STA);
   snprintf(g_usbSerial, sizeof g_usbSerial, "%02X:%02X:%02X:%02X:%02X:%02X",
            g_mac[0], g_mac[1], g_mac[2], g_mac[3], g_mac[4], g_mac[5]);
@@ -198,27 +222,50 @@ __attribute__((constructor)) static void sgpUsbNetCtor() {
 }
 
 // ---------------- TinyUSB netd ↔ lwIP netif ----------------
+// 死锁防线：USB 任务绝不能阻塞！tcpip_input 在 mbox 满时会阻塞 → USB 排不空 defer
+// 队列 → tcpip 在 linkoutput 的 usbd_defer_func 里阻塞 → 循环死锁。
+// 用非阻塞 try_callback 投递，回调里直接调 ethernet_input（mbox 满就丢帧）。
+static void sgpRxInput(void* arg) {                                     // tcpip 线程
+  struct pbuf* p = (struct pbuf*)arg;
+  if (g_netif) ethernet_input(p, g_netif);
+  else pbuf_free(p);
+}
+
 extern "C" bool tud_network_recv_cb(const uint8_t* src, uint16_t size) {
+  g_dbgRx++;   // TEMP-DEBUG
   if (g_netif && src && size && size <= 2000) {
     struct pbuf* p = pbuf_alloc(PBUF_RAW, size, PBUF_POOL);
     if (p) {
       pbuf_take(p, src, size);
-      if (g_netif->input(p, g_netif) != ERR_OK) pbuf_free(p);           // tcpip_input → tcpip 线程
+      if (tcpip_try_callback(sgpRxInput, p) != ERR_OK) { pbuf_free(p); g_dbgWhy = 'F'; }
     }
   }
   tud_network_recv_renew();
   return true;
 }
 
+static volatile int16_t g_txInFlight;                                   // 已递交给 USB 队列未发出的帧
+
 static void sgpDeferTx(void* arg) {                                     // USB 任务上下文
   struct pbuf* p = (struct pbuf*)arg;
+  g_txInFlight--;
   if (tud_network_can_xmit(p->tot_len)) tud_network_xmit(p, p->tot_len);
   else pbuf_free(p);                                                    // 驱动忙 → 丢（TCP 会重传）
 }
 
+// 在途上限：defer 事件占 TinyUSB 队列槽，若 USB 任务短暂停滞/队列浅，
+// 无上限投递会把队列塞满 → usbd_defer_func 阻塞 → tcpip 死锁（见 recv_cb 注释）
+static bool sgpDeferFrame(struct pbuf* p) {
+  if (g_txInFlight >= 16) { g_dbgWhy = 'Q'; return false; }             // 背压：丢不堵
+  g_txInFlight++;
+  usbd_defer_func(sgpDeferTx, p, false);                                // void：队列深则阻塞，靠上限兜底
+  return true;
+}
+
 static err_t sgpLinkOut(struct netif* nif, struct pbuf* p) {            // tcpip 线程上下文
+  g_dbgLo++;                                                            // TEMP-DEBUG: tcpip 活性
   pbuf_ref(p);
-  usbd_defer_func(sgpDeferTx, p, false);                                // 移交 USB 任务组 NTB
+  if (!sgpDeferFrame(p)) { pbuf_free(p); return ERR_MEM; }
   return ERR_OK;
 }
 
@@ -242,7 +289,188 @@ static err_t sgpNetifInit(struct netif* nif) {
   nif->flags = NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHARP | NETIF_FLAG_ETHERNET | NETIF_FLAG_IGMP;
   nif->linkoutput = sgpLinkOut;
   nif->output = etharp_output;
+  nif->output_ip6 = ethip6_output;        // v6 走独立出口回调（nd6 邻居解析，同走 linkoutput）
   return ERR_OK;
+}
+
+// ---------------- 零配置名称解析：DNS:53 + LLMNR(:5355) + mDNS(:5353) ----------------
+// 应答面三条路全绑本网卡，匹配规则统一：首标签 = "shougongpai"（带不带后缀都行）：
+//   shougongpai / shougongpai.local / shougongpai.<DNS后缀> → AAAA = fd53:4750::1
+// 只回 AAAA：主机没 v4 时 A 记录给了也连不上；A 查询回 NODATA，解析器自然落到 v6。
+// 三个 pcb 都 udp_bind_netif 到本网卡：不回答其它接口上的同名查询。
+
+#define SGP_HOST       "shougongpai"
+#define QT_AAAA 28
+#define QT_ANY  255
+
+// 设备的 ULA 固定地址 fd53:4750::1——RA 通告的 /64 网段的 1 号；不受 SLAAC/DAD 状态影响
+static ip6_addr_t g_ula;
+
+// 解码 qname → 小写 "a.b.c." 串；返回 qname 之后偏移，非法返回 0
+static uint16_t sgpDnsName(const uint8_t* m, uint16_t n, uint16_t off, char* out, uint16_t bsz) {
+  uint16_t o = 0;
+  while (off < n) {
+    uint8_t l = m[off++];
+    if (!l) { if (o < bsz) out[o] = 0; return off; }
+    if (l & 0xC0 || off + l > n || o + l + 1 >= bsz) return 0;   // 查询段不接受压缩指针
+    for (uint8_t i = 0; i < l; i++) out[o++] = tolower(m[off + i]);
+    out[o++] = '.';
+    off += l;
+  }
+  return 0;
+}
+
+static void wr16(uint8_t* o, uint16_t v) { o[0] = v >> 8; o[1] = v; }
+static void wr32(uint8_t* o, uint32_t v) { wr16(o, v >> 16); wr16(o + 2, v); }
+
+// 一条 answer：名字用 0xC00C 压回问题段
+static uint16_t sgpDnsAns(uint8_t* o, uint16_t type, uint32_t ttl, bool flush,
+                          uint16_t rdlen, const uint8_t* rd) {
+  o[0] = 0xC0; o[1] = 0x0C;
+  wr16(o + 2, type);
+  wr16(o + 4, flush ? 0x8001 : 0x0001);                          // mDNS 唯一记录要 cache-flush 位
+  wr32(o + 6, ttl);
+  wr16(o + 10, rdlen);
+  memcpy(o + 12, rd, rdlen);
+  return 12 + rdlen;
+}
+
+// 拼应答报文：回声问题段 + AAAA answer（或 NODATA：NOERROR+0 answer）。
+// 只服务 AAAA=ULA——v4 地址在主机无 v4 时给了也连不上；AAAA-only 让解析器必然落到 v6。
+static uint16_t sgpDnsBuild(uint8_t* o, uint16_t cap, uint16_t id, uint16_t flags,
+                            const uint8_t* q, uint16_t qlen, bool aaaa, bool mdns) {
+  uint16_t an = aaaa ? 1 : 0;
+  if (12 + qlen + 28 > cap) return 0;
+  wr16(o, id); wr16(o + 2, flags);
+  wr16(o + 4, 1); wr16(o + 6, an); wr16(o + 8, 0); wr16(o + 10, 0);
+  memcpy(o + 12, q, qlen);
+  uint16_t w = 12 + qlen;
+  if (aaaa) w += sgpDnsAns(o + w, QT_AAAA, mdns ? 120 : 30, mdns,
+                           16, (const uint8_t*)g_ula.addr);
+  return w;
+}
+
+static void sgpDnsServe(struct udp_pcb* upcb, struct pbuf* p,
+                        const ip_addr_t* src, u16_t port, bool mdns) {
+  g_dbgDns++;   // TEMP-DEBUG
+  g_dbgWhy = '?';
+  if (!g_netif || p->tot_len < 12) { g_dbgWhy = 'L'; return; }
+  uint8_t* m = (uint8_t*)p->payload;
+  uint16_t n = p->tot_len;
+  if ((m[2] & 0x80) || !(m[4] | m[5])) { g_dbgWhy = 'R'; return; }   // 只处理非零问题的查询
+  char name[64];
+  uint16_t qe = sgpDnsName(m, n, 12, name, sizeof name);
+  if (!qe || qe + 4 > n) { g_dbgWhy = 'N'; return; }
+  strncpy(g_dbgName, name, sizeof g_dbgName - 1);                    // TEMP-DEBUG
+  g_dbgName[sizeof g_dbgName - 1] = 0;
+  uint16_t qt = (m[qe] << 8) | m[qe + 1];
+  uint16_t qc = (m[qe + 2] << 8) | m[qe + 3];
+  // 首标签是 shougongpai 就应答（shougongpai. / .local. / .sgp. 各种后缀通吃）
+  if (strncmp(name, SGP_HOST, sizeof SGP_HOST - 1) ||
+      (name[sizeof SGP_HOST - 1] && name[sizeof SGP_HOST - 1] != '.')) { g_dbgWhy = 'M'; return; }
+  bool aaaa = qt == QT_AAAA || qt == QT_ANY;                         // A/其它 → NODATA 空应答
+  uint8_t out[512];
+  uint16_t len = sgpDnsBuild(out, sizeof out, (m[0] << 8) | m[1],
+                             mdns ? 0x8400 : 0x8000, m + 12, qe + 4 - 12, aaaa, mdns);
+  if (!len) { g_dbgWhy = 'B'; return; }
+  struct pbuf* r = pbuf_alloc(PBUF_TRANSPORT, len, PBUF_RAM);
+  if (!r) { g_dbgWhy = 'P'; return; }
+  pbuf_take(r, out, len);
+  if (mdns && !(qc & 0x8000) && port == 5353) {                  // 标准 mDNS 组播应答
+    ip_addr_t grp;
+    if (IP_IS_V6(src)) IP_ADDR6(&grp, PP_HTONL(0xff020000), 0, 0, PP_HTONL(0xfb));
+    else IP_ADDR4(&grp, 224, 0, 0, 251);
+    if (udp_sendto_if(upcb, r, &grp, 5353, g_netif) != ERR_OK) { g_dbgWhy = 'S'; }
+    else g_dbgAns++;
+  } else {                                                     // LLMNR / mDNS-QU：单播回询问方
+    if (udp_sendto_if(upcb, r, src, port, g_netif) != ERR_OK) { g_dbgWhy = 'S'; }
+    else g_dbgAns++;
+  }                                                            // TEMP-DEBUG
+  pbuf_free(r);
+}
+
+static void sgpLlmnrCb(void* a, struct udp_pcb* u, struct pbuf* p, const ip_addr_t* src, u16_t port) {
+  sgpDnsServe(u, p, src, port, false);
+  pbuf_free(p);
+}
+static void sgpMdnsCb(void* a, struct udp_pcb* u, struct pbuf* p, const ip_addr_t* src, u16_t port) {
+  sgpDnsServe(u, p, src, port, true);
+  pbuf_free(p);
+}
+
+// ---------------- IPv6 RA：让主机 SLAAC 自配地址 + 把设备注册成 DNS ----------------
+// Windows 在「没有任何地址」的网卡上不做名字解析（LLMNR/mDNS 都不发），
+// 所以反向推一把：周期组播 RA → 主机 SLAAC 拿到 fd53:4750::/64 地址 →
+// RDNSS 再把本机注册成 DNS 服务器 → 普通单播 DNS 解析 shougongpai → ULA。
+// Router Lifetime=0：不当默认路由，绝不劫持主机的上网流量。
+#define SGP_RA_MS 4000
+
+static uint32_t sgpCkAdd(uint32_t acc, const uint8_t* d, uint16_t n) {
+  while (n > 1) { acc += (d[0] << 8) | d[1]; d += 2; n -= 2; }
+  if (n) acc += d[0] << 8;
+  return acc;
+}
+
+static const ip6_addr_t* sgpV6LL(void) {                     // 链路本地地址（RA 源地址）
+  for (int i = 0; i < LWIP_IPV6_NUM_ADDRESSES; i++)
+    if (ip6_addr_isvalid(netif_ip6_addr_state(g_netif, i)) &&
+        ip6_addr_islinklocal(netif_ip6_addr(g_netif, i)))
+      return netif_ip6_addr(g_netif, i);
+  return NULL;
+}
+
+// RA 整帧直推：以太头+IPv6 头+ICMPv6 RA 手工拼装，经 defer 走 USB 任务发出。
+// 完全不经过 tcpip 线程——不依赖 tcpip_callback/mbox/timeout 任何机制。
+static void sgpSendRaRaw(const ip6_addr_t* ll) {
+  uint8_t f[14 + 40 + 80];
+  memset(f, 0, sizeof f);
+  f[0] = 0x33; f[1] = 0x33; f[5] = 0x01;                   // dst = 33:33:00:00:00:01
+  memcpy(f + 6, g_netif->hwaddr, 6);                       // src = 设备 MAC
+  f[12] = 0x86; f[13] = 0xDD;                              // ethertype IPv6
+  f[14] = 0x60;                                            // v6, tc/flow=0
+  wr16(f + 16, 80);                                        // payload len
+  f[18] = 58; f[19] = 255;                                 // next=ICMPv6, hop=255（ND 必须）
+  memcpy(f + 20, ll->addr, 16);                            // src = 链路本地
+  f[36] = 0xFF; f[37] = 0x02; f[51] = 0x01;                // dst = ff02::1
+  uint8_t* ra = f + 54;
+  ra[0] = 134;                                             // Router Advertisement
+  ra[4] = 64;                                              // Cur Hop Limit
+  // [6..7] Router Lifetime = 0：不当默认路由
+  ra[16] = 1; ra[17] = 1;                                  // SLLAO
+  memcpy(ra + 18, g_netif->hwaddr, 6);
+  ra[24] = 3; ra[25] = 4;                                  // PIO: /64 on-link+autonomous
+  ra[26] = 64; ra[27] = 0xC0;
+  wr32(ra + 28, 3600); wr32(ra + 32, 1800);
+  memcpy(ra + 40, g_ula.addr, 4);                          // 前缀 fd53:4750::
+  ra[56] = 25; ra[57] = 3;                                 // RDNSS: DNS=设备 ULA
+  wr32(ra + 60, 1800);
+  memcpy(ra + 64, g_ula.addr, 16);
+  uint32_t acc = sgpCkAdd(0, f + 20, 16);                  // ICMPv6 校验和：伪头 src+dst
+  acc = sgpCkAdd(acc, f + 36, 16);
+  acc += 80 + 58;
+  acc = sgpCkAdd(acc, ra, 80);
+  while (acc >> 16) acc = (acc & 0xffff) + (acc >> 16);
+  uint16_t ck = ~acc & 0xffff;
+  wr16(ra + 2, ck ? ck : 0xffff);
+  struct pbuf* p = pbuf_alloc(PBUF_RAW, sizeof f, PBUF_RAM);
+  if (!p) { g_dbgWhy = 'P'; return; }
+  pbuf_take(p, f, sizeof f);
+  if (!sgpDeferFrame(p)) pbuf_free(p);                     // USB 任务上下文发出
+  else g_dbgRa++;                                          // TEMP-DEBUG
+}
+
+void sgpUsbNetTick() {                                       // loop() 每圈调用
+  static uint32_t last;
+  uint32_t now = millis();
+  if (now - last < SGP_RA_MS) return;
+  last = now;
+  g_dbgRaT++;                                                // TEMP-DEBUG
+  g_dbgM = tud_mounted() ? 1 : 0;
+  if (g_dbgM && g_netif) {
+    const ip6_addr_t* ll = sgpV6LL();
+    if (ll) sgpSendRaRaw(ll);
+    else g_dbgWhy = '6';
+  }
 }
 
 // ---------------- TCP:80 → 隧道通道 ----------------
@@ -266,22 +494,10 @@ static void sgpConnTask(void* arg) {
   vTaskDelete(NULL);
 }
 
-static void sgpAcceptTask(void* arg) {
-  (void)arg;
-  for (int i = 0; i < 100 && !g_netif; i++) vTaskDelay(10);              // 等 tcpip 线程起好 netif
-  if (!g_netif) { vTaskDelete(NULL); return; }
-  int ls = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (ls < 0) { vTaskDelete(NULL); return; }
+// 一个监听 fd 的 accept 循环（v4/v6 各起一个任务共享此函数）
+static void sgpAcceptLoop(void* arg) {
+  int ls = (int)(intptr_t)arg;
   int yes = 1;
-  setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes);
-  struct sockaddr_in sa;
-  memset(&sa, 0, sizeof sa);
-  sa.sin_family = AF_INET;
-  sa.sin_port = htons(80);
-  sa.sin_addr.s_addr = g_netif->ip_addr.u_addr.ip4.addr;                // 只绑网卡 IP，不外溢
-  if (bind(ls, (struct sockaddr*)&sa, sizeof sa) != 0 || listen(ls, 4) != 0) {
-    close(ls); vTaskDelete(NULL); return;
-  }
   static const char busy[] = "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n";
   for (;;) {
     int fd = accept(ls, NULL, NULL);
@@ -299,6 +515,38 @@ static void sgpAcceptTask(void* arg) {
   }
 }
 
+static void sgpAcceptTask(void* arg) {
+  (void)arg;
+  for (int i = 0; i < 100 && !g_netif; i++) vTaskDelay(10);              // 等 tcpip 线程起好 netif
+  if (!g_netif) { vTaskDelete(NULL); return; }
+  int yes = 1;
+  int ls4 = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);                   // v4：只绑网卡 IP 不外溢
+  if (ls4 >= 0) {
+    setsockopt(ls4, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes);
+    struct sockaddr_in sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sin_family = AF_INET;
+    sa.sin_port = htons(80);
+    sa.sin_addr.s_addr = g_netif->ip_addr.u_addr.ip4.addr;
+    if (bind(ls4, (struct sockaddr*)&sa, sizeof sa) == 0 && listen(ls4, 4) == 0)
+      xTaskCreate(sgpAcceptLoop, "sgp_acc4", 3072, (void*)(intptr_t)ls4, 1, NULL);
+    else close(ls4);
+  }
+  int ls6 = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);                  // v6：链路本地也能直连（本机只有此 netif 有 v6）
+  if (ls6 >= 0) {
+    setsockopt(ls6, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes);
+    setsockopt(ls6, IPPROTO_IPV6, IPV6_V6ONLY, &yes, sizeof yes);        // v4 归 v4 监听，不抢
+    struct sockaddr_in6 sa6;
+    memset(&sa6, 0, sizeof sa6);
+    sa6.sin6_family = AF_INET6;
+    sa6.sin6_port = htons(80);
+    if (bind(ls6, (struct sockaddr*)&sa6, sizeof sa6) == 0 && listen(ls6, 4) == 0)
+      xTaskCreate(sgpAcceptLoop, "sgp_acc6", 3072, (void*)(intptr_t)ls6, 1, NULL);
+    else close(ls6);
+  }
+  vTaskDelete(NULL);
+}
+
 // netif 的全部操作收拢到 tcpip 线程
 static void sgpNetifBringUp(void* arg) {
   static struct netif nif;
@@ -310,8 +558,38 @@ static void sgpNetifBringUp(void* arg) {
   g_netif = &nif;
   netif_set_up(&nif);
   netif_set_link_up(&nif);
+  netif_create_ip6_linklocal_address(&nif, 1);                           // fe80:: 自配，零配置可达的兜底
+  IP6_ADDR(&g_ula, PP_HTONL(0xfd534750), 0, 0, PP_HTONL(1));             // fd53:4750::1（ULA）
+  s8_t uidx = netif_add_ip6_address(&nif, &g_ula, NULL);
+  if (uidx >= 0) netif_ip6_addr_set_state(&nif, uidx, IP6_ADDR_PREFERRED);
   dhcps_t* d = dhcps_new();
   if (d) dhcps_start(d, &nif, ip);                                       // 给 host 下发 192.168.55.x
+  // 组播入组 + UDP PCB：LLMNR(:5355) 与 mDNS(:5353) 名称应答，见上方注释
+  ip4_addr_t g4;
+  IP4_ADDR(&g4, 224, 0, 0, 252); igmp_joingroup_netif(&nif, &g4);
+  IP4_ADDR(&g4, 224, 0, 0, 251); igmp_joingroup_netif(&nif, &g4);
+#if LWIP_IPV6_MLD
+  ip6_addr_t g6;
+  IP6_ADDR(&g6, PP_HTONL(0xff020000), 0, 0, PP_HTONL(0x00010003)); mld6_joingroup_netif(&nif, &g6);
+  IP6_ADDR(&g6, PP_HTONL(0xff020000), 0, 0, PP_HTONL(0x000000fb)); mld6_joingroup_netif(&nif, &g6);
+#endif
+  struct udp_pcb* pcb;
+  if ((pcb = udp_new_ip_type(IPADDR_TYPE_ANY))) {
+    udp_bind_netif(pcb, &nif);
+    if (udp_bind(pcb, IP_ANY_TYPE, 5355) == ERR_OK) udp_recv(pcb, sgpLlmnrCb, NULL);
+    else udp_remove(pcb);
+  }
+  if ((pcb = udp_new_ip_type(IPADDR_TYPE_ANY))) {
+    udp_bind_netif(pcb, &nif);
+    if (udp_bind(pcb, IP_ANY_TYPE, 5353) == ERR_OK) udp_recv(pcb, sgpMdnsCb, NULL);
+    else udp_remove(pcb);
+  }
+  if ((pcb = udp_new_ip_type(IPADDR_TYPE_ANY))) {                          // 单播 DNS:53（RDNSS 指向我们）
+    udp_bind_netif(pcb, &nif);
+    if (udp_bind(pcb, IP_ANY_TYPE, 53) == ERR_OK) udp_recv(pcb, sgpLlmnrCb, NULL);
+    else udp_remove(pcb);
+  }
+  // RA 由 sgpUsbNetTick（loop 心跳）驱动：独立任务/sys_timeout/mbox 全不可靠
   etharp_gratuitous(&nif);                                               // 宣告 MAC→IP，省一轮 ARP
   if (tud_mounted()) tud_network_link_state(0, true);                    // NCM 链路状态上报 host
 }
@@ -346,10 +624,14 @@ void sgpUsbNetStart() {
 
 #else  // CFG_TUD_NCM 未编进库
 void sgpUsbNetStart() {}
+void sgpUsbNetTick() {}
 bool sgpUsbNetSend(uint8_t, const uint8_t*, uint16_t) { return false; }
+size_t sgpUsbNetDebugLine(char*, size_t) { return 0; }
 #endif
 
 #else  // 非 TinyUSB 构建（hwcdc/无 USB）：空实现，ino 照常编译
 void sgpUsbNetStart() {}
+void sgpUsbNetTick() {}
 bool sgpUsbNetSend(uint8_t, const uint8_t*, uint16_t) { return false; }
+size_t sgpUsbNetDebugLine(char*, size_t) { return 0; }
 #endif

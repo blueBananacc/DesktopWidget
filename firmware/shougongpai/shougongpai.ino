@@ -1140,6 +1140,12 @@ void drawOled() {
     oled.setFont(u8g2_font_wqy12_t_gb2312);
     oled.drawUTF8((128 - oled.getUTF8Width(sub)) / 2, 56, sub);
   }
+  char ndbg[40];                                            // TEMP-DEBUG: 底栏 NCM 计数器
+  if (sgpUsbNetDebugLine(ndbg, sizeof ndbg)) {
+    oled.setFont(u8g2_font_6x10_tf); oled.drawStr(0, 63, ndbg);
+    static uint32_t dbgLast;
+    if (millis() - dbgLast >= 2000) { dbgLast = millis(); Serial.println(ndbg); } // TEMP-DEBUG
+  }
   oled.sendBuffer();
 }
 
@@ -2659,6 +2665,7 @@ void sgpUsbNetOnRx(uint8_t slot, const uint8_t* d, uint16_t n) {
 void sgpUsbNetOnClose(uint8_t slot) { netClosed[slot] = 1; }   // loop 里收尾（同 bleDropped 模型）
 
 void loop() {
+  sgpUsbNetTick();                           // NCM 周期任务（RA 广播等）
   if (wantHello) {
     wantHello = false;
     emitEvent(F("{\"type\":\"hello\",\"name\":\"" DEVICE_DISPLAY "\",\"firmware\":\"" FIRMWARE_VER "\"}"));
