@@ -9,6 +9,7 @@ import {
 import { STATUSES } from "../domain/statuses";
 import type { StatusId } from "../domain/types";
 import { HoldButton } from "../ui/HoldButton";
+import { DevPlayground, Highlights } from "./ProductScenes";
 import "../styles/product.css";
 
 // ===== 可直接改的商品信息（价格/配色为占位，正式开售前替换） =====
@@ -266,7 +267,7 @@ export function ProductPage() {
         <div className="pd-wrap pd-nav-in">
           <a href="#top" className="pd-logo"><span className="pd-logo-mark" />收工牌</a>
           <div className="pd-nav-links">
-            <a href="#features">功能</a><a href="#how">怎么用</a><a href="#app">配套软件</a><a href="#specs">规格</a><a href="#faq">常见问题</a>
+            <a href="#highlights">功能</a><a href="#how">怎么用</a><a href="#app">配套软件</a><a href="#dev">开发者</a><a href="#specs">规格</a><a href="#faq">常见问题</a>
           </div>
           <div className="pd-nav-cta">
             <Link to="/" className="btn btn-ghost">打开控制台</Link>
@@ -363,8 +364,13 @@ export function ProductPage() {
         </VideoShot>
       </Section>
 
+      {/* ===== 核心功能 ===== */}
+      <Section id="highlights" eyebrow="核心功能" title="从专注到收工，它都替你照看" className="pd-alt">
+        <Highlights />
+      </Section>
+
       {/* ===== 怎么用 ===== */}
-      <Section id="how" eyebrow="怎么用" title="按一下、旋一下、长按收工" desc="不用打开手机，也不用切到某个软件。三个动作覆盖一整天。" className="pd-alt">
+      <Section id="how" eyebrow="怎么用" title="按一下、旋一下、长按收工" desc="不用打开手机，也不用切到某个软件。三个动作覆盖一整天。">
         <div className="pd-steps">
           <div className="pd-step">
             <span className="pd-step-n">01 · 按</span>
@@ -386,7 +392,7 @@ export function ProductPage() {
       </Section>
 
       {/* ===== 功能 ===== */}
-      <Section id="features" eyebrow="功能" title="一块状态牌，管好你的一整天">
+      <Section id="features" eyebrow="更多功能" title="一块状态牌，管好你的一整天">
         <Feature icon={<CalendarClock />} eyebrow="时间计划表" title="提前排好，到点自动切换"
           media={<PlanMock />}>
           <p>把一天的节奏写成计划表：9:00 工作中、10:30 会议中、12:00 休息中……到点后桌牌自己切换，你不用记得去改。</p>
@@ -407,7 +413,7 @@ export function ProductPage() {
 
         <Feature flip icon={<Timer />} eyebrow="旋钮定时 · 休息提醒" title="专注有计时，久坐有提醒"
           media={<Shot name="macro-knob" alt="旋钮特写" hint="金属旋钮微距，屏幕显示倒计时 25:00" ratio="4 / 3" />}>
-          <p>旋钮每格 5 分钟，5 到 180 分钟随手设定。累计处于工作状态 45 分钟后，灯光会温和地提醒你起来活动一下。</p>
+          <p>旋钮每格 5 分钟，5 分钟到 24 小时随手设定。累计处于工作状态 45 分钟后，灯光会温和地提醒你起来活动一下。</p>
           <Bullets items={["计时结束不会擅自改变你的状态", "会议中、已收工时休息计时自动暂停", "可以稍后提醒、今天不再提醒或彻底关闭"]} />
         </Feature>
 
@@ -425,7 +431,7 @@ export function ProductPage() {
 
         <Feature icon={<Users />} eyebrow="共享状态看板" title="整个团队谁有空，一屏看清"
           media={<div className="pd-stack"><Shot name="scene-team" alt="团队办公场景：多张相邻工位上各放一台收工牌，分别显示不同状态" ratio="2560 / 1425" /><AppShot name="app-board" alt="共享看板界面" /></div>}>
-          <p>同一区域的收工牌通过 ESP-NOW 彼此同步。加入团队后，在手机或网页上就能看到每位成员的当前状态和最后更新时间。</p>
+          <p>团队里的收工牌通过 Wi-Fi 和云端彼此同步。加入团队后，在手机或网页上就能看到每位成员的当前状态和最后更新时间。</p>
           <Bullets items={["分享默认关闭，只分享“当前状态”", "邀请链接 / 二维码加入，随时退出或撤销", "离线成员标记“可能已过期”，不伪装成实时"]} />
         </Feature>
       </Section>
@@ -510,6 +516,11 @@ export function ProductPage() {
         <div className="pd-center"><Link to="/" className="btn btn-primary pd-btn-lg">打开网页控制台<ArrowRight /></Link></div>
       </Section>
 
+      {/* ===== 开发者 ===== */}
+      <section id="dev" className="pd-sec">
+        <div className="pd-wrap"><DevPlayground /></div>
+      </section>
+
       {/* ===== 隐私 ===== */}
       <Section eyebrow="隐私优先" title="它为你工作，不替任何人盯着你">
         <div className="pd-privacy">
@@ -536,12 +547,12 @@ export function ProductPage() {
       {/* ===== 规格 ===== */}
       <Section id="specs" eyebrow="技术规格" title="规格参数" className="pd-alt">
         <div className="pd-specs">
-          <div><h4><Eye />屏幕</h4><ul><li>高对比度点阵状态屏</li><li>大字状态名 + 图标 + 预计结束时间</li><li>自动调光、定时熄屏、像素位移防烧屏</li><li>环境光传感器，0–15 级自动亮度</li></ul></div>
+          <div><h4><Eye />屏幕</h4><ul><li>正面 72×16 全彩 RGB LED 点阵屏</li><li>背面 160×80 灰阶副屏，看计时与菜单</li><li>大字状态名 + 图标 + 预计结束时间</li><li>自动调光、定时熄屏、像素位移防烧屏</li><li>环境光传感器，0–15 级自动亮度</li></ul></div>
           <div><h4><Keyboard />操作</h4><ul><li>4 枚实体按键（收工键 + 3 枚可自定义）</li><li>金属旋钮，带按压确认，每格 5 分钟</li><li>机身电容触摸区</li></ul></div>
           <div><h4><Lightbulb />灯光</h4><ul><li>RGB 状态灯带</li><li>常亮 / 呼吸 / 闪烁，亮度可调</li><li>渐变、彩虹、通知等预设灯效</li><li>夜间关闭时段、无灯光模式</li></ul></div>
           <div><h4><Volume2 />声音</h4><ul><li>MEMS 数字麦克风</li><li>物理麦克风静音开关 + 录音指示</li><li>提示音扬声器，音量可调</li></ul></div>
-          <div><h4><Cpu />处理器</h4><ul><li>ESP32-S3 双核 240 MHz</li><li>16 MB Flash · 8 MB PSRAM</li><li>屏幕程序沙箱运行</li><li>JavaScript 应用引擎</li></ul></div>
-          <div><h4><Radio />连接</h4><ul><li>Bluetooth LE 5.0</li><li>2.4 GHz Wi-Fi · ESP-NOW 设备互联</li><li>USB-C 数据连接 · USB 虚拟网卡</li><li>Matter 智能家居 · MQTT（TLS）云连接</li><li>mDNS 局域网自动发现</li></ul></div>
+          <div><h4><Cpu />处理器</h4><ul><li>STM32U5 主控 · Cortex-M33 160 MHz</li><li>SiWG917 独立无线协处理器</li><li>屏幕程序沙箱运行</li><li>JavaScript 应用引擎</li></ul></div>
+          <div><h4><Radio />连接</h4><ul><li>Bluetooth LE 5.0</li><li>2.4 GHz Wi-Fi 6</li><li>USB-C 数据连接 · USB 虚拟网卡</li><li>Matter 智能家居 · MQTT（TLS）云连接</li><li>mDNS 局域网自动发现</li></ul></div>
           <div><h4><BatteryCharging />供电</h4><ul><li>内置可充电锂电池</li><li>USB-C 充电</li><li>低电量时才在屏幕提示</li><li>空闲自动进入低功耗模式，支持软关机</li></ul></div>
           <div><h4><Wifi />软件</h4><ul><li>网页控制台：Chrome / Edge</li><li>手机 App：iOS / Android</li><li>固件在线升级</li><li>设备内置网页管理界面与 HTTP API</li></ul></div>
         </div>
