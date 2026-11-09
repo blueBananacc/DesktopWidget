@@ -1,0 +1,12 @@
+{
+    "name": "siw917",
+    "flash_address": "0x08202000",
+    "ram_address": "0xC",
+    "svd_file": "siw917/SiWx917.svd",
+    "openocd": {
+        "chip_config": "siw917/siw917.cfg",
+        "init_commands": [
+            "siw917.cpu configure -rtos auto"
+        ]
+    }
+}

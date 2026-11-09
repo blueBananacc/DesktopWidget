@@ -1,0 +1,36 @@
+#pragma once
+
+#include "wifi_common_i.h"
+
+#include <lwip/netif.h>
+
+#include <sl_ieee802_types.h>
+
+#include <furi.h>
+#include <intercom/intercom.h>
+#include <network/network.h>
+
+#define TAG "Wifi"
+
+struct Wifi {
+    FuriEventLoop* event_loop;
+    FuriMessageQueue* event_queue;
+    FuriMessageQueue* request_queue;
+    FuriEventLoopTimer* info_timer;
+    FuriPubSub* event_pubsub;
+    IntercomChannel* intercom_ch_control;
+    IntercomChannel* intercom_ch_data;
+    FuriSemaphore* tcpip_lock;
+    FuriSemaphore* ipv6_ready_semaphore;
+    struct netif netif;
+    uint32_t tx_drop_count;
+    uint32_t rx_drop_count;
+    WifiBackendState state;
+    bool scan_in_progress;
+};
+
+void wifi_net_tcpip_init(Wifi* instance, sl_mac_address_t* mac_addr);
+
+void wifi_net_tcpip_netif_up(Wifi* instance);
+
+void wifi_net_tcpip_netif_down(Wifi* instance);

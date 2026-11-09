@@ -1,0 +1,130 @@
+name: 'Unit tests'
+
+on:
+  workflow_call:
+    inputs:
+      branch_name:
+        required: true
+        type: string
+      commit_sha:
+        required: true
+        type: string
+      update_url:
+        required: true
+        type: string
+      target:
+        required: false
+        type: string
+        default: '21'
+
+permissions:
+  contents: write
+  checks: write
+  pull-requests: write
+  id-token: write
+
+env:
+  U5_HW_TARGET: ${{ inputs.target }}
+  FBT_GIT_SUBMODULE_SHALLOW: 0
+  FBT_TOOLCHAIN_PATH: /runner/_work
+
+jobs:
+  unit-tests:
+    runs-on: BusyBarTest
+    timeout-minutes: 20
+    steps:
+      - name: 'Checkout code at the build’s commit'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 2
+
+      - name: 'Update submodules'
+        run: |
+          git submodule update --init --depth 1 --filter=blob:none --recursive --jobs="$(nproc)" scripts/toolchain fbt_layers/fbtng
+
+      - name: 'Download unit test package'
+        run: |
+          set -euo pipefail
+          URL="https://update.busy.app/builds/busybar-firmware/${{ inputs.update_url }}"
+          echo "Using URL: $URL"
+          curl --fail -L -o busybar-f${{ inputs.target }}-unittests.zip "$URL"
+          unzip -q busybar-f${{ inputs.target }}-unittests.zip -d unittests
+
+      - name: 'Prepare ELF files for crash traces'
+        run: |
+          set -euo pipefail
+          mkdir -p /_work/elf
+
+          U5_ELF=$(find unittests -type f -name "busybar-f${{ inputs.target }}-firmware-*.elf" -print -quit)
+          SI917_ELF=$(find unittests -type f -name "busybar-f${{ inputs.target }}-sil_firmware-*.elf" -print -quit)
+
+          if [ -z "$U5_ELF" ]; then
+            echo "ERROR: U5 ELF not found in unit test package"
+            exit 1
+          fi
+          if [ -z "$SI917_ELF" ]; then
+            echo "ERROR: SI917 ELF not found in unit test package"
+            exit 1
+          fi
+
+          cp "$U5_ELF" /_work/elf/busybar-f${{ inputs.target }}-firmware.elf
+          cp "$SI917_ELF" /_work/elf/busybar-f${{ inputs.target }}-sil_firmware.elf
+
+      - name: 'Flash firmware'
+        id: flashing
+        uses: ./.github/actions/flash-device
+        with:
+          bundle: unittests/busybar-f${{ inputs.target }}-update-unittests.tgz
+
+      - name: 'Check that both cores are available (post-flash)'
+        if: steps.flashing.outcome == 'success'
+        run: |
+          set -euo pipefail
+          source scripts/toolchain/fbtenv.sh
+          python3 scripts/testops.py sanity
+
+      - name: 'Run units'
+        run: |
+          set -euo pipefail
+          source scripts/toolchain/fbtenv.sh
+          python3 scripts/testops.py unit-tests
+
+      - name: 'Configure AWS CLI'
+        if: always()
+        uses: aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885 # v6.1.1
+        with:
+          aws-access-key-id: ${{ secrets.QA_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.QA_AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: 'Upload runner logs to S3'
+        id: upload_logs
+        if: always()
+        continue-on-error: true
+        run: |
+          RUN_ID="${{ github.run_number }}-${{ github.sha }}"
+          LOG_FILE="$RUNNER_LOG_DIR/latest/runlog.log"
+          S3_BUCKET="bsb-qa-runners-crash-reports"
+          S3_KEY="runner-logs/unit-tests/$RUN_ID/runlog.log"
+          S3_PATH="s3://$S3_BUCKET/$S3_KEY"
+          PUBLIC_URL="https://$S3_BUCKET.s3.eu-central-1.amazonaws.com/$S3_KEY"
+
+          if [ -f "$LOG_FILE" ]; then
+            aws s3 cp "$LOG_FILE" "$S3_PATH"
+            echo "runlog_url=$PUBLIC_URL" >> "$GITHUB_OUTPUT"
+            {
+              echo "## 📋 Runner Logs"
+              echo "- [runlog.log]($PUBLIC_URL)"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Log file not found: $LOG_FILE"
+          fi
+
+      - name: 'Comment PR on crash'
+        if: always() && github.event.pull_request.number
+        continue-on-error: true
+        env:
+          CRASH_FLAG: ${{ env.RUNNER_LOG_DIR }}/latest/crash_detected.flag
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python3 tests/utils/report_test_results.py

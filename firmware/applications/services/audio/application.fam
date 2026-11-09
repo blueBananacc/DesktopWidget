@@ -1,0 +1,23 @@
+App(
+    appid="audio",
+    name="AudioSrv",
+    apptype=FlipperAppType.SERVICE,
+    entry_point="audio_srv",
+    cdefines=["SRV_AUDIO"],
+    stack_size=2 * 1024,
+    order=100,
+    provides=["cli_audio"],
+    sources=[
+        "audio.c",
+        "audio_api.c",
+    ],
+)
+
+App(
+    appid="cli_audio",
+    name="audio",
+    targets=["f20", "f21", "f22"],
+    apptype=FlipperAppType.CLICMD,
+    entry_point="cli_command_audio",
+    sources=["cli/cli_command_audio.c"],
+)

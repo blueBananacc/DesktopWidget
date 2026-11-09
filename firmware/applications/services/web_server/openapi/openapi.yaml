@@ -1,0 +1,52 @@
+openapi: 3.1.0
+info:
+  title: Shougongpai HTTP API
+  description: HTTP API for Shougongpai web server
+  version: 27.15.0
+  contact:
+    name: tbd
+
+security:
+  - ApiKeyAuth: []
+  - {}
+
+paths:
+  # {PATHS}
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Token
+
+  schemas:
+    SuccessResponse:
+      type: object
+      properties:
+        result:
+          type: string
+          example: "OK"
+          description: Success status message
+      required:
+        - result
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+        error_code:
+          type: string
+          description: Error code
+      required:
+        - error
+      example:
+        error: "Invalid parameter"
+        error_code: "invalid_parameter"
+
+    # {SCHEMAS}
+
+tags:
+  # {TAGS}

@@ -1,0 +1,219 @@
+#include "label.h"
+
+#include <gui/widget_i.h>
+
+#include <lvgl_addons/extensions/lv_label_ext.h>
+
+#define MY_CLASS (&label_lvgl_class)
+
+struct Label {
+    Widget base;
+    lv_obj_t* label;
+    FuriString* text;
+
+    FontRegistry* font_registry;
+    const lv_font_t* loaded_font;
+
+    lv_anim_t long_content_anim_template;
+};
+
+const lv_obj_class_t label_lvgl_class;
+
+// LVGL-specific code
+
+static void label_event_callback(const lv_obj_class_t* class_p, lv_event_t* event) {
+    UNUSED(class_p);
+
+    lv_result_t res = LV_RESULT_OK;
+    res = lv_obj_event_base(MY_CLASS, event);
+    if(res != LV_RESULT_OK) return;
+
+    lv_event_code_t code = lv_event_get_code(event);
+    Label* instance = (Label*)lv_event_get_target_obj(event);
+
+    if(code == LV_EVENT_SIZE_CHANGED) {
+        lv_obj_t* lv_base = TO_LV_OBJ(&instance->base);
+
+        int32_t lv_base_width = lv_obj_get_style_width(lv_base, LV_PART_MAIN);
+        bool is_lv_width_inheritable = lv_base->w_layout || lv_base_width != LV_SIZE_CONTENT;
+        lv_obj_set_width(
+            instance->label, is_lv_width_inheritable ? LV_PCT(100) : MY_CLASS->width_def);
+
+        int32_t lv_base_height = lv_obj_get_style_height(lv_base, LV_PART_MAIN);
+        bool is_lv_height_inheritable = lv_base->h_layout || lv_base_height != LV_SIZE_CONTENT;
+        lv_obj_set_height(
+            instance->label, is_lv_height_inheritable ? LV_PCT(100) : MY_CLASS->height_def);
+    }
+}
+
+static void label_lvgl_constructor(const lv_obj_class_t* class_p, lv_obj_t* obj) {
+    UNUSED(class_p);
+
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+
+    Label* instance = (Label*)obj;
+
+    instance->font_registry = furi_record_open(RECORD_FONT_REGISTRY);
+
+    lv_anim_init(&instance->long_content_anim_template);
+    lv_anim_set_delay(&instance->long_content_anim_template, 0);
+    lv_anim_set_repeat_delay(&instance->long_content_anim_template, 0);
+    lv_anim_set_repeat_count(&instance->long_content_anim_template, LV_ANIM_REPEAT_INFINITE);
+
+    instance->label = lv_label_create(obj);
+    lv_obj_set_style_anim(instance->label, &instance->long_content_anim_template, LV_PART_MAIN);
+
+    instance->text = furi_string_alloc();
+}
+
+static void label_lvgl_destructor(const lv_obj_class_t* class_p, lv_obj_t* obj) {
+    UNUSED(class_p);
+
+    Label* instance = (Label*)obj;
+    furi_string_free(instance->text);
+    furi_record_close(RECORD_FONT_REGISTRY);
+}
+
+// Public API
+
+Label* label_alloc(Widget* parent) {
+    furi_check(parent);
+
+    lv_obj_t* obj = lv_obj_class_create_obj(MY_CLASS, (lv_obj_t*)parent);
+    lv_obj_class_init_obj(obj);
+
+    Label* instance = (Label*)obj;
+    return instance;
+}
+
+void label_free(Label* instance) {
+    furi_check(instance);
+    lv_obj_delete((lv_obj_t*)instance);
+}
+
+Widget* label_get_base(Label* instance) {
+    furi_check(instance);
+    return (Widget*)instance;
+}
+
+void label_set_text(Label* instance, const char* text) {
+    furi_check(instance);
+    furi_check(text);
+
+    furi_string_set(instance->text, text);
+    lv_label_set_text_static(instance->label, furi_string_get_cstr(instance->text));
+}
+
+void label_set_text_color(Label* instance, Color color) {
+    furi_check(instance);
+    lv_obj_set_style_text_color((lv_obj_t*)instance->label, TO_LV_COLOR(color), LV_PART_MAIN);
+    lv_obj_set_style_text_opa(instance->label, color.a, LV_PART_MAIN);
+}
+
+void label_set_inline_text_color_formatting(Label* instance, bool enable) {
+    furi_check(instance);
+
+    lv_label_set_recolor(instance->label, enable);
+}
+
+void label_set_text_font_size(Label* instance, LabelFontSize size) {
+    furi_check(instance);
+
+    switch(size) {
+    case LabelFontSizeSmall:
+        lv_obj_set_style_text_font(
+            (lv_obj_t*)instance->label,
+            lv_theme_get_font_small((lv_obj_t*)instance->label),
+            LV_PART_MAIN);
+        break;
+    case LabelFontSizeNormal:
+        lv_obj_set_style_text_font(
+            (lv_obj_t*)instance->label,
+            lv_theme_get_font_normal((lv_obj_t*)instance->label),
+            LV_PART_MAIN);
+        break;
+    case LabelFontSizeLarge:
+        lv_obj_set_style_text_font(
+            (lv_obj_t*)instance->label,
+            lv_theme_get_font_large((lv_obj_t*)instance->label),
+            LV_PART_MAIN);
+        break;
+    default:
+        furi_check(false);
+        return;
+    }
+}
+
+void label_set_text_fmt(Label* instance, const char* fmt, ...) {
+    furi_check(instance);
+    furi_check(fmt);
+
+    va_list args;
+    va_start(args, fmt);
+    furi_string_vprintf(instance->text, fmt, args);
+    va_end(args);
+
+    lv_label_set_text_static(instance->label, furi_string_get_cstr(instance->text));
+}
+
+void label_set_line_spacing(Label* instance, int32_t spacing) {
+    furi_check(instance);
+    lv_obj_set_style_text_line_space((lv_obj_t*)instance, spacing, LV_PART_MAIN);
+}
+
+void label_set_text_align(Label* instance, TextAlign align) {
+    furi_check(instance);
+    furi_check(align < TextAlignMax);
+
+    lv_obj_set_style_text_align((lv_obj_t*)instance, (lv_text_align_t)align, LV_PART_MAIN);
+}
+
+void label_set_long_content_mode(Label* instance, LabelLongContentMode mode) {
+    furi_check(instance);
+    furi_check(mode < LabelLongContentModeCount);
+
+    lv_label_set_long_mode(instance->label, (lv_label_long_mode_t)mode);
+}
+
+void label_set_long_content_anim_start_delay(Label* instance, uint32_t delay) {
+    furi_check(instance);
+
+    lv_anim_set_delay(&instance->long_content_anim_template, delay);
+}
+
+void label_set_long_content_anim_repeat_delay(Label* instance, uint32_t delay) {
+    furi_check(instance);
+
+    lv_anim_set_repeat_delay(&instance->long_content_anim_template, delay);
+}
+
+void label_set_long_content_anim_speed(Label* instance, uint32_t speed) {
+    furi_check(instance);
+    furi_check(speed > 0);
+
+    lv_label_ext_set_anim_speed(instance->label, speed);
+}
+
+void label_set_font(Label* instance, const char* font_path) {
+    furi_check(instance);
+
+    if(instance->loaded_font)
+        font_registry_unload_font(instance->font_registry, instance->loaded_font);
+    instance->loaded_font = font_registry_load_font(instance->font_registry, font_path);
+
+    lv_obj_set_style_text_font(instance->label, instance->loaded_font, LV_PART_MAIN);
+}
+
+// LVGL class descriptor
+
+const lv_obj_class_t label_lvgl_class = {
+    .base_class = &widget_lvgl_class,
+    .constructor_cb = label_lvgl_constructor,
+    .destructor_cb = label_lvgl_destructor,
+    .event_cb = label_event_callback,
+    .name = "widget-label",
+    .width_def = LV_SIZE_CONTENT,
+    .height_def = LV_SIZE_CONTENT,
+    .instance_size = sizeof(Label),
+    .theme_inheritable = true,
+};

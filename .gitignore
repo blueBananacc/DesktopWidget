@@ -12,3 +12,28 @@ INMP441*/
 EC11*/
 
 firmware/shougongpai/build/
+
+# BUSY Bar 固件上游 git 子模块（第三方依赖，体积 ~2GB，保留在本地不入库；
+# 目录与 URL 对应关系见 firmware/.gitmodules）
+firmware/assets/proto/
+firmware/documentation/doxygen/doxygen-awesome-css/
+firmware/fbt_layers/core_libs/
+firmware/fbt_layers/fbtng/
+firmware/fbt_layers/freertos/
+firmware/lib/cjson/
+firmware/lib/heatshrink/
+firmware/lib/jerryscript/
+firmware/lib/lvgl/
+firmware/lib/lwip/
+firmware/lib/matter_ext/
+firmware/lib/matter_zap/
+firmware/lib/mbedtls/
+firmware/lib/microtar/
+firmware/lib/mongoose/
+firmware/lib/nanopb/
+firmware/lib/simplicity_sdk/
+firmware/lib/stb/stb_repo/
+firmware/lib/tinyusb/
+firmware/lib/wiseconnect/
+firmware/lib/zlib/
+firmware/scripts/toolchain/

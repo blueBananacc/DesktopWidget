@@ -1,0 +1,6 @@
+Import("env")
+
+# Stub for potential future use
+env.AppendUnique(
+    FW_ASSETS_HEADERS=[],
+)

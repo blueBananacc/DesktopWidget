@@ -1,0 +1,9 @@
+{
+    "inherit": "f21",
+    "sources": [
+        "*/*.c",
+        "f21:!furi_hal/furi_hal_display.c",
+        "f21:!furi_hal/furi_hal_resources_pins.c",
+        "f21:!furi_hal/furi_hal_version_device.c"
+    ]
+}

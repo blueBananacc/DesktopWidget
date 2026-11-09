@@ -1,0 +1,31 @@
+<template>
+  <div
+    data-id="page-index"
+    class="w-full flex flex-col gap-4"
+  >
+    <TabNetwork v-if="tabStore.currentTab === 'network'" />
+    <TabFirmware v-if="tabStore.currentTab === 'firmware'" />
+    <TabSettings v-if="tabStore.currentTab === 'settings'" />
+    <TabDrawTool v-if="tabStore.currentTab === 'draw-tool'" />
+    <TabApps v-if="tabStore.currentTab === 'apps'" />
+
+    <template v-if="tabStore.showHiddenTabs">
+      <TabFiles v-if="tabStore.currentTab === 'files'" />
+      <TabAnimations v-if="tabStore.currentTab === 'animations'" />
+    </template>
+  </div>
+</template>
+
+<script setup lang="ts">
+useHead({
+  title: 'Shougongpai Virtual LAN',
+  meta: [
+    {
+      name: 'description',
+      content: 'Control your Shougongpai in the browser'
+    }
+  ]
+});
+
+const tabStore = useTabStore();
+</script>

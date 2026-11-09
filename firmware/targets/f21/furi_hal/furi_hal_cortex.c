@@ -1,0 +1,156 @@
+#include <furi_hal_cortex.h>
+#include <furi_hal.h>
+#include <furi.h>
+
+#include <stm32u5xx.h>
+#include <stm32u5xx_ll_pwr.h>
+#include <stm32u5xx_ll_icache.h>
+#include <stm32u5xx_ll_dcache.h>
+
+#define DFU_ROM_BASE_ADDR 0x0BF90000
+
+void furi_hal_cortex_init_early(void) {
+    CoreDebug->DEMCR |= (CoreDebug_DEMCR_TRCENA_Msk | CoreDebug_DEMCR_MON_EN_Msk);
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    DWT->CYCCNT = 0U;
+
+    /* Enable instruction prefetch */
+    SET_BIT(FLASH->ACR, FLASH_ACR_PRFTEN);
+
+    /* Enable iCache*/
+    LL_ICACHE_SetMode(LL_ICACHE_1WAY);
+    LL_ICACHE_Enable();
+
+#ifdef DCACHE_ENABLE
+    /* Enable dCache*/
+    furi_hal_bus_enable(FuriHalBusDCACHE1);
+    LL_DCACHE_SetReadBurstType(DCACHE1, LL_DCACHE_READ_BURST_WRAP);
+    LL_DCACHE_Enable(DCACHE1);
+#endif
+}
+
+FURI_NORETURN void furi_hal_cortex_system_reset(void) {
+    NVIC_SystemReset();
+}
+
+void furi_hal_cortex_switch(void* address) {
+    __set_BASEPRI(0);
+    __set_CONTROL(0); // Reset MSP/PSP selection
+    asm volatile("ldr    r3, [%0]    \n"
+                 "msr    msp, r3     \n"
+                 "ldr    r3, [%1]    \n"
+                 "mov    pc, r3      \n"
+                 :
+                 : "r"(address), "r"(address + 0x4)
+                 : "r3");
+}
+
+static inline uint32_t furi_hal_cortex_resolve_jump_address(FuriHalCortexJumpType jump_type) {
+    switch(jump_type) {
+    case FuriHalCortexJumpDFU:
+        return DFU_ROM_BASE_ADDR;
+    case FuriHalCortexJumpSRAM:
+        return SRAM1_BASE;
+    case FuriHalCortexJumpFlash:
+        return FLASH_BASE;
+    default:
+        furi_crash("Invalid parameter");
+    }
+}
+
+FURI_NORETURN void furi_hal_cortex_jump(FuriHalCortexJumpType jump_type) {
+    // Disable all interrupts
+    __disable_irq();
+
+    // Disable Systick timer
+    SysTick->CTRL = 0;
+
+    // Clear Interrupt Enable Register & Interrupt Pending Register
+    for(size_t i = 0; i < 5; i++) {
+        NVIC->ICER[i] = 0xFFFFFFFF;
+        NVIC->ICPR[i] = 0xFFFFFFFF;
+    }
+
+    LL_PWR_EnableUCPDDeadBattery();
+
+#ifdef DCACHE_ENABLE
+    LL_DCACHE_Invalidate(DCACHE1);
+    LL_DCACHE_Disable(DCACHE1);
+#endif
+
+    LL_ICACHE_Invalidate();
+    LL_ICACHE_Disable();
+
+    SCB->VTOR = furi_hal_cortex_resolve_jump_address(jump_type);
+    furi_hal_cortex_switch((void*)SCB->VTOR);
+
+    furi_crash("Jump failed");
+    __builtin_unreachable();
+}
+
+// // Duck ST
+// #undef COMP0
+// #undef COMP1
+// #undef COMP2
+// #undef COMP3
+
+// void furi_hal_cortex_comp_enable(
+//     FuriHalCortexComp comp,
+//     FuriHalCortexCompFunction function,
+//     uint32_t value,
+//     uint32_t mask,
+//     FuriHalCortexCompSize size) {
+//     uint32_t function_reg = (uint32_t)function | ((uint32_t)size << 10);
+
+//     switch(comp) {
+//     case FuriHalCortexComp0:
+//         (DWT->COMP0) = value;
+//         (DWT->MASK0) = mask;
+//         (DWT->FUNCTION0) = function_reg;
+//         break;
+//     case FuriHalCortexComp1:
+//         (DWT->COMP1) = value;
+//         (DWT->MASK1) = mask;
+//         (DWT->FUNCTION1) = function_reg;
+//         break;
+//     case FuriHalCortexComp2:
+//         (DWT->COMP2) = value;
+//         (DWT->MASK2) = mask;
+//         (DWT->FUNCTION2) = function_reg;
+//         break;
+//     case FuriHalCortexComp3:
+//         (DWT->COMP3) = value;
+//         (DWT->MASK3) = mask;
+//         (DWT->FUNCTION3) = function_reg;
+//         break;
+//     default:
+//         furi_crash("Invalid parameter");
+//     }
+// }
+
+// void furi_hal_cortex_comp_reset(FuriHalCortexComp comp) {
+//     switch(comp) {
+//     case FuriHalCortexComp0:
+//         (DWT->COMP0) = 0;
+//         (DWT->MASK0) = 0;
+//         (DWT->FUNCTION0) = 0;
+//         break;
+//     case FuriHalCortexComp1:
+//         (DWT->COMP1) = 0;
+//         (DWT->MASK1) = 0;
+//         (DWT->FUNCTION1) = 0;
+//         break;
+//     case FuriHalCortexComp2:
+//         (DWT->COMP2) = 0;
+//         (DWT->MASK2) = 0;
+//         (DWT->FUNCTION2) = 0;
+//         break;
+//     case FuriHalCortexComp3:
+//         (DWT->COMP3) = 0;
+//         (DWT->MASK3) = 0;
+//         (DWT->FUNCTION3) = 0;
+//         break;
+//     default:
+//         furi_crash("Invalid parameter");
+//     }
+// }

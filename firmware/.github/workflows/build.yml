@@ -1,0 +1,332 @@
+name: 'Build'
+
+on:
+  push:
+    branches:
+      - dev
+    tags:
+      - '*'
+  pull_request:
+  workflow_dispatch:
+
+env:
+  FBT_GIT_SUBMODULE_SHALLOW: 0
+  DEFAULT_TARGET_SPEC: 22_65
+  FBT_TOOLCHAIN_PATH: /runner/_work
+  GIT_TRACE: ${{ vars.GIT_TRACE }}
+
+jobs:
+  build:
+    runs-on: BsbShell
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target_spec: ["21_64", "22_65"]
+    outputs:
+      default_target_spec: ${{ env.DEFAULT_TARGET_SPEC }}
+      bundle_target_spec: ${{ steps.set-url.outputs.target }}
+      update_url: ${{ steps.set-url.outputs.update_url }}
+      run_regression: ${{ steps.test-scope.outputs.run_regression }}
+
+    steps:
+      - name: 'Wipe workspace'
+        run: |
+          rm -f /home/runner/.gitconfig
+          # Self-hosted runners persist $HOME across jobs.
+          rm -f "${HOME}/.git-credentials"
+          find ./ -mount -maxdepth 1 -exec rm -rf {} \;
+
+      - name: 'Configure Git'
+        run: |
+          git config --global http.lowSpeedLimit 100
+          git config --global http.lowSpeedTime 30
+
+      - name: 'Checkout code'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 'Authenticate git for the job'
+        uses: ./.github/actions/authenticate-git
+
+      - name: 'Bootstrap tooling submodule'
+        uses: ./.github/actions/update-submodules
+        with:
+          paths: fbt_layers/fbtng
+
+      - name: 'Get commit details'
+        id: get-env
+        uses: ./.github/actions/get-commit-details
+
+      - name: 'Resolve test scope from commit message'
+        id: test-scope
+        if: matrix.target_spec == env.DEFAULT_TARGET_SPEC
+        run: |
+          set -euo pipefail
+          RUN_REGRESSION=false
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            COMMIT_MSG=$(git log -1 --format=%B HEAD)
+            if echo "$COMMIT_MSG" | grep -qF '[run regression]'; then
+              RUN_REGRESSION=true
+              echo "Found '[run regression]' in commit message — regression suite will run as a separate job"
+            fi
+          fi
+          echo "run_regression=${RUN_REGRESSION}" >> "$GITHUB_OUTPUT"
+
+      - name: 'Build firmware artifacts'
+        id: build-fw
+        uses: ./.github/actions/build-artifacts
+        with:
+          target_spec: ${{ matrix.target_spec }}
+          build_type: ${{ steps.get-env.outputs.build_profile }}
+          artifact_path: artifacts
+          signing_service_url: ${{ secrets.SI917_SIGN_SERVICE_URL }}
+          signing_service_token: ${{ secrets.SI917_SIGN_SERVICE_TOKEN }}
+          signing_service_profile: ${{ secrets.SI917_SIGN_SERVICE_PROFILE }}
+
+      - name: 'Upload build artifacts'
+        if: ${{ !github.event.pull_request.head.repo.fork && steps.build-fw.outcome == 'success' }}
+        id: build-update
+        run: |
+          ARTIFACT_DIR="${{ steps.build-fw.outputs.artifact_path }}"
+          FILE_ARGS=()
+          while IFS= read -r -d '' ARTIFACT; do
+            FILE_ARGS+=("-F" "files=@${ARTIFACT}")
+          done < <(find "$ARTIFACT_DIR" -maxdepth 1 -type f -print0)
+          curl --fail -L -H "Token: ${{ secrets.INDEXER_TOKEN }}" \
+              -F "branch=${BRANCH_NAME}" \
+              -F "version_token=${COMMIT_SHA}" \
+              "${FILE_ARGS[@]}" \
+              "${{ secrets.INDEXER_URL }}"/busybar-firmware/uploadfiles
+
+      - name: 'Upload build artifacts (update-indexer-dev)'
+        if: ${{ !github.event.pull_request.head.repo.fork && steps.build-fw.outcome == 'success' }}
+        run: |
+          ARTIFACT_DIR="${{ steps.build-fw.outputs.artifact_path }}"
+          while IFS= read -r -d '' ARTIFACT; do
+            curl --fail-with-body -L -H "Token: ${{ secrets.UPDATE_INDEXER_DEV_TOKEN }}" \
+                -F "branch=${BRANCH_NAME}" \
+                -F "version_token=${COMMIT_SHA}" \
+                -F "files=@${ARTIFACT}" \
+                "${{ secrets.UPDATE_INDEXER_DEV_URL }}"/busybar-firmware/uploadfiles
+          done < <(find "$ARTIFACT_DIR" -maxdepth 1 -type f -print0)
+        continue-on-error: true
+
+      - name: Handle u5 map files
+        if: ${{ !github.event.pull_request.head.repo.fork && steps.build-fw.outcome == 'success'  && matrix.target_spec == env.DEFAULT_TARGET_SPEC }}
+        run: |
+          rm -rf map_analyser_files
+          mkdir -p map_analyser_files
+          mv -v fbt_layers/fbtng/build/f${U5_TARGET_HW}-firmware*/fw_elf/*.elf* map_analyser_files
+          rm -f fbt_layers/fbtng/build/f${U5_TARGET_HW}-updater*/fw_elf/*.elf*
+          source scripts/toolchain/fbtenv.sh
+          python3 scripts/map_analyse_upload.py \
+              "--elf_file=map_analyser_files/firmware.elf" \
+              "--map_file=map_analyser_files/firmware.elf.map" \
+              "--analyser_url=${{ secrets.U5_ANALYSER_URL }}" \
+              "--analyser_token=${{ secrets.U5_ANALYSER_TOKEN }}";
+
+      - name: Handle silabs map files
+        if: ${{ !github.event.pull_request.head.repo.fork && steps.build-fw.outcome == 'success' && matrix.target_spec == env.DEFAULT_TARGET_SPEC }}
+        run: |
+          rm -rf map_analyser_files
+          mkdir -p map_analyser_files
+          mv -v fbt_layers/fbtng/build/*/fw_elf/*.elf* map_analyser_files
+          source scripts/toolchain/fbtenv.sh
+          python3 scripts/map_analyse_upload.py \
+              "--elf_file=map_analyser_files/firmware.elf" \
+              "--map_file=map_analyser_files/firmware.elf.map" \
+              "--analyser_url=${{ secrets.SIL_ANALYSER_URL }}" \
+              "--analyser_token=${{ secrets.SIL_ANALYSER_TOKEN }}";
+
+      - name: 'Find previous comment'
+        if: ${{ !github.event.pull_request.head.repo.fork && matrix.target_spec == env.DEFAULT_TARGET_SPEC && github.event.pull_request }}
+        uses: peter-evans/find-comment@b30e6a3c0ed37e7c023ccd3f1db5c6c0b0c23aad # v4.0.0
+        id: find-comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: 'Compiled f${{ matrix.target_spec }} firmware for commit'
+
+      - name: 'Create or update comment'
+        if: ${{ !github.event.pull_request.head.repo.fork && matrix.target_spec == env.DEFAULT_TARGET_SPEC && github.event.pull_request }}
+        uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 #v5.0.0
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            **Compiled f${{ matrix.target_spec }} firmware for commit `${{steps.get-env.outputs.commit_sha}}`:**
+            - [📦 Update package](https://update.busy.app/builds/busybar-firmware/${{steps.get-env.outputs.branch_name}}/busybar-f${{steps.build-fw.outputs.u5_target_hw}}-update_signed-${{steps.get-env.outputs.suffix}}.tgz)
+            - [📁 Update files](https://update.busy.app/builds/busybar-firmware/${{steps.get-env.outputs.branch_name}}/?${{ github.run_id }})
+            - [📊 Sil Size report](https://fw-reports-sil-bsb.flipp.dev/?branch=${{steps.get-env.outputs.branch_name}})
+            - [📊 U5 Size report](https://fw-reports-bsb.flipp.dev/?branch=${{steps.get-env.outputs.branch_name}})
+          edit-mode: replace
+
+      - name: 'Set update URL output for default target'
+        id: set-url
+        if: ${{ !github.event.pull_request.head.repo.fork && matrix.target_spec == env.DEFAULT_TARGET_SPEC }}
+        run: |
+          echo "update_url=${{ steps.get-env.outputs.branch_name }}/busybar-f${{ steps.build-fw.outputs.u5_target_hw }}-update-${{ steps.get-env.outputs.suffix }}.tgz" >> "$GITHUB_OUTPUT"
+          echo "target=${{ steps.build-fw.outputs.u5_target_hw }}" >> "$GITHUB_OUTPUT"
+
+  updater-tests:
+    needs: build
+    if: ${{ needs.build.result == 'success' && needs.build.outputs.update_url != '' }}
+    uses: './.github/workflows/updater-test.yml'
+    with:
+      branch_name: ${{ github.head_ref || github.ref_name }}
+      commit_sha: ${{ github.event.pull_request.head.sha }}
+      update_url: ${{ needs.build.outputs.update_url }}
+      target: ${{ needs.build.outputs.bundle_target_spec }}
+    secrets: inherit
+    concurrency:
+      group: updater-tests-${{ github.workflow }}-${{ github.ref }}-${{ needs.build.outputs.bundle_target_spec }}
+      cancel-in-progress: true
+
+  integration-tests:
+    needs: build
+    if: |
+      needs.build.result == 'success'
+      && needs.build.outputs.update_url != ''
+      && !(github.ref_type == 'tag' && contains(github.ref_name, '-rc'))
+      && needs.build.outputs.run_regression != 'true'
+    uses: './.github/workflows/integration-tests.yml'
+    with:
+      branch_name: ${{ github.head_ref || github.ref_name }}
+      commit_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      update_url: ${{ needs.build.outputs.update_url }}
+      target: ${{ needs.build.outputs.bundle_target_spec }}
+      marker_filter: 'not regression'
+    secrets: inherit
+
+  regression-tests:
+    needs: build
+    if: |
+      needs.build.result == 'success'
+      && needs.build.outputs.update_url != ''
+      && (
+        needs.build.outputs.run_regression == 'true'
+        || (github.ref_type == 'tag' && contains(github.ref_name, '-rc'))
+      )
+    uses: './.github/workflows/integration-tests.yml'
+    with:
+      branch_name: ${{ github.head_ref || github.ref_name }}
+      commit_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      update_url: ${{ needs.build.outputs.update_url }}
+      target: ${{ needs.build.outputs.bundle_target_spec }}
+      marker_filter: ''
+    secrets: inherit
+
+  unit-test-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        target_spec: ["22_65"]
+    concurrency:
+      group: unit-tests-build-${{ github.workflow }}-${{ github.ref }}-${{ matrix.target_spec }}
+      cancel-in-progress: true
+    uses: ./.github/workflows/build-test-artifacts.yml
+    with:
+      target_spec: ${{ matrix.target_spec }}
+      firmware_app_set: unit_tests
+      artifact_path: unit-test-artifacts
+      custom_suffix: unittests
+      zip_prefix: unittests
+    secrets: inherit
+
+  unit-tests:
+    needs: unit-test-build
+    if: ${{ needs.unit-test-build.result == 'success' && needs.unit-test-build.outputs.update_url != '' }}
+    uses: './.github/workflows/unit-test.yml'
+    with:
+      branch_name: ${{ github.head_ref || github.ref_name }}
+      commit_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      update_url: ${{ needs.unit-test-build.outputs.update_url }}
+      target: ${{ needs.unit-test-build.outputs.target }}
+    secrets: inherit
+    concurrency:
+      group: unit-tests-${{ github.workflow }}-${{ github.ref }}-${{ needs.unit-test-build.outputs.target }}
+      cancel-in-progress: true
+
+  brick-test-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        target_spec: ["22_65"]
+    concurrency:
+      group: brick-test-build-${{ github.workflow }}-${{ github.ref }}-${{ matrix.target_spec }}
+      cancel-in-progress: true
+    uses: ./.github/workflows/build-test-artifacts.yml
+    with:
+      target_spec: ${{ matrix.target_spec }}
+      firmware_app_set: 917_crash
+      artifact_path: brick-test-artifacts
+      custom_suffix: bricktest
+      zip_prefix: bricktest
+    secrets: inherit
+
+  brick-tests:
+    needs: brick-test-build
+    if: ${{ needs.brick-test-build.result == 'success' && needs.brick-test-build.outputs.update_url != '' }}
+    uses: "./.github/workflows/brick-test.yml"
+    with:
+      branch_name: ${{ github.head_ref || github.ref_name }}
+      commit_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      brick_update_url: ${{ needs.brick-test-build.outputs.update_url }}
+      normal_update_url: ${{ needs.brick-test-build.outputs.normal_update_url }}
+      target: ${{ needs.brick-test-build.outputs.target }}
+    secrets: inherit
+    concurrency:
+      group: brick-tests-${{ github.workflow }}-${{ github.ref }}-${{ needs.brick-test-build.outputs.target }}
+      cancel-in-progress: false
+
+  # Umbrella gate: aggregates all hardware test suites into a single required
+  # check ("tests-passed"), so branch protection only has to require this one
+  # context instead of the individual test checks (whose contexts change name
+  # between "ran" and "skipped", and which never run on fork PRs).
+  #
+  # Runs on fork PRs too and passes without requiring any suite, because on
+  # fork PRs every test job above is skipped by its own `if:` condition (no
+  # artifacts can be uploaded) - the gate stays green instead of skipped.
+  tests-passed:
+    needs: [build, updater-tests, integration-tests, regression-tests, unit-tests, brick-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Check that required test suites passed'
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event.pull_request.head.repo.fork }}" == "true" ]]; then
+            echo "External PR: test suites skipped (no build artifacts on the build server). OK."
+            exit 0
+          fi
+          run_regression="${{ needs.build.outputs.run_regression }}"
+          is_rc="${{ github.ref_type == 'tag' && contains(github.ref_name, '-rc') }}"
+          force_regression="$([[ "$run_regression" == "true" || "$is_rc" == "true" ]] && echo true || echo false)"
+
+          check_success() {
+            local label="$1" result="$2"
+            if [[ "$result" != "success" ]]; then
+              echo "::error::$label: ${result:-skipped}, but the suite was expected to run"
+              exit 1
+            fi
+          }
+
+          # These suites run on every non-fork event; a skip here means their build failed.
+          check_success "Updater tests" "${{ needs.updater-tests.result }}"
+          check_success "Unit tests" "${{ needs.unit-tests.result }}"
+          check_success "Brick recovery tests" "${{ needs.brick-tests.result }}"
+
+          if [[ "$force_regression" == "true" ]]; then
+            # Regression was requested ([run regression] or -rc tag): it must pass,
+            # and integration is legitimately skipped.
+            check_success "Regression tests" "${{ needs.regression-tests.result }}"
+          else
+            # Normal run: the smoke suite must pass, regression is legitimately skipped.
+            check_success "Integration tests" "${{ needs.integration-tests.result }}"
+          fi

@@ -1,0 +1,34 @@
+App(
+    appid="input",
+    name="InputSrv",
+    apptype=FlipperAppType.SERVICE,
+    entry_point="input_srv",
+    cdefines=["SRV_INPUT"],
+    stack_size=1 * 1024,
+    order=60,
+    targets=["f20", "f21", "f22"],
+    sources=["input.c"],
+    sdk_headers=["input.h"],
+    provides=["input_command"],
+)
+
+App(
+    appid="input",
+    name="InputSrv",
+    apptype=FlipperAppType.SERVICE,
+    entry_point="input_srv",
+    cdefines=["SRV_INPUT"],
+    stack_size=1 * 1024,
+    order=80,
+    targets=["f64", "f65"],
+    sources=["input_f64.c"],
+)
+
+App(
+    appid="input_command",
+    name="input",
+    targets=["f20", "f21", "f22"],
+    apptype=FlipperAppType.CLICMD,
+    entry_point="input_cli_command",
+    sources=["input_cli.c"],
+)

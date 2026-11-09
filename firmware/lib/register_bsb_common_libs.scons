@@ -1,0 +1,58 @@
+Import("env")
+
+for libname in [
+    "stb",
+    "internal_assets",
+    "drivers",
+    "tinyusb",
+    "lwip",
+    "netstat",
+    "cjson",
+    "cli",
+    "containers",
+    "jerryscript",
+    "lvgl",
+    "lvgl_addons",
+    "network",
+    "mongoose",
+    "fw_updater_opts",
+    "lib_base",
+    "microtar",
+    "mbedtls",
+    "icon_assets",
+    "toolbox",
+    "toolbox_old",
+    "formatters",
+    "flipper_format",
+    "flipper_application",
+    "nanopb",
+    "heatshrink",
+    "ext_applications",
+    "firmware_applications_u5",
+    "settings_helpers",
+    "setting_provider",
+    "anim_file",
+    "zlib",
+    "utz",
+    "proto",
+    "fetch",
+    "storage_utils",
+    "js_app",
+    "xpm",
+    "http",
+    ## SI917
+    "sl_glue",
+    "simplicity_sdk",
+    "wiseconnect",
+    "libm_fix",
+    "matter_ext",
+    "firmware_applications_si917",
+]:
+    env.RegisterComponent(f"fwlib_{libname}", env.FindComponentSconscript(libname))
+
+
+env.Append(
+    CPPPATH=[
+        Dir(".").srcnode(),
+    ],
+)

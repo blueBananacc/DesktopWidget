@@ -1,0 +1,299 @@
+#include "js_app_manifest.h"
+#include "js_app_common.h"
+
+#include <core/check.h>
+#include <core/log.h>
+
+#include <cjson/cJSON.h>
+#include <toolbox/semver.h>
+
+#include <storage/storage.h>
+
+#define TAG "JsAppManifest"
+
+#define JS_APP_MANIFEST_MAX_FILE_SIZE (512)
+
+#define JS_APP_MANIFEST_FORMAT_VERSION (1)
+
+#define JS_APP_MANIFEST_HEAP_SIZE_KIB_MIN     (1)
+#define JS_APP_MANIFEST_HEAP_SIZE_KIB_MAX     (512)
+#define JS_APP_MANIFEST_HEAP_SIZE_KIB_DEFAULT (128)
+
+#define JS_APP_MANIFEST_FORMAT_VERSION_KEY "format_version"
+#define JS_APP_MANIFEST_ID_KEY             "id"
+#define JS_APP_MANIFEST_NAME_KEY           "name"
+#define JS_APP_MANIFEST_VERSION_KEY        "version"
+#define JS_APP_MANIFEST_API_VERSION_KEY    "api_version"
+#define JS_APP_MANIFEST_DESCRIPTION_KEY    "description"
+#define JS_APP_MANIFEST_AUTHOR_KEY         "author"
+#define JS_APP_MANIFEST_HEAP_SIZE_KEY      "heap_size_kib"
+#define JS_APP_MANIFEST_DEBUG_KEY          "debug"
+
+struct JsAppManifest {
+    cJSON* parsed_json;
+    JsAppManifestInfo info;
+};
+
+static void js_app_manifest_reset(JsAppManifest* instance) {
+    if(instance->parsed_json != NULL) {
+        cJSON_Delete(instance->parsed_json);
+        instance->parsed_json = NULL;
+    }
+}
+
+static void js_app_manifest_log_missing_value(const char* key) {
+    FURI_LOG_E(TAG, "Missing or invalid value: %s", key);
+}
+
+static void js_app_manifest_log_invalid_string_value(const char* key, const char* value) {
+    FURI_LOG_E(TAG, "Invalid %s value: %s", key, value);
+}
+
+static bool js_app_manifest_parse_semver(const cJSON* json, const char* key, SemVer* out) {
+    bool success = false;
+
+    do {
+        const cJSON* item = cJSON_GetObjectItem(json, key);
+        if(!cJSON_IsString(item)) {
+            break;
+        }
+
+        const char* str = cJSON_GetStringValue(item);
+
+        if(!semver_parse(out, str)) {
+            break;
+        }
+
+        success = true;
+    } while(false);
+
+    return success;
+}
+
+static bool js_app_manifest_parse_version(const cJSON* json, JsAppManifestInfo* info) {
+    return js_app_manifest_parse_semver(json, JS_APP_MANIFEST_VERSION_KEY, &info->version);
+}
+
+static bool js_app_manifest_parse_api_version(const cJSON* json, JsAppManifestInfo* info) {
+    return js_app_manifest_parse_semver(json, JS_APP_MANIFEST_API_VERSION_KEY, &info->api_version);
+}
+
+static bool js_app_manifest_parse_heap_size(const cJSON* json, JsAppManifestInfo* info) {
+    bool success = false;
+
+    do {
+        int32_t heap_size_kib;
+
+        const cJSON* item = cJSON_GetObjectItem(json, JS_APP_MANIFEST_HEAP_SIZE_KEY);
+        if(cJSON_IsNumber(item)) {
+            heap_size_kib = cJSON_GetNumberValue(item);
+
+            if((heap_size_kib < JS_APP_MANIFEST_HEAP_SIZE_KIB_MIN) ||
+               (heap_size_kib > JS_APP_MANIFEST_HEAP_SIZE_KIB_MAX)) {
+                break;
+            }
+
+        } else {
+            heap_size_kib = JS_APP_MANIFEST_HEAP_SIZE_KIB_DEFAULT;
+        }
+        // Resulting value is in bytes for convenience
+        info->heap_size = heap_size_kib * 1024;
+        success = true;
+
+    } while(false);
+
+    return success;
+}
+
+static bool
+    js_app_manifest_parse_data(JsAppManifest* instance, const char* data, uint32_t data_len) {
+    furi_assert(instance->parsed_json == NULL);
+
+    bool success = false;
+
+    JsAppManifestInfo* info = &instance->info;
+
+    cJSON* json;
+
+    do {
+        json = cJSON_ParseWithLength(data, data_len);
+
+        if(json == NULL) {
+            break;
+        }
+
+        cJSON* item;
+
+        item = cJSON_GetObjectItem(json, JS_APP_MANIFEST_FORMAT_VERSION_KEY);
+        if(!cJSON_IsNumber(item)) {
+            js_app_manifest_log_missing_value(JS_APP_MANIFEST_FORMAT_VERSION_KEY);
+            break;
+        }
+
+        const uint32_t format_version = cJSON_GetNumberValue(item);
+        if(format_version != JS_APP_MANIFEST_FORMAT_VERSION) {
+            FURI_LOG_W(TAG, "Unknown format version: %lu", format_version);
+            // Emit a warning, but try anyway
+        }
+
+        item = cJSON_GetObjectItem(json, JS_APP_MANIFEST_ID_KEY);
+        if(!cJSON_IsString(item)) {
+            js_app_manifest_log_missing_value(JS_APP_MANIFEST_ID_KEY);
+            break;
+        }
+
+        info->id = cJSON_GetStringValue(item);
+        if(!js_app_is_valid_id(info->id)) {
+            js_app_manifest_log_invalid_string_value(JS_APP_MANIFEST_ID_KEY, info->id);
+            break;
+        }
+
+        item = cJSON_GetObjectItem(json, JS_APP_MANIFEST_NAME_KEY);
+        if(!cJSON_IsString(item)) {
+            js_app_manifest_log_missing_value(JS_APP_MANIFEST_NAME_KEY);
+            break;
+        }
+
+        info->name = cJSON_GetStringValue(item);
+
+        if(!js_app_manifest_parse_version(json, info)) {
+            js_app_manifest_log_missing_value(JS_APP_MANIFEST_VERSION_KEY);
+            break;
+        }
+
+        if(!js_app_manifest_parse_api_version(json, info)) {
+            js_app_manifest_log_missing_value(JS_APP_MANIFEST_API_VERSION_KEY);
+            break;
+        }
+
+        item = cJSON_GetObjectItem(json, JS_APP_MANIFEST_DESCRIPTION_KEY);
+        if(cJSON_IsString(item)) {
+            info->description = cJSON_GetStringValue(item);
+        } else {
+            info->description = "";
+        }
+
+        item = cJSON_GetObjectItem(json, JS_APP_MANIFEST_AUTHOR_KEY);
+        if(cJSON_IsString(item)) {
+            info->author = cJSON_GetStringValue(item);
+        } else {
+            info->author = "";
+        }
+
+        if(!js_app_manifest_parse_heap_size(json, info)) {
+            js_app_manifest_log_missing_value(JS_APP_MANIFEST_HEAP_SIZE_KEY);
+            break;
+        }
+
+        item = cJSON_GetObjectItem(json, JS_APP_MANIFEST_DEBUG_KEY);
+        if(cJSON_IsBool(item)) {
+            info->is_debug = cJSON_IsTrue(item);
+        } else {
+            info->is_debug = false;
+        }
+
+        success = true;
+    } while(false);
+
+    if(success) {
+        instance->parsed_json = json;
+    } else {
+        cJSON_Delete(json);
+    }
+
+    return success;
+}
+
+JsAppManifest* js_app_manifest_alloc(void) {
+    JsAppManifest* instance = malloc(sizeof(JsAppManifest));
+    return instance;
+}
+
+void js_app_manifest_free(JsAppManifest* instance) {
+    furi_check(instance);
+
+    js_app_manifest_reset(instance);
+    free(instance);
+}
+
+bool js_app_manifest_load_from_file(JsAppManifest* instance, const char* file_path) {
+    furi_check(instance);
+    furi_check(file_path);
+
+    bool success = false;
+
+    js_app_manifest_reset(instance);
+
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    File* file = storage_file_alloc(storage);
+
+    char* file_buf = NULL;
+
+    do {
+        FileInfo file_info;
+
+        if(storage_common_stat(storage, file_path, &file_info) != FSE_OK) {
+            FURI_LOG_W(TAG, "File %s is not present", file_path);
+            break;
+        }
+
+        if(file_info_is_dir(&file_info)) {
+            FURI_LOG_E(TAG, "File path %s is a directory", file_path);
+            break;
+        }
+
+        const uint32_t file_size = file_info.size;
+
+        if(file_size == 0) {
+            FURI_LOG_E(TAG, "File %s is empty", file_path);
+            break;
+        }
+
+        if(file_size > JS_APP_MANIFEST_MAX_FILE_SIZE) {
+            FURI_LOG_E(TAG, "File %s is too big", file_path);
+            break;
+        }
+
+        if(!storage_file_open(file, file_path, FSAM_READ, FSOM_OPEN_EXISTING)) {
+            FURI_LOG_E(TAG, "Failed to open file %s for reading", file_path);
+            break;
+        }
+
+        file_buf = malloc(file_size);
+
+        if(storage_file_read(file, file_buf, file_size) != file_size) {
+            FURI_LOG_E(TAG, "Failed to read file %s", file_path);
+            break;
+        }
+
+        if(!js_app_manifest_parse_data(instance, file_buf, file_size)) {
+            FURI_LOG_E(TAG, "Failed to parse file %s", file_path);
+            break;
+        }
+
+        success = true;
+    } while(false);
+
+    if(file_buf != NULL) {
+        free(file_buf);
+    }
+
+    storage_file_free(file);
+    furi_record_close(RECORD_STORAGE);
+
+    return success;
+}
+
+bool js_app_manifest_get_info(const JsAppManifest* instance, JsAppManifestInfo* info) {
+    furi_check(instance);
+    furi_check(info);
+
+    bool success = false;
+
+    if(instance->parsed_json) {
+        *info = instance->info;
+        success = true;
+    }
+
+    return success;
+}

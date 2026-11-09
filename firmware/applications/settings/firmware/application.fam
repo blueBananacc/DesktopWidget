@@ -1,0 +1,9 @@
+App(
+    appid="firmware_settings",
+    name="Firmware Settings",
+    apptype=FlipperAppType.SETTINGS,
+    entry_point="firmware_settings_entry",
+    requires=["gui", "updater", "power_srv"],
+    stack_size=4 * 1024,
+    order=60,
+)

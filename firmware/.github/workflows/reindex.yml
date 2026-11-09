@@ -1,0 +1,25 @@
+name: "Post-release hooks"
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reindex:
+    name: "Post-release hooks"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Trigger reindex"
+        run: |
+          curl --fail -L -H "Token: ${{ secrets.INDEXER_TOKEN }}" \
+              "${{ secrets.INDEXER_URL }}"/busybar-firmware/reindex;
+
+      - name: "Trigger reindex (update-indexer-dev)"
+        run: |
+          curl --fail -L -H "Token: ${{ secrets.UPDATE_INDEXER_DEV_TOKEN }}" \
+              "${{ secrets.UPDATE_INDEXER_DEV_URL }}"/busybar-firmware/reindex;

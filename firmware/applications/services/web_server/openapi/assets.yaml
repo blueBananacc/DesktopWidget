@@ -1,0 +1,622 @@
+tags:
+- name: Assets
+  description: Asset file management and display control
+
+paths:
+  /api/assets/upload:
+    post:
+      tags:
+        - Assets
+      summary: Upload asset file with app ID
+      description: |
+        Upload a file to the application-specific assets directory. If the directory does not yet exist, it will be created automatically.
+        Additionally, if the file name contains a subdirectory, it will be created as well, and the file will be placed inside of it.
+      operationId: uploadAssetWithAppId
+      parameters:
+        - name: application_name
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/ApplicationName"
+          description: Application name for organizing assets
+        - name: file
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/AssetsPath"
+          description: File path for the uploaded asset within the app assets directory
+          example: "file.png"
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+              description: File data to upload as raw binary content
+      responses:
+        "200":
+          description: File uploaded successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: Invalid parameters or upload failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: File too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "508":
+          description: Failed to write uploaded file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    delete:
+      tags:
+        - Assets
+      summary: Delete app assets
+      description: Deletes all assets for a specific app ID
+      operationId: deleteAppAssets
+      parameters:
+        - name: application_name
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/ApplicationName"
+          description: Application ID whose assets should be deleted
+      responses:
+        "200":
+          description: Assets deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Delete failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/display/draw:
+    post:
+      tags:
+        - Assets
+      summary: Draw on display
+      description: |
+        Sends drawing data to the display.
+        Supports JSON-defined display elements.
+      operationId: drawOnDisplay
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DisplayElements"
+      responses:
+        "200":
+          description: Drawing command executed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: Invalid drawing data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Requested priority level is below that of currently active app
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      tags:
+        - Assets
+      summary: Clear display
+      description: Deletes display elements drawn via this API. This operation can be selective - see the request body type.
+      operationId: clearDisplay
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeletionParameters"
+      parameters:
+        - name: application_name
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ApplicationName"
+          description: Application identifier
+      responses:
+        "200":
+          description: Display or some elements cleared successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: Invalid deletion data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/audio/play:
+    post:
+      tags:
+        - Assets
+      summary: Play audio file
+      description: |
+        Plays an audio file from the assets directory.
+        Supported formats include .snd files.
+      operationId: playAudio
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlayAudio"
+      responses:
+        "200":
+          description: Audio playback started successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: Invalid file path
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Audio file not found or is unplayable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    delete:
+      tags:
+        - Assets
+      summary: Stop audio playback
+      description: Stops any currently playing audio
+      operationId: stopAudio
+      responses:
+        "200":
+          description: Audio playback stopped successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "410":
+          description: No audio is playing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Audio system error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+schemas:
+  ApplicationName:
+    type: string
+    maxLength: 32
+    pattern: "^[a-zA-Z0-9._-]+$"
+    example: "my_app"
+
+  AssetsPath:
+    type: string
+    maxLength: 64
+    pattern: "^[a-zA-Z0-9._/-]+$"
+
+  StockPath:
+    type: string
+    maxLength: 256
+    pattern: "shared/[a-zA-Z0-9._/-]+$"
+
+  DisplayElements:
+    type: object
+    properties:
+      application_name:
+        $ref: "#/components/schemas/ApplicationName"
+        description: Application name for organizing assets
+      priority:
+        type: integer
+        minimum: 1
+        maximum: 100
+        description: >-
+          Draw priority in the range [1, 100] inclusive. A draw request is
+          accepted when its priority is greater than or equal to (>=) the
+          priority of the currently running system app. Equal-priority requests
+          from a different application_name override whatever is on screen.
+          System app priority levels: stub/poweroff apps = 0 (always
+          preemptable), any standard built-in app = 10, active BUSY/CUSTOM
+          work session = 90. The draw API only accepts values 1–100; 0 is
+          reserved for internal use.
+        default: 50
+      led_notification_color:
+        type: string
+        pattern: "^#[a-fA-F0-9]{8}$"
+        description: >-
+          Color to blink the status LED, in #RRGGBBAA format.
+          If not specified, the LED will not blink.
+        example: "#FF0000FF"
+      elements:
+        type: array
+        minItems: 1
+        items:
+          oneOf:
+            - $ref: "#/components/schemas/TextElement"
+            - $ref: "#/components/schemas/ImageElement"
+            - $ref: "#/components/schemas/AnimationElement"
+            - $ref: "#/components/schemas/CountdownElement"
+            - $ref: "#/components/schemas/RectangleElement"
+            - $ref: "#/components/schemas/XpmBitmapElement"
+        description: Array of elements to display
+    required:
+      - application_name
+      - elements
+    example:
+      application_name: "my_app"
+      led_notification_color: "#FF0000FF"
+      elements:
+        - id: "0"
+          timeout: 10
+          align: center
+          x: 36
+          y: 10
+          type: text
+          text: "Hello, World! Long text"
+          font: normal
+          color: "#FFFFFFFF"
+          width: 72
+          scroll_rate: 1000
+          scroll_start_delay: 1000
+          scroll_repeat_delay: 2500
+          display: front
+        - id: "1"
+          timeout: 6
+          align: top_mid
+          x: 36
+          y: 0
+          type: text
+          text: "top_mid"
+          font: small
+          color: "#AAFF00FF"
+          display: "front"
+
+  DisplayElement:
+    type: object
+    required:
+      - id
+      - type
+    properties:
+      id:
+        type: string
+        pattern: "^[a-zA-Z0-9._-]+$"
+        description: Unique identifier for the element
+      timeout:
+        type: integer
+        minimum: 0
+        description: Time in seconds the element should be displayed (0 for no timeout). Mutually exclusive with display_until.
+      display_until:
+        type: string
+        description: The element will be hidden when system time reaches the specified Unix timestamp (in seconds). Mutually exclusive with timeout.
+      type:
+        type: string
+        enum: [text, image, animation, countdown, rectangle, xpmbitmap]
+        description: Type of display element
+      x:
+        type: integer
+        minimum: -4096
+        maximum: 4095
+        description: X coordinate of selected anchor point relative to top-left of display
+        default: 0
+      y:
+        type: integer
+        minimum: -4096
+        maximum: 4095
+        description: Y coordinate of selected anchor point relative to top-left of display
+        default: 0
+      display:
+        type: string
+        enum: [front, back]
+        description: Which display to show the element on (for dual-display devices)
+        default: front
+      align:
+        type: string
+        description: Anchor point of element. Also use `x` and `y` to position element.
+        enum:
+          - top_left
+          - top_mid
+          - top_right
+          - mid_left
+          - center
+          - mid_right
+          - bottom_left
+          - bottom_mid
+          - bottom_right
+      z_index:
+        type: integer
+        minimum: 0
+        maximum: 2147483647
+        description: Order of the element. Elements with higher Z-indexes are drawn on top of those with lower ones.
+    discriminator:
+      propertyName: type
+      mapping:
+        text: "#/components/schemas/TextElement"
+        image: "#/components/schemas/ImageElement"
+        animation: "#/components/schemas/AnimationElement"
+        countdown: "#/components/schemas/CountdownElement"
+        rectangle: "#/components/schemas/RectangleElement"
+        xpmbitmap: "#/components/schemas/XpmBitmapElement"
+  TextElement:
+    allOf:
+      - $ref: "#/components/schemas/DisplayElement"
+      - type: object
+        required:
+          - text
+          - font
+        properties:
+          text:
+            type: string
+            minLength: 1
+            pattern: "^[\\x20-\\x7E]+$"
+            description: Text content to display (printable ASCII only; fonts are bitmap ASCII)
+          font:
+            type: string
+            description: One of the available fonts to display the text in
+            enum:
+              - tiny
+              - small
+              - normal
+              - condensed
+              - bold
+              - large
+              - extra_large
+              - global
+              - superscript
+          color:
+            type: string
+            description: "Color to display the text in, in #RRGGBBAA format"
+            pattern: "^#[a-fA-F0-9]{8}$"
+            default: "#FFFFFFFF"
+          width:
+            type: integer
+            minimum: 1
+            description: Width of the label
+          scroll_rate:
+            type: integer
+            minimum: 0
+            description: Scroll rate in pixels per minute
+          scroll_start_delay:
+            type: integer
+            minimum: 0
+            description: Delay in milliseconds before the scroll animation begins
+          scroll_repeat_delay:
+            type: integer
+            minimum: 0
+            description: Pause duration in milliseconds between successive scroll cycles
+
+  ImageElement:
+    allOf:
+      - $ref: "#/components/schemas/DisplayElement"
+      - type: object
+        allOf:
+          - oneOf:
+            - required:
+                - path
+              properties:
+                path:
+                  $ref: "#/components/schemas/AssetsPath"
+                  description: Path to the image file in the app's assets
+            - required:
+                - stock_path
+              properties:
+                stock_path:
+                  $ref: "#/components/schemas/StockPath"
+                  description: Stock image file name
+          - properties:
+              opacity:
+                type: integer
+                minimum: 0
+                maximum: 100
+                description: Opacity of the image in percentage (0-100)
+                default: 100
+
+  AnimationElement:
+    allOf:
+      - $ref: "#/components/schemas/DisplayElement"
+      - type: object
+        allOf:
+          - oneOf:
+              - properties:
+                  path:
+                    $ref: "#/components/schemas/AssetsPath"
+                    description: Path to the animation file in the app's assets
+              - properties:
+                  stock_path:
+                    $ref: "#/components/schemas/StockPath"
+                    description: Stock animation file name
+          - properties:
+              loop:
+                type: boolean
+                description: Whether to loop the requested part of the animation
+                default: false
+              await_previous_end:
+                type: boolean
+                description: If the element has been created before and this flag is true, the previous range will finish before the requested one starts.
+                default: false
+              section:
+                type: string
+                description: Name of the section to play back. Specifying "default" selects the entire animation.
+              opacity:
+                type: integer
+                minimum: 0
+                maximum: 100
+                description: Opacity of the animated image in percentage (0-100)
+                default: 100
+
+  CountdownElement:
+    allOf:
+      - $ref: "#/components/schemas/DisplayElement"
+      - type: object
+        required:
+          - timestamp
+          - direction
+          - show_hours
+        properties:
+          timestamp:
+            type: string
+            pattern: "^[0-9]+$"
+            description: "Seconds-based Unix UTC timestamp to count down or up to. Note: it's a number in a string."
+          color:
+            type: string
+            description: "Color to display the text in, in #RRGGBBAA format"
+            pattern: "^#[a-fA-F0-9]{8}$"
+            default: "#FFFFFFFF"
+          direction:
+            type: string
+            enum: [time_left, time_since]
+            description: Whether to count up or down
+          show_hours:
+            type: string
+            enum: [when_non_zero, always]
+            description: When to show the hours position
+
+  RectangleElement:
+    allOf:
+      - $ref: "#/components/schemas/DisplayElement"
+      - type: object
+        required:
+          - width
+          - height
+        properties:
+          width:
+            type: integer
+            minimum: 1
+            description: Width of the rectangle in pixels
+          height:
+            type: integer
+            minimum: 1
+            description: Height of the rectangle in pixels
+          radius:
+            type: integer
+            minimum: 0
+            description: Corner radius of the rectangle in pixels (0 for sharp corners)
+          fill:
+            type: string
+            enum: [none, solid, gradient_h, gradient_v]
+            description: Fill style of the rectangle
+            default: none
+          fill_colors:
+            type: array
+            minItems: 1
+            maxItems: 2
+            items:
+              type: string
+              pattern: "^#[a-fA-F0-9]{8}$"
+            description: Colors used for filling the rectangle. For solid fill, provide one color. For gradient fill, provide two colors.
+            default: ["#FFFFFFFF", "#00000000"]
+          border_width:
+            type: integer
+            minimum: 0
+            description: Width of the rectangle border in pixels (0 for no border)
+            default: 1
+          border_color:
+            type: string
+            pattern: "^#[a-fA-F0-9]{8}$"
+            description: "Color of the rectangle border in #RRGGBBAA format"
+            default: "#FFFFFFFF"
+  XpmBitmapElement:
+    allOf:
+      - $ref: "#/components/schemas/DisplayElement"
+      - type: object
+        required:
+          - data
+        properties:
+          data:
+            type: string
+            minLength: 1
+            description: >-
+              XPM2 source as plain text: must begin with a "! XPM2" signature
+              line, followed by a "width height ncolors cpp" header line, then
+              ncolors color lines, then height pixel rows.
+              Each color line is "<chars> <visual> <value>" where visual is
+              c (color), g/g4 (grayscale), m (monochrome), or s (symbolic).
+              Values can be hex (#RGB, #RRGGBB, #RRRGGGBBB, #RRRRGGGGBBBB), 
+              or named (none, black, white, red, green, blue, yellow, cyan,
+              magenta, gray, grey).
+              Limits: ncolors <= 32, cpp <= 4, and width/height must not exceed
+              the target display dimensions (see the "display" field).
+          opacity:
+            type: integer
+            minimum: 0
+            maximum: 100
+            description: Opacity of the image in percentage (0-100)
+            default: 100
+
+  PlayAudio:
+    type: object
+    allOf:
+      - properties:
+          application_name:
+            $ref: "#/components/schemas/ApplicationName"
+            description: Application name for organizing assets
+        required:
+          - application_name
+      - oneOf:
+        - properties:
+            path:
+              $ref: "#/components/schemas/AssetsPath"
+              description: Path to audio file within app's assets directory
+          required:
+            - path
+        - properties:
+            stock_path:
+              $ref: "#/components/schemas/StockPath"
+              description: Stock audio file name
+              examples:
+                - "beep.snd"
+                - "sounds/alert.snd"
+          required:
+              - stock_path
+
+  DeletionParameters:
+    type: object
+    properties:
+      application_name:
+        $ref: "#/components/schemas/ApplicationName"
+        description: Fill in this field for a sanity check that you actually own these elements. Omit it to delete them anyway.
+        example: my_app
+      element_ids:
+        description: Unique identifiers of elements that should be deleted. Omit this field to delete all elements.
+        type: array
+        items:
+          type: string
+          pattern: "^[a-zA-Z0-9._-]+$"
+          example: my_element

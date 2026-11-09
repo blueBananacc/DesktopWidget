@@ -1,0 +1,25 @@
+Import("env")
+
+env.Append(
+    CPPPATH=[
+        Dir("tinyusb/src").srcnode(),
+        Dir("tinyusb/src/common").srcnode(),
+        Dir("tinyusb/src/device").srcnode(),
+    ],
+)
+
+libenv = env.Clone(FW_LIB_NAME="tinyusb")
+libenv.ApplyLibFlags()
+
+sources = [
+    "tinyusb/src/tusb.c",
+    "tinyusb/src/portable/synopsys/dwc2/dwc2_common.c",
+    "tinyusb/src/portable/synopsys/dwc2/dcd_dwc2.c",
+    "tinyusb/src/class/net/ncm_device.c",
+]
+sources += libenv.Glob("tinyusb/src/common/*.c", source=True)
+sources += libenv.Glob("tinyusb/src/device/*.c", source=True)
+
+lib = libenv.StaticLibrary("${FW_LIB_NAME}", sources)
+libenv.Install("${LIB_DIST_DIR}", lib)
+Return("lib")

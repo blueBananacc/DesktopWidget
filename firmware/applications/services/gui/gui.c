@@ -1,0 +1,457 @@
+#include "gui_i.h"
+
+#include <lvgl_addons/fs/lv_fs.h>
+#include <lvgl_addons/themes/lv_theme_front.h>
+#include <lvgl_addons/themes/lv_theme_back.h>
+#include <sysctl/sysctl.h>
+
+#define TAG "Gui"
+
+// To ensure TO_LV_COLOR soundness
+static_assert(offsetof(lv_color_t, blue) == offsetof(Color, b));
+static_assert(offsetof(lv_color_t, green) == offsetof(Color, g));
+static_assert(offsetof(lv_color_t, red) == offsetof(Color, r));
+
+static void
+    gui_flush_front_callback(lv_display_t* lv_display, const lv_area_t* area, uint8_t* px_map) {
+    UNUSED(area);
+
+    GuiDisplay* display = lv_display_get_driver_data(lv_display);
+    furi_check(px_map == display->draw_buffer);
+
+    front_display_draw(display->driver, display->draw_buffer);
+
+    lv_display_flush_ready(lv_display);
+}
+
+static void
+    gui_flush_back_callback(lv_display_t* lv_display, const lv_area_t* area, uint8_t* px_map) {
+    UNUSED(area);
+
+    GuiDisplay* display = lv_display_get_driver_data(lv_display);
+    furi_check(px_map == display->draw_buffer);
+
+    back_display_draw(display->driver, display->draw_buffer);
+
+    lv_display_flush_ready(lv_display);
+}
+
+static void gui_log_callback(lv_log_level_t level, const char* buf) {
+    char* line = strdup(buf);
+    line[strlen(buf) - 1] = 0;
+
+    switch(level) {
+    case LV_LOG_LEVEL_INFO:
+        FURI_LOG_I(TAG, "%s", line);
+        break;
+    case LV_LOG_LEVEL_WARN:
+        FURI_LOG_W(TAG, "%s", line);
+        break;
+    case LV_LOG_LEVEL_ERROR:
+        FURI_LOG_E(TAG, "%s", line);
+        break;
+    default:
+        FURI_LOG_D(TAG, "%s", line);
+    }
+
+    free(line);
+}
+
+static void gui_input_pubsub_callback(const void* message, void* context) {
+    furi_assert(message);
+    furi_assert(context);
+
+    Gui* instance = context;
+
+    furi_check(
+        furi_message_queue_put(instance->input_queue, message, FuriWaitForever) == FuriStatusOk);
+}
+
+static void gui_tick_callback(void* context) {
+    UNUSED(context);
+    // lv_lock() is called inside lv_timer_periodic_handler
+    lv_timer_periodic_handler();
+}
+
+static lv_obj_t* gui_get_layer_root(Gui* instance, GuiDisplayId display_id, GuiLayerId layer_id) {
+    lv_display_t* display = instance->displays[display_id].lv_display;
+    lv_obj_t* layer;
+
+    if(layer_id == GuiLayerIdBottom) {
+        layer = lv_display_get_layer_bottom(display);
+    } else if(layer_id == GuiLayerIdMain) {
+        lv_obj_t* root = lv_display_get_screen_active(display);
+
+        if(display_id == GuiDisplayIdBack) {
+            // Special case: make room for the status bar
+            layer = lv_obj_create(root);
+            lv_obj_set_size(
+                layer, lv_obj_get_width(root) - BACK_STATUS_BAR_WIDTH, lv_obj_get_height(root));
+        } else {
+            layer = root;
+        }
+    } else if(layer_id == GuiLayerIdTop) {
+        layer = lv_display_get_layer_top(display);
+    } else if(layer_id == GuiLayerIdSystem) {
+        layer = lv_display_get_layer_sys(display);
+    } else {
+        furi_crash();
+    }
+
+    lv_obj_remove_flag(layer, LV_OBJ_FLAG_SCROLLABLE);
+    return layer;
+}
+
+static bool gui_layer_feed_input(GuiLayer* layer, const InputEvent* event) {
+    bool consumed = false;
+
+    for(GuiDisplayId display_id = 0; display_id < GuiDisplayIdMax; ++display_id) {
+        lv_obj_t* root = layer->root_objs[display_id];
+        const uint32_t child_count = lv_obj_get_child_count(root);
+
+        for(uint32_t i = 0; i < child_count; ++i) {
+            lv_obj_t* child = lv_obj_get_child(root, i);
+
+            if(IS_WIDGET_CLASS(child)) {
+                if(widget_input((Widget*)child, event)) {
+                    consumed = true;
+                }
+            }
+        }
+    }
+
+    return consumed;
+}
+
+static void gui_display_object_created_callback(lv_event_t* event) {
+    lv_obj_t* lv_object = lv_event_get_param(event);
+
+    if(IS_WIDGET_CLASS(lv_object)) {
+        widget_style(NULL, (Widget*)lv_object);
+    }
+}
+
+static bool gui_layer_feed_user_input(GuiLayer* layer, const InputEvent* event) {
+    bool consumed = false;
+
+    GuiInputItemList_it_t it;
+    for(GuiInputItemList_it(it, layer->input_list); !GuiInputItemList_end_p(it);
+        GuiInputItemList_next(it)) {
+        const GuiInputItem* item = GuiInputItemList_cref(it);
+        if(item->callback(event, item->context)) {
+            consumed = true;
+        }
+    }
+
+    return consumed;
+}
+
+static void gui_input_queue_callback(FuriEventLoopObject* object, void* context) {
+    furi_assert(context);
+
+    Gui* instance = context;
+    furi_assert(object == instance->input_queue);
+
+    lv_lock();
+
+    InputEvent event;
+    while(furi_message_queue_get(instance->input_queue, &event, 0) == FuriStatusOk) {
+        for(GuiLayerId id = GuiLayerIdSystem; id < GuiLayerIdMax; ++id) {
+            GuiLayer* layer = &instance->layers[id];
+            if(gui_layer_feed_input(layer, &event)) {
+                break;
+            }
+            if(gui_layer_feed_user_input(layer, &event)) {
+                break;
+            }
+        }
+    }
+
+    lv_unlock();
+}
+
+static void gui_init_front(GuiDisplay* display) {
+    display->draw_buffer = malloc(FRONT_DRAW_BUFFER_SIZE);
+    display->lv_display = lv_display_create(FRONT_W, FRONT_H);
+    display->driver = furi_record_open(RECORD_FRONT_DISPLAY);
+
+    lv_display_set_driver_data(display->lv_display, display);
+    lv_display_set_user_data(display->lv_display, (void*)GuiDisplayIdFront);
+    lv_display_set_flush_cb(display->lv_display, gui_flush_front_callback);
+    lv_display_set_color_format(display->lv_display, FRONT_COLOR_FORMAT);
+    lv_display_set_buffers(
+        display->lv_display,
+        display->draw_buffer,
+        NULL,
+        FRONT_DRAW_BUFFER_SIZE,
+        LV_DISPLAY_RENDER_MODE_DIRECT);
+
+    lv_theme_t* theme = lv_theme_front_alloc(display->lv_display);
+    lv_display_set_theme(display->lv_display, theme);
+
+    lv_display_add_event_cb(
+        display->lv_display, gui_display_object_created_callback, LV_EVENT_CREATE, NULL);
+}
+
+static void gui_init_back(GuiDisplay* display) {
+    const size_t back_display_buffer_size =
+        back_display_get_width() * back_display_get_height() * BACK_BYTES_PER_PIXEL;
+
+    display->draw_buffer = malloc(back_display_buffer_size);
+    display->lv_display = lv_display_create(back_display_get_width(), back_display_get_height());
+    display->driver = furi_record_open(RECORD_BACK_DISPLAY);
+
+    lv_display_set_driver_data(display->lv_display, display);
+    lv_display_set_user_data(display->lv_display, (void*)GuiDisplayIdBack);
+    lv_display_set_flush_cb(display->lv_display, gui_flush_back_callback);
+    lv_display_set_color_format(display->lv_display, BACK_COLOR_FORMAT);
+    lv_display_set_buffers(
+        display->lv_display,
+        display->draw_buffer,
+        NULL,
+        back_display_buffer_size,
+        LV_DISPLAY_RENDER_MODE_DIRECT);
+
+    lv_theme_t* theme = lv_theme_back_alloc(display->lv_display);
+    lv_display_set_theme(display->lv_display, theme);
+
+    lv_display_add_event_cb(
+        display->lv_display, gui_display_object_created_callback, LV_EVENT_CREATE, NULL);
+}
+
+static void gui_init_input(Gui* instance) {
+#if defined(SRV_INPUT)
+    FuriPubSub* input_events = furi_record_open(RECORD_INPUT_EVENTS);
+    furi_pubsub_subscribe(input_events, gui_input_pubsub_callback, instance);
+#else
+    UNUSED(instance);
+    UNUSED(gui_input_pubsub_callback);
+#endif
+}
+
+static void gui_init_layers(Gui* instance) {
+    for(GuiLayerId layer_id = GuiLayerIdSystem; layer_id < GuiLayerIdMax; ++layer_id) {
+        GuiLayer* layer = &instance->layers[layer_id];
+        for(GuiDisplayId display_id = 0; display_id < GuiDisplayIdMax; ++display_id) {
+            furi_assert(layer->root_objs[display_id] == NULL);
+            layer->root_objs[display_id] = gui_get_layer_root(instance, display_id, layer_id);
+        }
+        GuiInputItemList_init(layer->input_list);
+    }
+}
+
+static void gui_debug_overlay_draw_recursive(
+    lv_obj_t* obj,
+    lv_layer_t* layer,
+    lv_obj_t* overlay,
+    lv_draw_rect_dsc_t* rect) {
+    if(obj == overlay || lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) {
+        return;
+    }
+
+    if(lv_obj_get_parent(obj) != NULL) {
+        lv_area_t coords = {0};
+        lv_obj_get_coords(obj, &coords);
+        lv_draw_rect(layer, rect, &coords);
+    }
+
+    uint32_t child_cnt = lv_obj_get_child_count(obj);
+    for(uint32_t i = 0; i < child_cnt; i++) {
+        gui_debug_overlay_draw_recursive(lv_obj_get_child(obj, i), layer, overlay, rect);
+    }
+}
+
+static void gui_debug_overlay_draw_cb(lv_event_t* e) {
+    lv_obj_t* overlay = lv_event_get_user_data(e);
+    lv_layer_t* layer = lv_event_get_layer(e);
+    if(layer == NULL) return;
+
+    bool is_back_screen = layer->color_format == BACK_COLOR_FORMAT;
+
+    lv_draw_rect_dsc_t rect;
+    lv_draw_rect_dsc_init(&rect);
+
+    rect.bg_opa = LV_OPA_TRANSP;
+    rect.outline_width = 0;
+    rect.shadow_width = 0;
+
+    rect.border_width = 1;
+    rect.border_color = lv_color_hex(is_back_screen ? 0x808080 : 0x500000);
+    rect.border_opa = LV_OPA_50;
+
+    lv_obj_t* screen = lv_obj_get_screen(overlay);
+    gui_debug_overlay_draw_recursive(screen, layer, overlay, &rect);
+}
+
+static void gui_debug_overlay_alloc(lv_obj_t* screen) {
+    lv_obj_t* debug_overlay = lv_obj_create(screen);
+
+    lv_obj_remove_style_all(debug_overlay);
+    lv_obj_add_flag(debug_overlay, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_remove_flag(debug_overlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_set_size(debug_overlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_pos(debug_overlay, 0, 0);
+
+    lv_obj_add_event_cb(screen, gui_debug_overlay_draw_cb, LV_EVENT_DRAW_POST, debug_overlay);
+}
+
+static Gui* gui_alloc(void) {
+    Gui* instance = malloc(sizeof(Gui));
+    // Must be first to ensure that power subsystem is OK
+    instance->power = furi_record_open(RECORD_POWER);
+    // TODO: Subscribe to power subsystem events
+    // TODO: React on overheat or low power budget by limiting brightness
+    instance->event_loop = furi_event_loop_alloc();
+    instance->input_queue = furi_message_queue_alloc(16, sizeof(InputEvent));
+
+    furi_event_loop_subscribe_message_queue(
+        instance->event_loop,
+        instance->input_queue,
+        FuriEventLoopEventIn,
+        gui_input_queue_callback,
+        instance);
+
+    furi_event_loop_tick_set(
+        instance->event_loop, GUI_TICK_PERIOD_MS, gui_tick_callback, instance);
+
+    lv_init();
+    lv_storage_driver_init();
+    lv_tick_set_cb(furi_get_tick);
+    lv_delay_set_cb(furi_delay_ms);
+    lv_log_register_print_cb(gui_log_callback);
+
+    gui_init_front(&instance->displays[GuiDisplayIdFront]);
+    gui_init_back(&instance->displays[GuiDisplayIdBack]);
+    gui_init_layers(instance);
+    gui_init_input(instance);
+
+    // TODO: Make it configurable at runtime
+    int debug_level = 0;
+#ifdef SRV_SYSCTL
+    debug_level = sysctl_get_ui_debug_mode();
+#endif
+    if(debug_level == 1) {
+        gui_debug_overlay_alloc(gui_get_layer_root(instance, GuiDisplayIdBack, GuiLayerIdMain));
+        gui_debug_overlay_alloc(gui_get_layer_root(instance, GuiDisplayIdFront, GuiLayerIdMain));
+    } else if(debug_level == 2) {
+        for(GuiLayerId layer_id = 0; layer_id < GuiLayerIdMax; ++layer_id) {
+            gui_debug_overlay_alloc(gui_get_layer_root(instance, GuiDisplayIdBack, layer_id));
+            gui_debug_overlay_alloc(gui_get_layer_root(instance, GuiDisplayIdFront, layer_id));
+        }
+    }
+
+    furi_thread_set_current_priority(FuriThreadPriorityHigh);
+
+    furi_record_create(RECORD_GUI, instance);
+    return instance;
+}
+
+int gui_srv(void* arg) {
+    UNUSED(arg);
+
+    Gui* instance = gui_alloc();
+    furi_event_loop_run(instance->event_loop);
+
+    return 0;
+}
+
+// ====================
+// Public API functions
+// ====================
+
+void gui_lock(Gui* instance) {
+    furi_check(instance);
+    lv_lock();
+}
+
+void gui_unlock(Gui* instance) {
+    furi_check(instance);
+    lv_unlock();
+}
+
+GuiLayer* gui_get_layer(Gui* instance, GuiLayerId layer_id) {
+    furi_check(instance);
+    furi_check(layer_id < GuiLayerIdMax);
+
+    return &instance->layers[layer_id];
+}
+
+Widget* gui_layer_get_root_widget(GuiLayer* layer, GuiDisplayId display_id) {
+    furi_check(layer);
+    furi_check(display_id < GuiDisplayIdMax);
+
+    return (Widget*)layer->root_objs[display_id];
+}
+
+void gui_layer_add_input_callback(GuiLayer* layer, GuiInputCallback callback, void* context) {
+    furi_check(layer);
+    furi_check(callback);
+
+    GuiInputItemList_it_t it;
+    for(GuiInputItemList_it(it, layer->input_list); !GuiInputItemList_end_p(it);
+        GuiInputItemList_next(it)) {
+        const GuiInputItem* item = GuiInputItemList_cref(it);
+        if(item->callback == callback) {
+            furi_crash(TAG ": Callback already registered");
+        }
+    }
+
+    GuiInputItem* item = GuiInputItemList_push_new(layer->input_list);
+    item->callback = callback;
+    item->context = context;
+}
+
+void gui_layer_remove_input_callback(GuiLayer* layer, GuiInputCallback callback) {
+    furi_check(layer);
+    furi_check(callback);
+
+    GuiInputItemList_it_t it;
+    for(GuiInputItemList_it(it, layer->input_list); !GuiInputItemList_end_p(it);
+        GuiInputItemList_next(it)) {
+        const GuiInputItem* item = GuiInputItemList_cref(it);
+        if(item->callback == callback) {
+            GuiInputItemList_remove(layer->input_list, it);
+            break;
+        }
+    }
+}
+
+const uint8_t* gui_display_get_frame_buffer(Gui* gui, GuiDisplayId display_id) {
+    furi_check(gui);
+    furi_check(display_id < GuiDisplayIdMax);
+
+    return gui->displays[display_id].draw_buffer;
+}
+
+const GuiDisplayParameters* gui_display_get_parameters(GuiDisplayId display_id) {
+    furi_check(display_id < GuiDisplayIdMax);
+
+    static const GuiDisplayParameters display_parameters[] = {
+        [GuiDisplayIdFront] =
+            {
+                .width = FRONT_DISPLAY_W,
+                .height = FRONT_DISPLAY_H,
+                .bits_per_pixel = FRONT_DISPLAY_BPP,
+                .buffer_size = FRONT_DISPLAY_BUF_SIZE,
+            },
+        [GuiDisplayIdBack] =
+            {
+                .width = BACK_DISPLAY_W,
+                .height = BACK_DISPLAY_H,
+                .bits_per_pixel = BACK_DISPLAY_BPP,
+                .buffer_size = BACK_DISPLAY_BUF_SIZE,
+            },
+    };
+
+    static_assert(COUNT_OF(display_parameters) == GuiDisplayIdMax);
+
+    return &display_parameters[display_id];
+}
+
+GuiDisplayId gui_get_display_id(Widget* widget) {
+    furi_check(widget);
+
+    lv_display_t* display = lv_obj_get_display(TO_LV_OBJ(widget));
+    return (GuiDisplayId)lv_display_get_user_data(display);
+}

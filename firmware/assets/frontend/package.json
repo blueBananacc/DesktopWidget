@@ -1,0 +1,45 @@
+{
+  "name": "nuxt-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm postinstall && pnpx nuxi cleanup && BUILD_ID=$(git -C \"$(git rev-parse --show-toplevel)\" log -1 --pretty=format:%h -- assets/frontend | cut -c1-7) && echo \"BUILD_ID=$BUILD_ID\" && BUILD_ID=$BUILD_ID nuxt generate",
+    "build/ci": "pnpm postinstall && BUILD_ID=$(git -C \"$(git rev-parse --show-toplevel)\" log -1 --pretty=format:%h -- assets/frontend | cut -c1-7) && echo \"BUILD_ID=$BUILD_ID\" && BUILD_ID=$BUILD_ID nuxt generate",
+    "dev": "pnpm postinstall && nuxt dev --dotenv .env.development",
+    "preview": "nuxt preview",
+    "postinstall": "pnpm draw-tool-icons:generate && nuxt prepare",
+    "draw-tool-icons:generate": "node ./scripts/generate-draw-tool-icons-json.mjs",
+    "lint": "eslint --ext .js,.ts,.vue --ignore-pattern .gitignore .",
+    "lint/tsc": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@busy-app/busy-lib": "^0.21.1",
+    "@nuxt/eslint": "1.4.1",
+    "@nuxt/ui": "3.3.4",
+    "@nuxtjs/mdc": "0.20.1",
+    "@pinia/nuxt": "^0.10.1",
+    "eslint": "^9.35.0",
+    "gifenc": "1.0.3",
+    "gifuct-js": "^2.1.2",
+    "konva": "^10.2.5",
+    "maska": "^3.2.0",
+    "nuxt": "^3.19.2",
+    "pinia": "^3.0.3",
+    "pinia-plugin-persistedstate": "^4.5.0",
+    "qr": "^0.5.4",
+    "tailwind-merge": "3.3.1",
+    "tailwindcss": "^4.1.13",
+    "vite-plugin-eslint2": "^5.0.4",
+    "vue": "^3.5.21",
+    "vue-konva": "^3.4.0",
+    "vue-router": "^4.5.1",
+    "worker-timers": "^8.0.30"
+  },
+  "packageManager": "pnpm@9.12.3+sha512.cce0f9de9c5a7c95bef944169cc5dfe8741abfb145078c0d508b868056848a87c81e626246cb60967cbd7fd29a6c062ef73ff840d96b3c86c40ac92cf4a813ee",
+  "devDependencies": {
+    "@iconify-json/ri": "^1.2.5",
+    "@stylistic/eslint-plugin": "^5.7.1",
+    "typescript": "^5.9.2",
+    "vue-tsc": "^3.3.9"
+  }
+}

@@ -1,0 +1,399 @@
+name: 'Integration Tests'
+
+on:
+  workflow_call:
+    inputs:
+      branch_name:
+        required: true
+        type: string
+      commit_sha:
+        required: true
+        type: string
+      update_url:
+        required: true
+        type: string
+        description: 'Relative path to firmware update file'
+      target:
+        required: false
+        type: string
+        default: '22'
+      marker_filter:
+        required: false
+        type: string
+        default: 'not regression'
+        description: 'Pytest -m marker expression. Empty string or "all" runs everything.'
+
+  workflow_dispatch:
+    inputs:
+      marker_filter:
+        description: 'Pytest -m expression. Default runs smoke only; "all" runs the full suite including regression.'
+        required: false
+        type: string
+        default: 'not regression'
+      commit_sha:
+        description: 'Commit/ref to checkout. Empty uses the selected workflow ref.'
+        required: false
+        type: string
+        default: ''
+      firmware_branch:
+        description: 'Firmware branch/path prefix. Empty uses the selected workflow ref; TestOps defaults to dev.'
+        required: false
+        type: string
+        default: ''
+      update_url:
+        description: 'Explicit firmware path or URL. Overrides firmware_branch if set.'
+        required: false
+        type: string
+        default: ''
+      target:
+        description: 'Hardware target'
+        required: false
+        type: string
+        default: '22'
+      ALLURE_JOB_RUN_ID:
+        description: 'Allure TestOps service parameter. Leave blank.'
+        required: false
+        type: string
+      ALLURE_USERNAME:
+        description: 'Allure TestOps service parameter. Leave blank.'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+  id-token: write
+
+env:
+  U5_HW_TARGET: ${{ inputs.target || '22' }}
+  FIRMWARE_BASE_URL: https://update.busy.app/builds/busybar-firmware
+  PYTEST_FAILED_TEST_RETRIES: 1
+  ALLURE_JOB_RUN_ID: ${{ github.event.inputs.ALLURE_JOB_RUN_ID }}
+  ALLURE_USERNAME: ${{ github.event.inputs.ALLURE_USERNAME }}
+
+jobs:
+  integration-tests:
+    runs-on: BusyBarTest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      # - name: 'Wipe workspace'
+      #   run: find ./ -mount -maxdepth 1 -exec rm -rf {} \;
+
+      - name: Validate TestOps configuration
+        if: env.ALLURE_JOB_RUN_ID != ''
+        env:
+          ALLURE_ENDPOINT: ${{ vars.ALLURE_TESTOPS_URL }}
+          ALLURE_TOKEN: ${{ secrets.ALLURE_TESTOPS_TOKEN }}
+          ALLURE_PROJECT_ID: ${{ secrets.ALLURE_PROJECT_ID }}
+        run: |
+          if [ -z "$ALLURE_ENDPOINT" ] || [ -z "$ALLURE_TOKEN" ] || [ -z "$ALLURE_PROJECT_ID" ]; then
+            echo '::error::A TestOps run requires ALLURE_TESTOPS_URL, ALLURE_TESTOPS_TOKEN, and ALLURE_PROJECT_ID.'
+            exit 1
+          fi
+
+      - name: 'Checkout code'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.commit_sha || github.sha }}
+          fetch-depth: 2
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 'Configure Git and LFS for submodules'
+        run: |
+          git lfs install --skip-smudge
+          # Self-hosted runners persist $HOME; keep creds in per-job RUNNER_TEMP.
+          rm -f "$HOME/.git-credentials"
+          echo "https://x-access-token:${GH_TOKEN}@github.com" > "${RUNNER_TEMP}/git-credentials"
+          git config credential.helper "store --file ${RUNNER_TEMP}/git-credentials"
+          git config lfs.transfer.maxretries 3
+
+      - name: 'Update submodules'
+        run: |
+          git submodule update --init --depth 1 --filter=blob:none --jobs="$(nproc)" || (git lfs logs last && exit 1)
+
+      - name: 'Resolve firmware URLs'
+        id: resolve_firmware
+        env:
+          FIRMWARE_BRANCH_INPUT: ${{ inputs.firmware_branch || '' }}
+          UPDATE_URL_INPUT: ${{ inputs.update_url || '' }}
+        run: |
+          set -euo pipefail
+          TARGET="f${{ env.U5_HW_TARGET }}"
+
+          if [ -n "$UPDATE_URL_INPUT" ]; then
+            UPDATE_PATH="$UPDATE_URL_INPUT"
+            # Strip absolute base if a full URL was pasted into the dispatch
+            # input — downstream code expects a relative path.
+            UPDATE_PATH="${UPDATE_PATH#"$FIRMWARE_BASE_URL"/}"
+            UPDATE_PATH="${UPDATE_PATH#https://update.busy.app/builds/busybar-firmware/}"
+            if [[ "$UPDATE_PATH" == http*://* ]]; then
+              echo "ERROR: update_url points outside ${FIRMWARE_BASE_URL}: $UPDATE_URL_INPUT"
+              exit 1
+            fi
+          else
+            BRANCH="${FIRMWARE_BRANCH_INPUT:-${GITHUB_REF_NAME:-}}"
+            if [ -n "$ALLURE_JOB_RUN_ID" ] && [ -z "$FIRMWARE_BRANCH_INPUT" ]; then
+              BRANCH=dev
+            fi
+            if [ -z "$BRANCH" ]; then
+              echo "ERROR: No update_url, firmware_branch, or selected ref provided"; exit 1
+            fi
+            LISTING=$(curl --fail -sL "${FIRMWARE_BASE_URL}/${BRANCH}/") || {
+              echo "ERROR: Failed to fetch listing for branch $BRANCH (${FIRMWARE_BASE_URL}/${BRANCH}/)"
+              exit 1
+            }
+            if [ -z "$LISTING" ]; then
+              echo "ERROR: Empty listing for branch $BRANCH"; exit 1
+            fi
+            UPDATE_FILE=$(echo "$LISTING" | grep -oE "busybar-${TARGET}-update-[^\"]+\.(tgz|tar)" | sort -V | tail -1 || true)
+            [ -n "$UPDATE_FILE" ] || { echo "ERROR: No update file for target $TARGET in branch $BRANCH"; exit 1; }
+            UPDATE_PATH="${BRANCH}/${UPDATE_FILE}"
+          fi
+
+          UPDATE_DIR="$(dirname "$UPDATE_PATH")"
+          UPDATE_FILE="$(basename "$UPDATE_PATH")"
+
+          U5_ELF="${UPDATE_DIR}/${UPDATE_FILE/-update-/-firmware-}"
+          U5_ELF="${U5_ELF%.tgz}"; U5_ELF="${U5_ELF%.tar}.elf"
+
+          SI917_ELF="${UPDATE_DIR}/${UPDATE_FILE/-update-/-sil_firmware-}"
+          SI917_ELF="${SI917_ELF%.tgz}"; SI917_ELF="${SI917_ELF%.tar}.elf"
+
+          {
+            echo "update_url=${FIRMWARE_BASE_URL}/${UPDATE_PATH}"
+            echo "u5_elf_url=${FIRMWARE_BASE_URL}/${U5_ELF}"
+            echo "si917_elf_url=${FIRMWARE_BASE_URL}/${SI917_ELF}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 'Download firmware artifacts'
+        run: |
+          set -euo pipefail
+          curl --fail -L -o busybar-f${{ env.U5_HW_TARGET }}-update.tgz \
+            "${{ steps.resolve_firmware.outputs.update_url }}"
+
+          mkdir -p /_work/elf
+          curl --fail -L -o /_work/elf/busybar-f${{ env.U5_HW_TARGET }}-firmware.elf \
+            "${{ steps.resolve_firmware.outputs.u5_elf_url }}"
+          curl --fail -L -o /_work/elf/busybar-f${{ env.U5_HW_TARGET }}-sil_firmware.elf \
+            "${{ steps.resolve_firmware.outputs.si917_elf_url }}"
+
+      - name: 'Flash firmware'
+        id: flashing
+        timeout-minutes: 20
+        uses: ./.github/actions/flash-device
+        with:
+          bundle: busybar-f${{ env.U5_HW_TARGET }}-update.tgz
+
+      - name: 'Sanity check after flashing'
+        if: steps.flashing.outcome == 'success'
+        run: |
+          set -euo pipefail
+          source scripts/toolchain/fbtenv.sh
+          python3 scripts/testops.py sanity
+          {
+            echo "U5_ELF=/_work/elf/busybar-f${{ env.U5_HW_TARGET }}-firmware.elf"
+            echo "SI917_ELF=/_work/elf/busybar-f${{ env.U5_HW_TARGET }}-sil_firmware.elf"
+          } >> "$GITHUB_ENV"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: tests/requirements.txt
+
+      - name: Install test dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r tests/requirements.txt
+
+      - name: Setup allurectl for selected TestOps plan
+        id: testops_allure_setup
+        if: env.ALLURE_JOB_RUN_ID != ''
+        uses: allure-framework/setup-allurectl@2d89ee0b7ba2f59dbe9849b6df5763cab78e14db # v1.0.3
+        with:
+          allure-endpoint: ${{ vars.ALLURE_TESTOPS_URL }}
+          allure-token: ${{ secrets.ALLURE_TESTOPS_TOKEN }}
+          allure-project-id: ${{ secrets.ALLURE_PROJECT_ID }}
+          allurectl-version: 2.22.0
+
+      - name: Resolve pytest marker filter
+        id: pytest_filter
+        env:
+          MARKER_FILTER: ${{ inputs.marker_filter }}
+        run: |
+          # Normalize the requested marker filter before it reaches pytest.
+          #
+          # GitHub substitutes the input *default* when a workflow_dispatch field
+          # is left blank, so clearing the field cannot express "run everything".
+          # Use the explicit `all` sentinel for the full suite instead.
+          #
+          # We also tolerate stray surrounding quotes/whitespace (e.g. a literal
+          # `""` typed into the form) which would otherwise reach pytest as an
+          # invalid `-m` expression and abort the run with exit code 4.
+          filter="$MARKER_FILTER"
+          # strip leading/trailing whitespace
+          filter="$(printf '%s' "$filter" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          # strip a single pair of surrounding double quotes
+          case "$filter" in
+            \"*\") filter="${filter#\"}"; filter="${filter%\"}" ;;
+          esac
+          # treat empty / all (case-insensitive) as "no filter" (full suite)
+          shopt -s nocasematch
+          if [ -n "$ALLURE_JOB_RUN_ID" ] || [ -z "$filter" ] || [[ "$filter" == "all" ]]; then
+            filter=""
+          fi
+          shopt -u nocasematch
+          echo "marker_filter=$filter" >> "$GITHUB_OUTPUT"
+          if [ -n "$filter" ]; then
+            echo "Resolved pytest marker filter: $filter"
+          else
+            echo "Resolved pytest marker filter: <empty> (full suite)"
+          fi
+
+      - name: Run integration tests
+        id: smoke_tests
+        env:
+          MARKER_FILTER: ${{ steps.pytest_filter.outputs.marker_filter }}
+          BSB_FIRMWARE_PATH: ${{ github.workspace }}
+          CLI_HOST: ${{ secrets.CLI_HOST || '10.0.4.20' }}
+          CLI_PORT: ${{ secrets.CLI_PORT || '23' }}
+          WEB_BASE_URL: ${{ secrets.WEB_BASE_URL || 'http://10.0.4.20' }}
+          LOG_LEVEL: INFO
+          LOG_TO_FILE: true
+        run: |
+          set +e
+          cd tests
+          PYTEST_OUTPUT=pytest-output.log
+
+          # MARKER_FILTER is a `-m` expression; an empty string means
+          # "no filter" (collect everything, including `regression`-tagged
+          # tests such as schemathesis).
+          pytest_args=(. -v --durations=25 --alluredir=allure-results --clean-alluredir --junitxml=test-results.xml)
+          if [ -n "$MARKER_FILTER" ]; then
+            pytest_args+=(-m "$MARKER_FILTER")
+            echo "Running pytest with marker filter: $MARKER_FILTER"
+          else
+            echo "Running pytest without marker filter (full suite)"
+          fi
+          if [ "$PYTEST_FAILED_TEST_RETRIES" -gt 0 ]; then
+            pytest_args+=(--reruns "$PYTEST_FAILED_TEST_RETRIES" --reruns-delay 1 -rR)
+          fi
+          test_command=(python3 -m pytest "${pytest_args[@]}")
+          if [ -n "$ALLURE_JOB_RUN_ID" ]; then
+            export ALLURE_RESULTS="$PWD/allure-results"
+            test_command=(allurectl watch -- bash -c '
+              if ! python3 -c "import json, os, sys; from pathlib import Path; \
+                plan = json.loads(Path(os.environ[\"ALLURE_TESTPLAN_PATH\"]).read_text(encoding=\"utf-8\")); \
+                selected = plan.get(\"tests\") if isinstance(plan, dict) else None; \
+                valid = isinstance(selected, list) and selected and all(isinstance(test, dict) and (test.get(\"id\") or test.get(\"selector\")) for test in selected); \
+                sys.exit(0 if valid else 2)"; then
+                echo "::error::TestOps returned an empty or invalid test plan."
+                exit 2
+              fi
+              exec "$@"
+            ' _ "${test_command[@]}")
+          fi
+          "${test_command[@]}" 2>&1 | tee "$PYTEST_OUTPUT"
+          PYTEST_EXIT=${PIPESTATUS[0]}
+          echo "pytest_exit=$PYTEST_EXIT" >> "$GITHUB_OUTPUT"
+
+          if [ "$PYTEST_EXIT" -ge 2 ]; then
+            echo "Pytest failed to run properly (exit code $PYTEST_EXIT)"
+            exit "$PYTEST_EXIT"
+          fi
+
+      - name: Setup allurectl
+        if: env.ALLURE_JOB_RUN_ID == ''
+        continue-on-error: true
+        uses: allure-framework/setup-allurectl@2d89ee0b7ba2f59dbe9849b6df5763cab78e14db # v1.0.3
+        with:
+          allure-endpoint: ${{ vars.ALLURE_TESTOPS_URL }}
+          allure-token: ${{ secrets.ALLURE_TESTOPS_TOKEN }}
+          allure-project-id: ${{ secrets.ALLURE_PROJECT_ID }}
+
+      - name: Upload test results to Allure TestOps
+        id: allure_upload
+        if: env.ALLURE_JOB_RUN_ID == ''
+        continue-on-error: true
+        env:
+          LAUNCH_BRANCH: ${{ inputs.branch_name || github.head_ref || github.ref_name }}
+        run: |
+          cd tests
+          OUTPUT=$(allurectl upload allure-results \
+            --endpoint "${{ vars.ALLURE_TESTOPS_URL }}" \
+            --token "${{ secrets.ALLURE_TESTOPS_TOKEN }}" \
+            --project-id "${{ secrets.ALLURE_PROJECT_ID }}" \
+            --launch-name "BSB Firmware - Integration Tests - ${LAUNCH_BRANCH} - ${GITHUB_SHA::7}" 2>&1) || true
+          echo "$OUTPUT"
+          LAUNCH_ID=$(echo "$OUTPUT" | grep -oP 'Launch \[\K[0-9]+' | head -1)
+          if [ -n "$LAUNCH_ID" ]; then
+            echo "allure_launch_url=${{ vars.ALLURE_TESTOPS_URL }}/launch/$LAUNCH_ID" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set selected TestOps report URL
+        id: testops_allure_report
+        if: always() && steps.testops_allure_setup.outcome == 'success'
+        continue-on-error: true
+        run: |
+          echo "allure_launch_url=${{ vars.ALLURE_TESTOPS_URL }}/jobrun/$ALLURE_JOB_RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: 'Configure AWS CLI'
+        if: always()
+        uses: aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885 # v6.1.1
+        with:
+          aws-access-key-id: ${{ secrets.QA_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.QA_AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: 'Upload runner logs to S3'
+        id: upload_logs
+        if: always()
+        continue-on-error: true
+        run: |
+          RUN_ID="${{ github.run_number }}-${{ github.sha }}"
+          LOG_FILE="$RUNNER_LOG_DIR/latest/runlog.log"
+          S3_BUCKET="bsb-qa-runners-crash-reports"
+          S3_KEY="runner-logs/integration-tests/$RUN_ID/runlog.log"
+          S3_PATH="s3://$S3_BUCKET/$S3_KEY"
+          PUBLIC_URL="https://$S3_BUCKET.s3.eu-central-1.amazonaws.com/$S3_KEY"
+
+          if [ -f "$LOG_FILE" ]; then
+            aws s3 cp "$LOG_FILE" "$S3_PATH"
+            echo "runlog_url=$PUBLIC_URL" >> "$GITHUB_OUTPUT"
+            {
+              echo "## 📋 Runner Logs"
+              echo "- [runlog.log]($PUBLIC_URL)"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Log file not found: $LOG_FILE"
+          fi
+
+      - name: 'Report test results'
+        if: always()
+        continue-on-error: true
+        env:
+          JUNIT_XML: tests/test-results.xml
+          PYTEST_OUTPUT: tests/pytest-output.log
+          ALLURE_URL: ${{ steps.testops_allure_report.outputs.allure_launch_url || steps.allure_upload.outputs.allure_launch_url }}
+          FIRMWARE_URL: ${{ steps.resolve_firmware.outputs.update_url }}
+          BRANCH_NAME: ${{ inputs.branch_name || github.head_ref || github.ref_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          RUNNER_NAME: ${{ runner.name }}
+        run: |
+          status=0
+          LOG_DIR="$SESSION_LOG_DIR" python3 tests/utils/report_test_results.py || status=$?
+          CRASH_FLAG="$SESSION_LOG_DIR/crash_detected.flag" python3 tests/utils/report_test_results.py || status=$?
+          exit "$status"
+
+      - name: 'Fail job on test failures'
+        if: always() && steps.smoke_tests.outputs.pytest_exit != '0' && steps.smoke_tests.outputs.pytest_exit != ''
+        env:
+          PYTEST_EXIT: ${{ steps.smoke_tests.outputs.pytest_exit }}
+        run: |
+          echo "::error::Integration tests reported failures (pytest exit code $PYTEST_EXIT)."
+          exit "$PYTEST_EXIT"

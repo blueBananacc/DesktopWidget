@@ -1,0 +1,42 @@
+App(
+    appid="status_lights",
+    name="StatusLightsSrv",
+    apptype=FlipperAppType.SERVICE,
+    entry_point="status_lights_srv",
+    cdefines=["SRV_STATUS_LIGHTS"],
+    stack_size=1 * 1024,
+    order=130,
+    targets=["f64", "f65"],
+    requires=["intercom"],
+    sources=[
+        "status_lights_backend.c",
+        "status_lights_preset_defs.c",
+        "presets/*.c",
+    ],
+)
+
+App(
+    appid="status_lights",
+    name="StatusLightsSrv",
+    apptype=FlipperAppType.SERVICE,
+    entry_point="status_lights_srv",
+    cdefines=["SRV_STATUS_LIGHTS"],
+    stack_size=1 * 1024,
+    order=130,
+    targets=["f20", "f21", "f22"],
+    requires=["intercom", "light_sensor"],
+    provides=["status_lights_cli"],
+    sources=[
+        "status_lights.c",
+        "status_lights_api.c",
+    ],
+)
+
+App(
+    appid="status_lights_cli",
+    name="status_lights",
+    apptype=FlipperAppType.CLICMD,
+    entry_point="status_lights_cli_command",
+    requires=["status_lights"],
+    sources=["status_lights_cli.c"],
+)

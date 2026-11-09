@@ -1,0 +1,202 @@
+@import 'tailwindcss';
+@import "@nuxt/ui";
+
+@theme static {
+  --color-brand: #2B7FFF;
+  --color-brand-50: #EAF2FF;
+  --color-brand-100: #D5E5FF;
+  --color-brand-200: #AACCFF;
+  --color-brand-300: #80B2FF;
+  --color-brand-400: #5599FF;
+  --color-brand-500: #2B7FFF;
+  --color-brand-600: #2266CC;
+  --color-brand-700: #1A4C99;
+  --color-brand-800: #113366;
+  --color-brand-900: #091933;
+  --color-brand-950: #050F20;
+
+  --color-error-50: #FDE6E9;
+  --color-error-100: #FACCD3;
+  --color-error-200: #F599A7;
+  --color-error-300: #F0667A;
+  --color-error-400: #EB334E;
+  --color-error-500: #E60022;
+  --color-error-600: #B8001B;
+  --color-error-700: #8A0014;
+  --color-error-800: #5C000E;
+  --color-error-900: #2E0007;
+  --color-error-950: #1D0004;
+
+  --color-info-50: var(--color-gray-50);
+  --color-info-100: var(--color-gray-100);
+  --color-info-200: var(--color-gray-200);
+  --color-info-300: var(--color-gray-300);
+  --color-info-400: var(--color-gray-400);
+  --color-info-500: var(--color-gray-500);
+  --color-info-600: var(--color-gray-600);
+  --color-info-700: var(--color-gray-700);
+  --color-info-800: var(--color-gray-800);
+  --color-info-900: var(--color-gray-900);
+  --color-info-950: var(--color-gray-950);
+
+  --ui-surface-container: #FFFFFF;
+}
+
+:root {
+  --font-sans: 'Inter', sans-serif;
+  --ui-container: 1440px;
+
+  --ui-text: var(--color-neutral-700);
+  --ui-bg: var(--color-neutral-50);
+  --ui-bg-accented: var(--color-neutral-300);
+  --ui-info: var(--color-info-500);
+  --ui-success: var(--color-success-500);
+  --ui-error: var(--color-error-500);
+  --ui-modal-bg: --alpha(var(--color-neutral-100) / 90%);
+  --ui-modal-overlay-bg: --alpha(var(--color-neutral-900) / 20%);
+  --ui-surface-card: #FFFFFF;
+  --ui-divider: --alpha(#111111 / 5%);
+
+  --glass-ring-inner: --alpha(var(--color-white) / 10%);
+  --glass-ring-outer: --alpha(var(--color-black) / 4%);
+}
+
+.dark {
+  --ui-text: var(--color-neutral-200);
+  --ui-bg: var(--color-old-neutral-950);
+  --ui-bg-accented: var(--color-neutral-700);
+  --ui-success: var(--color-success-400);
+  --ui-error: var(--color-error-400);
+  --ui-modal-bg: --alpha(var(--color-neutral-800) / 75%);
+  --ui-modal-overlay-bg: --alpha(var(--color-neutral-900) / 80%);
+  --ui-surface-container: #181818;
+  --ui-surface-card: #222222;
+  --ui-divider: --alpha(#FAFAFA / 4%);
+
+  --glass-ring-inner: --alpha(var(--color-white) / 10%);
+  --glass-ring-outer: --alpha(var(--color-white) / 4%);
+}
+
+@theme {
+  --ring-glass: 1px;
+  --ring-glass-0: 0px;
+  --ring-glass-1: 1px;
+  --ring-glass-2: 2px;
+  --ring-glass-3: 3px;
+  --ring-glass-4: 4px;
+  --ring-glass-6: 6px;
+  --ring-glass-8: 8px;
+}
+
+@utility ring {
+  --ring-glass-width: var(--ring-glass);
+}
+
+@utility ring-* {
+  --ring-glass-width: --value(--ring-glass-*, [length]);
+}
+
+@utility inset-ring {
+  --ring-glass-width: var(--ring-glass);
+}
+
+@utility inset-ring-* {
+  --ring-glass-width: --value(--ring-glass-*, [length]);
+}
+
+@utility ring-glass {
+  --ring-glass-inner: var(--glass-ring-inner);
+  --ring-glass-outer: var(--glass-ring-outer);
+
+  --ring-shadow:
+    inset 0 var(--ring-glass-width) var(--ring-glass-width) 0 var(--ring-glass-inner),
+    inset 0 0 0 var(--ring-glass-width) var(--ring-glass-outer);
+
+  box-shadow:
+    var(--tw-ring-offset-shadow),
+    var(--ring-shadow),
+    var(--tw-shadow) !important;
+}
+
+@utility bg-modal {
+  background-color: var(--ui-modal-bg);
+  backdrop-filter: blur(5px);
+}
+@utility bg-modal-overlay {
+  background-color: var(--ui-modal-overlay-bg);
+}
+
+@utility bg-surface-container {
+  background-color: var(--ui-surface-container);
+}
+
+@utility border-divider {
+  border-color: var(--ui-divider);
+}
+
+@layer utilities {
+  @keyframes -spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(-360deg);
+    }
+  }
+
+  .rounded-group > * {
+    border-radius: 9px;
+  }
+  
+  .rounded-group > *:first-child {
+    border-top-left-radius: var(--radius-xl);
+    border-top-right-radius: var(--radius-xl);
+  }
+
+  .rounded-group > *:last-child {
+    border-bottom-left-radius: var(--radius-xl);
+    border-bottom-right-radius: var(--radius-xl);
+  }
+}
+
+body {
+  overscroll-behavior: none;
+}
+
+button {
+  @apply cursor-pointer disabled:cursor-not-allowed aria-disabled:cursor-not-allowed;
+}
+
+input[aria-invalid="true"] {
+  --glass-ring-inner: var(--ui-error);
+  --glass-ring-outer: var(--ui-error);
+}
+
+article > h1 {
+  @apply text-3xl font-bold mb-4;
+}
+article > h2 {
+  @apply text-2xl font-bold mb-3;
+}
+article > ul {
+  list-style-type: disc;
+  padding-left: 1.25rem;
+  margin-bottom: 1rem;
+}
+article > ol {
+  list-style-type: decimal;
+  padding-left: 1rem;
+  margin-bottom: 1rem;
+}
+article > ol > li:not(:last-child) {
+  margin-bottom: 1rem;
+}
+article > p {
+  margin-bottom: 1rem;
+}
+article a {
+  @apply text-primary underline;
+}
+article > *:last-child {
+  margin-bottom: 0;
+}

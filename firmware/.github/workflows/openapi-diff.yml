@@ -1,0 +1,297 @@
+name: "OAS diff check"
+
+on:
+    pull_request:
+        types: [opened, synchronize]
+        paths:
+            - "applications/services/web_server/openapi/**"
+            - "applications/services/web_server/http_api/http_api.h"
+            - "scripts/openapi_merge.py"
+            - "scripts/fbt_env_modules/fwenv/bsb_assets.scons"
+            - ".github/workflows/openapi-diff.yml"
+    push:
+        branches:
+            - dev
+        paths:
+            - "applications/services/web_server/openapi/**"
+            - "applications/services/web_server/http_api/http_api.h"
+            - "scripts/openapi_merge.py"
+            - "scripts/fbt_env_modules/fwenv/bsb_assets.scons"
+            - ".github/workflows/openapi-diff.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+    oasdiff:
+        runs-on: ubuntu-latest
+
+        # Job outputs only accept scalar expressions; the description/value
+        # object form is only valid for on.workflow_call.outputs.
+        outputs:
+            oasdiff_report: ${{ steps.export-report.outputs.oasdiff_report }}
+
+        env:
+            OAPI_DIR: applications/services/web_server/openapi
+            OAS_OUT: dist/openapi.yaml
+
+        steps:
+            - name: Checkout current
+              uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+                  sparse-checkout: |
+                    scripts/openapi_merge.py
+                    scripts/flipper/app.py
+                    applications/services/web_server/openapi/
+                    applications/services/web_server/http_api/http_api.h
+                  sparse-checkout-cone-mode: false
+
+            - name: Checkout base
+              uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+                  path: base
+                  sparse-checkout: |
+                    scripts/openapi_merge.py
+                    scripts/flipper/app.py
+                    applications/services/web_server/openapi/
+                    applications/services/web_server/http_api/http_api.h
+                  sparse-checkout-cone-mode: false
+
+            - name: Install Python dependencies
+              run: pip3 install pyyaml colorlog
+
+            - name: Build current spec
+              shell: bash
+              run: |
+                set -euo pipefail
+                mkdir -p dist
+                python3 scripts/openapi_merge.py merge \
+                  "${OAS_OUT}" \
+                  "${OAPI_DIR}/"*.yaml
+                python3 scripts/openapi_merge.py validate "${OAS_OUT}"
+
+            - name: Build base spec
+              shell: bash
+              run: |
+                set -euo pipefail
+                mkdir -p base/dist
+                if python3 base/scripts/openapi_merge.py merge \
+                     "base/${OAS_OUT}" \
+                     "base/${OAPI_DIR}/"*.yaml 2>/dev/null; then
+                  python3 base/scripts/openapi_merge.py validate "base/${OAS_OUT}"
+                else
+                  echo "WARNING: base does not support openapi_merge; copying from source"
+                  cp "base/${OAPI_DIR}/openapi.yaml" "base/${OAS_OUT}"
+                fi
+
+            - name: Install oasdiff
+              run: |
+                  curl -fsSL https://raw.githubusercontent.com/oasdiff/oasdiff/main/install.sh | sh
+
+            - name: Run oasdiff
+              id: oasdiff
+              run: |
+                  set -o pipefail
+
+                  SUMMARY="$(oasdiff summary --exclude-elements description,summary,examples "base/${OAS_OUT}" "${OAS_OUT}" 2>&1)" || true
+                  echo 'summary<<EOF' >> "$GITHUB_OUTPUT"
+                  echo "$SUMMARY" >> "$GITHUB_OUTPUT"
+                  echo 'EOF' >> "$GITHUB_OUTPUT"
+
+                  # Check if there are meaningful (non-description/summary/example) changes
+                  if echo "$SUMMARY" | grep -q 'diff: true'; then
+                    echo "has_changes=true" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "has_changes=false" >> "$GITHUB_OUTPUT"
+                  fi
+
+                  if oasdiff breaking -o ERR --format markdown "base/${OAS_OUT}" "${OAS_OUT}" > breaking.md 2>&1; then
+                    echo "exit_code=0" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+                  fi
+
+                  # Run oasdiff changelog once, then derive both payloads from it
+                  oasdiff changelog --format markdown "base/${OAS_OUT}" "${OAS_OUT}" 2>/dev/null > oasdiff_changelog_raw.txt || true
+
+                  # GitHub comment payload: escape #NNN so GitHub does not auto-link to issues/PRs
+                  sed -E 's/(^|[^#])#([0-9]+)/\1`#\2`/g' oasdiff_changelog_raw.txt > oasdiff_changelog.md
+                  oasdiff diff --format markdown --exclude-elements description,summary,examples "base/${OAS_OUT}" "${OAS_OUT}" 2>/dev/null \
+                    | sed -E 's/(^|[^#])#([0-9]+)/\1`#\2`/g' > oasdiff_diff.md || true
+
+                  # Slack payload: escape HTML entities that Slack mrkdwn would interpret as markup
+                  grep -v '^# ' oasdiff_changelog_raw.txt | head -20 \
+                    | sed -e 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' > oasdiff_changelog_slack.txt
+                  rm -f oasdiff_changelog_raw.txt
+
+            - name: Check version bump
+              id: version_check
+              env:
+                  HAS_BREAKING: ${{ steps.oasdiff.outputs.exit_code }}
+                  HAS_CHANGES: ${{ steps.oasdiff.outputs.has_changes }}
+              run: |
+                  BASE_VERSION=$(grep -m1 'version:' "base/${OAS_OUT}" | sed 's/.*version: *//; s/[^0-9.]//g')
+                  CURR_VERSION=$(grep -m1 'version:' "${OAS_OUT}" | sed 's/.*version: *//; s/[^0-9.]//g')
+
+                  echo "base_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
+                  echo "current_version=$CURR_VERSION" >> "$GITHUB_OUTPUT"
+
+                  IFS='.' read -r BASE_MAJOR BASE_MINOR BASE_PATCH <<< "$BASE_VERSION"
+                  IFS='.' read -r CURR_MAJOR CURR_MINOR CURR_PATCH <<< "$CURR_VERSION"
+
+                  echo "Base version: $BASE_VERSION ($BASE_MAJOR.$BASE_MINOR.$BASE_PATCH)"
+                  echo "Current version: $CURR_VERSION ($CURR_MAJOR.$CURR_MINOR.$CURR_PATCH)"
+
+                  VERSION_OK=true
+                  VERSION_MSG=""
+
+                  # Only require version bumps for meaningful changes (not description/summary/example-only)
+                  if [ "$HAS_CHANGES" = "true" ]; then
+                    if [ "$HAS_BREAKING" != "0" ]; then
+                      # Breaking changes: major must be incremented
+                      if [ "$CURR_MAJOR" -le "$BASE_MAJOR" ]; then
+                        VERSION_OK=false
+                        VERSION_MSG="Breaking changes detected: major version must be incremented ($BASE_VERSION -> expected ${BASE_MAJOR+1}.0.0 or higher, got $CURR_VERSION)"
+                      fi
+                    else
+                      # Non-breaking changes: at least minor must be incremented
+                      if [ "$CURR_MAJOR" -eq "$BASE_MAJOR" ] && [ "$CURR_MINOR" -le "$BASE_MINOR" ]; then
+                        VERSION_OK=false
+                        VERSION_MSG="API changes detected: at least minor version must be incremented ($BASE_VERSION -> expected $BASE_MAJOR.$((BASE_MINOR+1)).0 or higher, got $CURR_VERSION)"
+                      fi
+                    fi
+                  fi
+
+                  if [ "$CURR_MAJOR" -lt "$BASE_MAJOR" ] || { [ "$CURR_MAJOR" -eq "$BASE_MAJOR" ] && [ "$CURR_MINOR" -lt "$BASE_MINOR" ]; } || { [ "$CURR_MAJOR" -eq "$BASE_MAJOR" ] && [ "$CURR_MINOR" -eq "$BASE_MINOR" ] && [ "$CURR_PATCH" -lt "$BASE_PATCH" ]; }; then
+                    VERSION_OK=false
+                    VERSION_MSG="Version must not decrease ($BASE_VERSION -> $CURR_VERSION)"
+                  fi
+
+                  echo "version_ok=$VERSION_OK" >> "$GITHUB_OUTPUT"
+                  echo "version_msg=$VERSION_MSG" >> "$GITHUB_OUTPUT"
+
+                  if [ "$VERSION_OK" = "false" ]; then
+                    echo "::error::$VERSION_MSG"
+                  else
+                    echo "Version bump OK: $BASE_VERSION -> $CURR_VERSION"
+                  fi
+
+                  # Check that http_api.h API_VERSION matches openapi.yaml version
+                  HEADER_FILE="applications/services/web_server/http_api/http_api.h"
+                  HEADER_VERSION=$(grep -m1 '#define API_VERSION' "$HEADER_FILE" | sed 's/.*{\s*//; s/\s*}.*//; s/,\s*/./g')
+                  echo "header_version=$HEADER_VERSION" >> "$GITHUB_OUTPUT"
+                  echo "C header API_VERSION: $HEADER_VERSION"
+
+                  if [ "$HEADER_VERSION" != "$CURR_VERSION" ]; then
+                    VERSION_OK=false
+                    SYNC_MSG="openapi.yaml version ($CURR_VERSION) does not match http_api.h API_VERSION ($HEADER_VERSION)"
+                    echo "::error::$SYNC_MSG"
+                    echo "version_ok=false" >> "$GITHUB_OUTPUT"
+                    echo "version_msg=$SYNC_MSG" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Prepare PR comment
+              if: ${{ github.event_name == 'pull_request' }}
+              run: |
+                  # Build the comment from files so the changelog/diff text is never
+                  # interpolated into a shell script (backticks, quotes and $ are safe).
+                  {
+                    echo "## OpenAPI Diff Report"
+                    echo "**Version:** ${{ steps.version_check.outputs.base_version }} → ${{ steps.version_check.outputs.current_version }} ${{ steps.version_check.outputs.version_ok == 'true' && '✅' || format('❌ {0}', steps.version_check.outputs.version_msg) }}"
+                    echo "**Breaking changes:** ${{ steps.oasdiff.outputs.exit_code == '0' && '✅ None' || '❌ Detected' }}"
+                    echo ""
+                    cat oasdiff_changelog.md
+                    echo ""
+                    echo "<details>"
+                    echo "<summary>Full diff</summary>"
+                    echo ""
+                    cat oasdiff_diff.md
+                    echo ""
+                    echo "</details>"
+                    echo ""
+                    echo "<sub>Description, summary, and example changes are excluded.</sub>"
+                  } > oasdiff_comment.md
+
+            - name: Comment on PR
+              if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
+              uses: thollander/actions-comment-pull-request@v3
+              with:
+                  file-path: oasdiff_comment.md
+                  comment-tag: oasdiff-report
+
+            - name: Export report to job output (fork PRs)
+              if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+              id: export-report
+              run: |
+                  # Fork PRs cannot receive PR comments (GITHUB_TOKEN is read-only), so
+                  # publish the report as a job output instead.
+                  {
+                    echo "oasdiff_report<<OASDIFF_REPORT_EOF"
+                    cat oasdiff_comment.md
+                    echo "OASDIFF_REPORT_EOF"
+                  } >> "$GITHUB_OUTPUT"
+
+            - name: Post to Slack
+              if: ${{ github.event_name == 'push' && steps.version_check.outputs.version_ok == 'true' && steps.version_check.outputs.base_version != steps.version_check.outputs.current_version }}
+              env:
+                  SLACK_WEBHOOK_URL: ${{ secrets.OPENAPI_DIFF_SLACK_WEBHOOK_URL }}
+              run: |
+                  if [ -z "$SLACK_WEBHOOK_URL" ]; then
+                    echo "::warning::OPENAPI_DIFF_SLACK_WEBHOOK_URL secret is not set, skipping Slack notification"
+                    exit 0
+                  fi
+
+                  EVENT_TITLE="Merged to ${{ github.ref_name }}: $(git log -1 --pretty=%s)"
+                  EVENT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
+                  EVENT_AUTHOR="${{ github.actor }}"
+                  STATUS=${{ steps.oasdiff.outputs.exit_code == '0' && '"✅ No breaking changes"' || '"❌ Breaking changes detected"' }}
+
+                  VERSION_BASE="${{ steps.version_check.outputs.base_version }}"
+                  VERSION_CURR="${{ steps.version_check.outputs.current_version }}"
+                  VERSION_OK="${{ steps.version_check.outputs.version_ok }}"
+                  VERSION_MSG="${{ steps.version_check.outputs.version_msg }}"
+                  if [ "$VERSION_OK" = "true" ]; then
+                    VERSION_LINE="✅ Version: $VERSION_BASE → $VERSION_CURR"
+                  else
+                    VERSION_LINE="❌ Version: $VERSION_BASE → $VERSION_CURR — $VERSION_MSG"
+                  fi
+
+                  curl -fsSL -X POST "$SLACK_WEBHOOK_URL" \
+                    -H 'Content-Type: application/json' \
+                    -d "$(jq -n \
+                      --arg status "$STATUS" \
+                      --rawfile changelog oasdiff_changelog_slack.txt \
+                      --arg version "$VERSION_LINE" \
+                      --arg pr_title "$EVENT_TITLE" \
+                      --arg pr_url "$EVENT_URL" \
+                      --arg pr_author "$EVENT_AUTHOR" \
+                      '{
+                        blocks: [
+                          {
+                            type: "header",
+                            text: { type: "plain_text", text: ("OpenAPI Spec Changed — " + $status) }
+                          },
+                          {
+                            type: "section",
+                            text: { type: "mrkdwn", text: ("*<" + $pr_url + "|" + $pr_title + ">* by " + $pr_author + "\n" + $version) }
+                          },
+                          {
+                            type: "section",
+                            text: { type: "mrkdwn", text: (if $changelog == "" then "No structural API changes" else $changelog end) }
+                          }
+                        ]
+                      }'
+                    )"
+
+            - name: Fail on version issues
+              if: ${{ steps.version_check.outputs.version_ok != 'true' }}
+              run: |
+                  echo "::error::${{ steps.version_check.outputs.version_msg }}"
+                  exit 1

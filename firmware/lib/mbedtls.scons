@@ -1,0 +1,77 @@
+Import("env")
+
+env.Append(
+    CPPPATH=[
+        Dir("mbedtls_patch").srcnode(),
+        Dir("mbedtls/include").srcnode(),
+        Dir("mbedtls/library").srcnode(),
+    ],
+    SDK_HEADERS=[
+        File("mbedtls_patch/pk_wrap.h"),
+        File("mbedtls/include/mbedtls/des.h"),
+        File("mbedtls/include/mbedtls/sha1.h"),
+        File("mbedtls/include/mbedtls/sha256.h"),
+        File("mbedtls/include/mbedtls/md5.h"),
+        File("mbedtls/include/mbedtls/md.h"),
+        File("mbedtls/include/mbedtls/ecdsa.h"),
+        File("mbedtls/include/mbedtls/ecdh.h"),
+        File("mbedtls/include/mbedtls/ecp.h"),
+    ],
+    CPPDEFINES=[("MBEDTLS_CONFIG_FILE", '\\"mbedtls_cfg.h\\"')],
+)
+
+
+libenv = env.Clone(FW_LIB_NAME="mbedtls")
+libenv.ApplyLibFlags()
+
+libenv.AppendUnique(
+    CCFLAGS=[
+        # Required for lib to be linkable with .faps
+        "-mword-relocations",
+        "-mlong-calls",
+        # Crappy code :)
+        "-Wno-redundant-decls",
+    ],
+)
+
+# If we were to build full mbedtls, we would need to use this:
+# sources = libenv.GlobRecursive("*.c*", "mbedtls/library")
+# Otherwise, we can just use the files we need:
+sources = [
+    File("mbedtls/library/bignum.c"),
+    File("mbedtls/library/bignum_core.c"),
+    File("mbedtls/library/md.c"),
+    File("mbedtls/library/md5.c"),
+    File("mbedtls/library/platform_util.c"),
+    File("mbedtls/library/ripemd160.c"),
+    File("mbedtls/library/des.c"),
+    File("mbedtls/library/dhm.c"),
+    File("mbedtls/library/ccm.c"),
+    File("mbedtls/library/gcm.c"),
+    File("mbedtls/library/oid.c"),
+    File("mbedtls/library/pem.c"),
+    File("mbedtls/library/base64.c"),
+    File("mbedtls/library/debug.c"),
+    File("mbedtls/library/error.c"),
+    File("mbedtls/library/constant_time.c"),
+    libenv.Glob("mbedtls/library/x509*.c"),
+    libenv.Glob("mbedtls/library/asn1*.c"),
+    libenv.Glob("mbedtls/library/pk*.c", exclude=["mbedtls/library/pk_wrap.c"]),
+    libenv.Glob("mbedtls/library/ec*.c"),
+    libenv.Glob("mbedtls/library/rsa*.c"),
+    libenv.Glob("mbedtls/library/sha*.c"),
+    libenv.Glob("mbedtls/library/aes*.c"),
+    libenv.Glob("mbedtls/library/psa*.c"),
+    libenv.Glob("mbedtls/library/cipher*.c"),
+    libenv.Glob(
+        "mbedtls/library/ssl*.c", exclude=["mbedtls/library/ssl_tls13_generic.c"]
+    ),
+    File("mbedtls_patch/ssl_tls13_generic.c"),
+    File("mbedtls_patch/pk_wrap.c"),
+]
+
+Depends(sources, File("mbedtls_cfg.h"))
+
+lib = libenv.StaticLibrary("${FW_LIB_NAME}", sources)
+libenv.Install("${LIB_DIST_DIR}", lib)
+Return("lib")

@@ -1,0 +1,88 @@
+from fbt_extra.util import find_variable_config
+
+Import("FW_ENV", "VARS")
+
+VARS.AddVariables(
+    (
+        "SI917_PORT",
+        "Serial port for communication with the device's bootloader",
+        "auto",
+    ),
+    (
+        "SI917_NWP_STACK",
+        "NWP stack to use for the SI917 target",
+        "#lib/wiseconnect_extra/connectivity_firmware/SiWG917-1611.2.1.1.255.11.71.rps",
+    ),
+    (
+        "SI917_SIGN_KEYSTORE",
+        "Path to JSON keystore for signing SI917 firmware images",
+        "",
+    ),
+    (
+        "SI917_SIGN_SERVICE_URL",
+        "Signing-service /api/v1/sign endpoint for SI917 firmware signing",
+        "",
+    ),
+    (
+        "SI917_SIGN_SERVICE_TOKEN",
+        "Bearer token for the signing service",
+        "",
+    ),
+    (
+        "SI917_SIGN_SERVICE_PROFILE",
+        "Signing-service profile name for SI917 firmware signing",
+        "",
+    ),
+    (
+        "COMMANDER_CLI",
+        "Path to commander-cli executable (auto-detected if empty)",
+        "",
+    ),
+)
+
+
+# Inject default values for this target into global variables
+_fw_default_apps_config = {
+    "default": [
+        "basic_services",
+        "intercom_services",
+        "system_apps",
+    ],
+    "unit_tests": [
+        "basic_services",
+        "intercom_services",
+        "system_apps",
+        "debug_apps",
+    ],
+    "hwtest": [
+        "basic_services",
+        "system_apps",
+        "cli",
+        "cli_uart",
+    ],
+    "917_crash": [
+        "basic_services",
+        "intercom_services",
+        "system_apps",
+        "crash",
+    ],
+    "recovery": [
+        "basic_services",
+        "intercom_services",
+    ],
+    "factory_testing": [
+        "basic_services",
+        "intercom_services",
+        "system_apps",
+    ],
+}
+
+fw_apps_configs_option = find_variable_config(VARS, "FIRMWARE_APPS")
+assert isinstance(fw_apps_configs_option.default, dict)
+for key, value in _fw_default_apps_config.items():
+    fw_apps_configs_option.default[key] = value
+
+
+fw_appdirs_option = find_variable_config(VARS, "APPDIRS")
+assert isinstance(fw_appdirs_option.default, list)
+fw_appdirs_option.default.extend((("applications/system", False),))

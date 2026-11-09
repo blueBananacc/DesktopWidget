@@ -1,0 +1,30 @@
+App(
+    appid="power_srv",
+    name="PowerSrv",
+    apptype=FlipperAppType.SERVICE,
+    entry_point="power_srv_app",
+    stack_size=2 * 1024,
+    cdefines=["SRV_POWER"],
+    provides=["power_cmd"],
+    sources=[
+        "power_service/power_api.c",
+        "power_service/power_api_misc.c",
+        "power_service/power_battery.c",
+        "power_service/power_usb_pd.c",
+        "power_service/power.c",
+        "power_service/settings/settings.c",
+        "power_service/settings/interface_v1.c",
+    ],
+    sdk_headers=["power_service/power.h"],
+    order=40,
+    targets=["f20", "f21", "f22"],
+)
+
+App(
+    appid="power_cmd",
+    name="power",
+    apptype=FlipperAppType.CLICMD,
+    entry_point="power_cli_command",
+    sources=["power_cli.c"],
+    requires=["power_srv"],
+)

@@ -1,0 +1,135 @@
+name: 'Lint sources'
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SET_GH_OUTPUT: 1
+
+jobs:
+  lint_sources_check_submodules:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: 'Checkout code'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 'Configure Git and LFS for submodules'
+        run: |
+          # Configure Git LFS
+          git lfs install --skip-smudge
+
+          # Auth via per-job RUNNER_TEMP creds (self-hosted runners persist $HOME).
+          rm -f "$HOME/.git-credentials"
+          echo "https://x-access-token:${GH_TOKEN}@github.com" > "${RUNNER_TEMP}/git-credentials"
+          git config credential.helper "store --file ${RUNNER_TEMP}/git-credentials"
+
+          # Configure LFS settings
+          git config lfs.transfer.maxretries 3
+
+      - name: 'Update submodules'
+        run: |
+          git submodule update --init --recursive --filter=blob:none --jobs=$(nproc) || (git lfs logs last && exit 1)
+
+      - name: 'Restore toolchain cache'
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: toolchain/
+          key: toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/toolchain/fbtenv.sh') }}
+
+      - name: 'Check submodule branches'
+        if: always()
+        run: |
+          python3 scripts/check-submodules.py .github/expected-submodule-branches.txt
+
+      - name: 'Check REUSE compliance'
+        id: reuse_check
+        if: always()
+        run: |
+          set +e
+          pip install --quiet reuse
+          log_file="lint-reuse.log"
+          echo "::group::REUSE lint"
+          reuse lint 2>&1 | tee "${log_file}"
+          status=${PIPESTATUS[0]}
+          echo "::endgroup::"
+          if [ "${status}" -ne 0 ]; then
+            echo "errors=1" >> $GITHUB_OUTPUT
+            printf "REUSE compliance errors:\n\`\`\`\n" >> $GITHUB_STEP_SUMMARY
+            cat "${log_file}" >> $GITHUB_STEP_SUMMARY
+            printf "\n\`\`\`\n" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            printf "REUSE compliance: all good ✨\n" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: 'Check C/C++ code formatting for f21 and f64'
+        id: syntax_check_cpp
+        if: always()
+        run: |
+          set +e;
+          export FBT_NO_SYNC=1;
+          errors=0;
+          for target in 21 64; do
+            log_file="lint-cpp-${target}.log";
+            echo "::group::Lint TARGET_HW=${target}";
+            bash ./fbt -s lint TARGET_HW=${target} 2>&1 | tee "${log_file}";
+            status=${PIPESTATUS[0]};
+            echo "::endgroup::";
+            if [ "${status}" -ne 0 ]; then
+              errors=1;
+              printf "C Lint errors (TARGET_HW=%s):\n\`\`\`\n" "${target}" >> $GITHUB_STEP_SUMMARY;
+              cat "${log_file}" >> $GITHUB_STEP_SUMMARY;
+              printf "\n\`\`\`\n" >> $GITHUB_STEP_SUMMARY;
+            else
+              printf "C Lint (TARGET_HW=%s): all good ✨\n" "${target}" >> $GITHUB_STEP_SUMMARY;
+            fi
+          done
+          if [ "${errors}" -ne 0 ]; then
+            echo "errors=1" >> $GITHUB_OUTPUT;
+            exit 1;
+          fi
+
+      - name: 'Check Python code formatting for f21 and f64'
+        id: syntax_check_py
+        # if: always()
+        if: false
+        run: |
+          set +e;
+          export FBT_NO_SYNC=1;
+          errors=0;
+          for target in 21 64; do
+            log_file="lint-py-${target}.log";
+            echo "::group::Lint_py TARGET_HW=${target}";
+            bash ./fbt -s lint_py TARGET_HW=${target} 2>&1 | tee "${log_file}";
+            status=${PIPESTATUS[0]};
+            echo "::endgroup::";
+            if [ "${status}" -ne 0 ]; then
+              errors=1;
+              printf "Python Lint errors (TARGET_HW=%s):\n\`\`\`\n" "${target}" >> $GITHUB_STEP_SUMMARY;
+              cat "${log_file}" >> $GITHUB_STEP_SUMMARY;
+              printf "\n\`\`\`\n" >> $GITHUB_STEP_SUMMARY;
+            else
+              printf "Python Lint (TARGET_HW=%s): all good ✨\n" "${target}" >> $GITHUB_STEP_SUMMARY;
+            fi
+          done
+          if [ "${errors}" -ne 0 ]; then
+            echo "errors=1" >> $GITHUB_OUTPUT;
+            exit 1;
+          fi
+
+      - name: 'Report code formatting errors'
+        if: (steps.syntax_check_cpp.outputs.errors || steps.syntax_check_py.outputs.errors || steps.reuse_check.outputs.errors) && github.event.pull_request
+        run: |
+          echo "Code formatting errors found";
+          echo "Please run './fbt format' or './fbt format_py' to fix them";
+          exit 1;

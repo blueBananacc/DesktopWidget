@@ -1,0 +1,22 @@
+Import("env")
+
+SL_GLUE_DIR = "sl_glue"
+SL_GLUE_INCDIR = f"#/lib/{SL_GLUE_DIR}"
+
+env.Append(
+    CPPPATH=[
+        Dir(f"{SL_GLUE_INCDIR}/inc").rdir(),
+    ],
+    CPPDEFINES=[],
+)
+
+libenv = env.Clone(FW_LIB_NAME="sl_glue")
+libenv.ApplyLibFlags()
+
+sources = [
+    f"{SL_GLUE_DIR}/src/sl_debug.c",
+]
+
+lib = libenv.StaticLibrary("${FW_LIB_NAME}", sources)
+libenv.Install("${LIB_DIST_DIR}", lib)
+Return("lib")

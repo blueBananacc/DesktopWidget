@@ -1,0 +1,34 @@
+App(
+    appid="brightness_control",
+    name="BrightnessControl",
+    apptype=FlipperAppType.SERVICE,
+    entry_point="brightness_control_srv",
+    stack_size=1.5 * 1024,
+    targets=["f20", "f21", "f22"],
+    order=95,
+    requires=["storage"],
+    provides=["cli_display", "cli_light_sensor"],
+    sources=[
+        "brightness_control.c",
+        "brightness_conv.c",
+        "settings/interface_v1.c"
+    ],
+)
+
+App(
+    appid="cli_display",
+    name="display",
+    targets=["f20", "f21", "f22"],
+    apptype=FlipperAppType.CLICMD,
+    entry_point="cli_command_display",
+    sources=["cli/cli_command_display.c"],
+)
+
+App(
+    appid="cli_light_sensor",
+    name="light_sensor",
+    targets=["f20", "f21", "f22"],
+    apptype=FlipperAppType.CLICMD,
+    entry_point="cli_command_light_sensor",
+    sources=["cli/cli_command_light_sensor.c"],
+)

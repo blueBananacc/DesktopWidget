@@ -1,0 +1,145 @@
+#include "../busy_i.h"
+
+#include <gui/modules/menu.h>
+#include <gui/modules/anim_menu.h>
+#include <gui/modules/anim_player.h>
+#include <gui/modules/flex_layout.h>
+
+#include <lvgl.h>
+
+#define ANIM_MENU_OPTIONS 2
+
+typedef struct {
+    FlexLayout* front_layout;
+    AnimPlayer* front_logo;
+    AnimMenu* front_menu;
+    Menu* back_menu;
+} BusySceneStart;
+
+typedef enum {
+    BusySceneStartMenuIndexStart,
+    BusySceneStartMenuIndexSetup,
+    BusySceneStartMenuIndexMax,
+} BusySceneStartMenuIndex;
+
+static void busy_scene_start_menu_callback(uint32_t index, void* context) {
+    furi_assert(index < BusySceneStartMenuIndexMax);
+    furi_assert(context);
+
+    BusyApp* instance = context;
+    busy_send_custom_event_nonblocking(instance, index);
+}
+
+static void busy_scene_start_handle_start(BusyApp* instance) {
+    with_gui(instance->gui, {
+        widget_set_visible(nav_bar_get_base(instance->nav_bar), false);
+        widget_set_visible(mirror_card_get_base(instance->timer_card), true);
+
+        mirror_card_set_show_header(instance->timer_card, false);
+        mirror_card_set_show_footer(instance->timer_card, false);
+    });
+
+    busy_prepare_transition(instance, BusyTransitionTypeSelect);
+
+    BusyTimerPreset timer_preset;
+    busy_get_timer_preset(instance, &timer_preset);
+
+    busy_set_app_config(instance, &timer_preset.app_config);
+
+    const BusyTimerMode timer_mode = timer_preset.timer_config.mode;
+
+    if(timer_mode == BusyTimerModeInterval) {
+        scene_manager_next_scene(instance->scene_manager, BusyAppSceneIdOverview);
+    } else {
+        scene_manager_next_scene(instance->scene_manager, BusyAppSceneIdTimer);
+    }
+}
+
+static void busy_scene_start_handle_setup(BusyApp* instance) {
+    busy_push_location(instance, "SETUP");
+    scene_manager_next_scene(instance->scene_manager, BusyAppSceneIdSetup);
+}
+
+static void busy_scene_start_apply_initial_params(BusyApp* instance) {
+    busy_set_front_display_blanking(instance, false);
+    busy_set_priority(instance, false);
+}
+
+static void busy_scene_start_on_enter(void* context) {
+    furi_assert(context);
+
+    BusyApp* instance = context;
+    BusySceneStart* data =
+        scene_manager_get_scene_data(instance->scene_manager, BusyAppSceneIdStart);
+
+    busy_scene_start_apply_initial_params(instance);
+
+    with_gui(instance->gui, {
+        nav_bar_reset_location(instance->nav_bar);
+
+        widget_set_visible(mirror_card_get_base(instance->timer_card), false);
+        widget_set_visible(nav_bar_get_base(instance->nav_bar), true);
+
+        data->front_layout = flex_layout_alloc(instance->front_window, FlexLayoutTypeRow);
+
+        data->front_logo = anim_player_alloc(flex_layout_get_base(data->front_layout));
+        anim_player_set_source(
+            data->front_logo, busy_get_global_preset(instance)->start_anim_path);
+        anim_player_set_section(data->front_logo, AnimFilePlayFlagNone, ANIM_FILE_DEFAULT_SECTION);
+
+        data->front_menu = anim_menu_alloc(flex_layout_get_base(data->front_layout));
+        anim_menu_set_callback(data->front_menu, busy_scene_start_menu_callback, instance);
+        anim_menu_set_source(
+            data->front_menu, SHARED_ANIM_PATH("start_menu_31x16.anim"), ANIM_MENU_OPTIONS);
+
+        data->back_menu = menu_alloc(instance->back_window);
+        menu_add_item(
+            data->back_menu, "Start", NULL, SHARED_IMG_PATH("start_11x11.image"), 0, NULL, NULL);
+        menu_add_item(
+            data->back_menu, "Setup", NULL, SHARED_IMG_PATH("setup_11x11.image"), 0, NULL, NULL);
+    });
+
+    busy_start_transition(instance);
+}
+
+static void busy_scene_start_on_exit(void* context) {
+    furi_assert(context);
+
+    BusyApp* instance = context;
+    BusySceneStart* data =
+        scene_manager_get_scene_data(instance->scene_manager, BusyAppSceneIdStart);
+
+    with_gui(instance->gui, {
+        flex_layout_free(data->front_layout);
+        menu_free(data->back_menu);
+    });
+}
+
+static bool busy_scene_start_on_event(const SceneManagerEvent* event, void* context) {
+    furi_assert(context);
+    BusyApp* instance = context;
+
+    bool consumed = false;
+
+    if(event->type == SceneManagerEventTypeCustom) {
+        if(event->event == BusySceneStartMenuIndexStart) {
+            busy_scene_start_handle_start(instance);
+
+        } else if(event->event == BusySceneStartMenuIndexSetup) {
+            busy_scene_start_handle_setup(instance);
+        }
+
+        consumed = true;
+    } else if(event->type == SceneManagerEventTypeBack) {
+        consumed = true;
+    }
+
+    return consumed;
+}
+
+const Scene busy_scene_start = {
+    .enter_callback = busy_scene_start_on_enter,
+    .exit_callback = busy_scene_start_on_exit,
+    .event_callback = busy_scene_start_on_event,
+    .data_size = sizeof(BusySceneStart),
+};

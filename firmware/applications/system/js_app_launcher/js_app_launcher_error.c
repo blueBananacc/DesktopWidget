@@ -1,0 +1,128 @@
+#include "js_app_launcher_i.h"
+
+static const JsAppLauncherErrorDesc js_app_launcher_error_descs[JsAppLauncherErrorMax] = {
+    [JsAppLauncherErrorNone] =
+        {
+            {0}, /* Empty, no error message to display */
+            {0}, /* Empty, no error message to display */
+        },
+    [JsAppLauncherErrorLoadFailed] =
+        {
+            .primary =
+                {
+                    .front = "App loading failed,\nreinstall it.",
+                    .back = "App loading failed",
+                },
+            .auxiliary =
+                {
+                    .back = "Try to restart or reinstall it",
+                },
+        },
+    [JsAppLauncherErrorApiVersionMismatch] =
+        {
+            .primary =
+                {
+                    .front = "App incompatible,\nupdate firmware.",
+                    .back = "App not compatible",
+                },
+            .auxiliary =
+                {
+                    .back = "Update the firmware",
+                },
+        },
+    [JsAppLauncherErrorSettingsSchemaMissing] =
+        {
+            .primary =
+                {
+                    .front = "This app has\nno settings.",
+                    .back = "No settings",
+                },
+            .auxiliary =
+                {
+                    .back = "Add settings file to the app",
+                },
+        },
+    [JsAppLauncherErrorSettingsSchemaInvalid] =
+        {
+            .primary =
+                {
+                    .front = "Settings file\nis invalid.",
+                    .back = "Invalid settings",
+                },
+            .auxiliary =
+                {
+                    .back = "Fix the app settings file",
+                },
+        },
+    [JsAppLauncherErrorSettingsStorageFailure] =
+        {
+            .primary =
+                {
+                    .front = "Settings storage\nerror.",
+                    .back = "Settings storage error",
+                },
+            .auxiliary =
+                {
+                    .back = "Check the storage device",
+                },
+        },
+    [JsAppLauncherErrorSettingsLoadFailed] =
+        {
+            .primary =
+                {
+                    .front = "Settings loading\nfailed.",
+                    .back = "Settings loading failed",
+                },
+            .auxiliary =
+                {
+                    .back = "Check the app settings file",
+                },
+        },
+    [JsAppLauncherErrorSyntaxError] =
+        {
+            .primary =
+                {
+                    .front = "Syntax error,\ncheck script.",
+                    .back = "Syntax error",
+                },
+            .auxiliary =
+                {
+                    .back = "Check the app script file",
+                },
+        },
+    [JsAppLauncherErrorProgramCrashed] =
+        {
+            .primary =
+                {
+                    .front = "App crashed,\nsee device logs.",
+                    .back = "App crashed",
+                },
+            .auxiliary =
+                {
+                    .back = "See device logs",
+                },
+        },
+};
+
+const JsAppLauncherErrorDesc* js_app_launcher_get_error_desc(const JsAppLauncher* instance) {
+    furi_assert(instance->error < JsAppLauncherErrorMax);
+    furi_assert(instance->error != JsAppLauncherErrorNone);
+    return &js_app_launcher_error_descs[instance->error];
+}
+
+JsAppLauncherError js_app_launcher_translate_from_js_runner_error(JsRunnerError js_runner_error) {
+    furi_assert(js_runner_error < JsRunnerErrorMax);
+    JsAppLauncherError translated_error;
+
+    if(js_runner_error == JsRunnerErrorNone) {
+        translated_error = JsAppLauncherErrorNone;
+    } else if(js_runner_error == JsRunnerErrorParseException) {
+        translated_error = JsAppLauncherErrorSyntaxError;
+    } else if(js_runner_error == JsRunnerErrorOutOfMemory) {
+        translated_error = JsAppLauncherErrorProgramCrashed;
+    } else {
+        translated_error = JsAppLauncherErrorLoadFailed;
+    }
+
+    return translated_error;
+}

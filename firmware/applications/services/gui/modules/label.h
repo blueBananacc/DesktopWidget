@@ -1,0 +1,180 @@
+/**
+ * @file label.h
+ * @brief A simple text label widget.
+ */
+#pragma once
+
+#include <gui/widget.h>
+#include <gui/gui.h>
+#include <toolbox/color.h>
+#include <font_registry/fonts.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/** Label opaque structure. */
+typedef struct Label Label;
+
+/** Enumeration of possible text alignment types */
+typedef enum {
+    TextAlignAuto, /**< Align text automatically */
+    TextAlignLeft, /**< Align text to the left */
+    TextAlignCenter, /**< Align text to the centre */
+    TextAlignRight, /**< Align text to the right */
+
+    TextAlignMax, /**< Special value, not to be used in application code */
+} TextAlign;
+
+/** Enumeration of possible behaviour with long content */
+typedef enum {
+    LabelLongContentModeWrap, /**< Keep the object width, wrap lines longer than object width and expand the object height*/
+    LabelLongContentModeDots, /**< Keep the size and write dots at the end if the text is too long*/
+    LabelLongContentModeScroll, /**< Keep the size and roll the text back and forth*/
+    LabelLongContentModeScrollCircular, /**< Keep the size and roll the text circularly*/
+    LabelLongContentModeClip, /**< Keep the size and clip the text out of it*/
+
+    LabelLongContentModeCount /**< Count of possible choices*/
+} LabelLongContentMode;
+
+typedef enum {
+    LabelFontSizeSmall,
+    LabelFontSizeNormal,
+    LabelFontSizeLarge,
+} LabelFontSize;
+
+/**
+ * @brief Create a new Label instance.
+ *
+ * @param[in,out] parent pointer to the parent Widget instance
+ *
+ * @returns pointer to the newly created Label instance
+ */
+Label* label_alloc(Widget* parent);
+
+/**
+ * @brief Delete a Label instance.
+ *
+ * @param[in,out] instance pointer to the Label instance to be deleted
+ */
+void label_free(Label* instance);
+
+/**
+ * @brief Get a pointer to the base class instance.
+ *
+ * The return value can be used in all Widget methods.
+ *
+ * @param[in,out] instance pointer to the Label instance to be queried
+ * @returns pointer to the base class instance
+ */
+Widget* label_get_base(Label* instance);
+
+/**
+ * @brief Set the label text.
+ *
+ * @param[in,out] instance pointer to the Label instance to be modified
+ * @param[in] text zero-terminated string containing the text to be shown
+ */
+void label_set_text(Label* instance, const char* text);
+
+/**
+ * @brief Set the label text color.
+ *
+ * @param[in,out] instance pointer to the Label instance to be modified
+ * @param[in] color text color
+ */
+void label_set_text_color(Label* instance, Color color);
+
+/**
+ * @brief Enable or disable inline text color formatting
+ * Example: "This is a #ff0000 red# word"
+ *
+ * @param[in,out] instance pointer to the Label instance to be modified
+ * @param[in] enable true to enable recoloring, false otherwise 
+*/
+void label_set_inline_text_color_formatting(Label* instance, bool enable);
+
+/**
+ * @brief Set the label font size.
+ * @param[in,out] instance pointer to the Label instance to be modified
+ * @param[in] size font size
+ */
+void label_set_text_font_size(Label* instance, LabelFontSize size);
+
+/**
+ * @brief Set the label text with printf-like formatting.
+ *
+ * @param[in,out] instance pointer to the Label instance to be modified
+ * @param[in] fmt zero-terminated format string
+ * @param[in] ... variadic list of arguments according to the format string
+ */
+void label_set_text_fmt(Label* instance, const char* fmt, ...)
+    __attribute__((__format__(__printf__, 2, 3)));
+
+/**
+ * @brief Set the label line spacing.
+ *
+ * @param[in,out] instance pointer to the Label instance to be modified
+ * @param[in] spacing spacing value in pixels
+ */
+void label_set_line_spacing(Label* instance, int32_t spacing);
+
+/**
+ * @brief Set the label text alignment.
+ *
+ * @param[in,out] instance pointer to the Label instance to be modified
+ * @param[in] align enum value to determine the alignment type
+ */
+void label_set_text_align(Label* instance, TextAlign align);
+
+/**
+ * @brief Set label long content mode.
+ *
+ * @param[in,out] instance pointer to the Label instance to be modified
+ * @param[in] mode new long content mode for label
+ */
+void label_set_long_content_mode(Label* instance, LabelLongContentMode mode);
+
+/**
+ * @brief Set the initial delay before the long content animation starts.
+ *
+ * Only applies to scrollable modes (@c LabelLongContentModeScroll,
+ * @c LabelLongContentModeScrollCircular).
+ *
+ * @param[in,out] instance pointer to the Label instance to be modified
+ * @param[in] delay delay in milliseconds before the animation begins
+ */
+void label_set_long_content_anim_start_delay(Label* instance, uint32_t delay);
+
+/**
+ * @brief Set the pause duration between the long content animation repetitions.
+ *
+ * Only applies to scrollable modes (@c LabelLongContentModeScroll,
+ * @c LabelLongContentModeScrollCircular).
+ *
+ * @param[in,out] instance pointer to the Label instance to be modified
+ * @param[in] delay pause duration in milliseconds between successive scroll cycles
+ */
+void label_set_long_content_anim_repeat_delay(Label* instance, uint32_t delay);
+
+/**
+ * @brief Set the scroll animation speed for a label.
+ *
+ * @warning Only valid for @c LabelLongContentModeScrollCircular.
+ *
+ * @param[in, out] instance pointer to the Label instance
+ * @param[in]      speed    scroll speed in pixels per minute (must be > 0)
+ */
+void label_set_long_content_anim_speed(Label* instance, uint32_t speed);
+
+/**
+ * @brief Set font of label text.
+ * 
+ * @param[in,out] instance pointer to the Label instance to be modified
+ * @param[in] font_path path to font file
+ */
+void label_set_font(Label* instance, const char* font_path);
+
+#ifdef __cplusplus
+}
+#endif

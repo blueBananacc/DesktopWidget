@@ -1,0 +1,69 @@
+/**
+ * @file furi_hal_serial_types.h
+ * @brief Target-specific serial types.
+ */
+#pragma once
+
+/**
+ * UART channels
+ */
+typedef enum {
+    FuriHalSerialIdUsart1,
+    FuriHalSerialIdUsart2,
+    FuriHalSerialIdUsart3,
+    FuriHalSerialIdUart4,
+    FuriHalSerialIdUart5,
+    FuriHalSerialIdUsart6,
+
+    FuriHalSerialIdMax,
+} FuriHalSerialId;
+
+typedef enum {
+    FuriHalSerialDirectionNone = 0,
+    FuriHalSerialDirectionTx = 1 << 0,
+    FuriHalSerialDirectionRx = 1 << 1,
+    FuriHalSerialDirectionTxRx = FuriHalSerialDirectionTx | FuriHalSerialDirectionRx,
+} FuriHalSerialDirection;
+
+/**
+ * @brief Enumeration of available hardware serial pins.
+ */
+typedef enum {
+    FuriHalSerialPinTx, /**< Transmit hardware pin */
+    FuriHalSerialPinRx, /**< Receive hardware pin */
+    FuriHalSerialPinRts, /**< Request to send hardware pin */
+    FuriHalSerialPinCts, /**< Clear to send hardware pin */
+
+    FuriHalSerialPinMax, /**< Special value, internal use */
+} FuriHalSerialPin;
+
+typedef enum {
+    FuriHalSerialConfigDataBits7,
+    FuriHalSerialConfigDataBits8,
+    FuriHalSerialConfigDataBits9,
+} FuriHalSerialConfigDataBits;
+
+typedef enum {
+    FuriHalSerialConfigParityNone,
+    FuriHalSerialConfigParityEven,
+    FuriHalSerialConfigParityOdd,
+} FuriHalSerialConfigParity;
+
+typedef enum {
+    FuriHalSerialConfigStopBits_0_5,
+    FuriHalSerialConfigStopBits_1,
+    FuriHalSerialConfigStopBits_1_5,
+    FuriHalSerialConfigStopBits_2,
+} FuriHalSerialConfigStopBits;
+
+typedef enum {
+    FuriHalSerialTransferBitOrderLsbFirst,
+    FuriHalSerialTransferBitOrderMsbFirst,
+} FuriHalSerialTransferBitOrder;
+
+typedef enum {
+    FuriHalSerialBinaryDataLogicPositive,
+    FuriHalSerialBinaryDataLogicNegative,
+} FuriHalSerialBinaryDataLogic;
+
+typedef struct FuriHalSerialHandle FuriHalSerialHandle;

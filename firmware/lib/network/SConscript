@@ -1,0 +1,24 @@
+Import("env")
+
+env.Append(
+    CPPPATH=[
+        Dir("dhserver").srcnode(),
+    ],
+    LINT_SOURCES=[
+        Dir(".").srcnode(),
+    ],
+)
+
+
+libenv = env.Clone(FW_LIB_NAME="network")
+libenv.ApplyLibFlags()
+
+sources = [
+    "dhserver/dhserver.c",
+]
+
+libenv.Append(CPPPATH=[libenv.Dir(".")])
+
+lib = libenv.StaticLibrary("${FW_LIB_NAME}", sources)
+libenv.Install("${LIB_DIST_DIR}", lib)
+Return("lib")

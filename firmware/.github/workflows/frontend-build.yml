@@ -1,0 +1,58 @@
+name: Build frontend, check output bundle diff
+on:
+  pull_request:
+    paths:
+      - 'assets/frontend/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        node-version: [20]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Checkout protobuf submodule
+        run: |
+          git submodule sync -- assets/proto
+          git submodule update --init --depth 1 --filter=blob:none assets/proto
+
+      - name: Copy frontend assets to working directory
+        run: |
+          mkdir -p ci_build
+          cp -r ./assets/frontend/* ci_build/
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@8912a9102ac27614460f54aedde9e1e7f9aec20d # v6.0.5
+        with:
+          version: 10
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache-dependency-path: assets/frontend/pnpm-lock.yaml
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: ./ci_build
+
+      - name: Build frontend
+        run: pnpm run build/ci
+        working-directory: ./ci_build
+
+      - name: Check output bundle diff
+        run: |
+          echo "Build ID: $(git -C "$(git rev-parse --show-toplevel)" log -1 --pretty=format:%h -- assets/frontend)"
+          diff -r ../frontend-build/public ../assets/frontend-build/public || (echo "Build output for the latest commit is different from the committed bundle! Have you run 'pnpm build'?" && exit 1)
+        working-directory: ./ci_build

@@ -1,0 +1,635 @@
+#include "tar_archive.h"
+
+#include <microtar.h>
+#include <storage/storage.h>
+#include <furi.h>
+#include <toolbox/path.h>
+#include <toolbox/compress.h>
+
+#define TAG "TarArch"
+
+#define MAX_NAME_LEN    255
+#define FILE_BLOCK_SIZE 1024 * 16
+
+#define FILE_OPEN_NTRIES      10
+#define FILE_OPEN_RETRY_DELAY 25
+
+typedef struct TarArchive {
+    Storage* storage;
+    File* stream;
+    mtar_t tar;
+    tar_unpack_file_cb unpack_cb;
+    void* unpack_cb_context;
+} TarArchive;
+
+/* Plain file backend - uncompressed, supports read and write */
+static int mtar_storage_file_write(void* stream, const void* data, unsigned size) {
+    size_t bytes_written = storage_file_write(stream, data, size);
+    return (bytes_written == size) ? (int)bytes_written : MTAR_EWRITEFAIL;
+}
+
+static int mtar_storage_file_read(void* stream, void* data, unsigned size) {
+    size_t bytes_read = storage_file_read(stream, data, size);
+    return (bytes_read == size) ? (int)bytes_read : MTAR_EREADFAIL;
+}
+
+static int mtar_storage_file_seek(void* stream, unsigned offset) {
+    bool res = storage_file_seek(stream, offset, true);
+    return res ? MTAR_ESUCCESS : MTAR_ESEEKFAIL;
+}
+
+static int mtar_storage_file_close(void* stream) {
+    if(stream) {
+        storage_file_close(stream);
+    }
+    return MTAR_ESUCCESS;
+}
+
+const struct mtar_ops filesystem_ops = {
+    .read = mtar_storage_file_read,
+    .write = mtar_storage_file_write,
+    .seek = mtar_storage_file_seek,
+    .close = mtar_storage_file_close,
+};
+
+/* Heatshrink stream backend - compressed, read-only */
+
+typedef struct {
+    File* stream;
+    CompressStreamDecoder* decoder;
+    size_t header_skip; ///< header bytes to skip at the beginning of the file
+} CompressStream;
+
+/* HSDS 'heatshrink data stream' header magic */
+static const uint32_t HEATSHRINK_MAGIC = 0x53445348;
+static const uint32_t GZIP_MAGIC = 0x088b1f;
+static const uint64_t USTAR_MAGIC = 0x3030007261747375;
+
+typedef struct {
+    uint32_t magic;
+    uint8_t version;
+    uint8_t window_sz2;
+    uint8_t lookahead_sz2;
+} FURI_PACKED HeatshrinkStreamHeader;
+_Static_assert(sizeof(HeatshrinkStreamHeader) == 7, "Invalid HeatshrinkStreamHeader size");
+
+static int mtar_compress_file_close(void* stream) {
+    CompressStream* hs_stream = stream;
+    if(hs_stream) {
+        if(hs_stream->decoder) {
+            compress_stream_decoder_free(hs_stream->decoder);
+        }
+        storage_file_close(hs_stream->stream);
+        free(hs_stream);
+    }
+    return MTAR_ESUCCESS;
+}
+
+static int mtar_compress_file_read(void* stream, void* data, unsigned size) {
+    CompressStream* hs_stream = stream;
+    ssize_t read_size = compress_stream_decoder_read(hs_stream->decoder, data, size);
+    return read_size >= 0 ? read_size : MTAR_EREADFAIL;
+}
+
+static int mtar_compress_file_seek(void* stream, unsigned offset) {
+    CompressStream* hs_stream = stream;
+    bool success = false;
+    if(offset == 0) {
+        success = storage_file_seek(hs_stream->stream, hs_stream->header_skip, true) &&
+                  compress_stream_decoder_reset(hs_stream->decoder);
+    } else {
+        success = compress_stream_decoder_seek(hs_stream->decoder, offset);
+    }
+    return success ? MTAR_ESUCCESS : MTAR_ESEEKFAIL;
+}
+
+const struct mtar_ops compress_ops = {
+    .read = mtar_compress_file_read,
+    .write = NULL, // not supported
+    .seek = mtar_compress_file_seek,
+    .close = mtar_compress_file_close,
+};
+
+static bool try_heatshrink_magic(File* f) {
+    if(!storage_file_seek(f, 0, true)) {
+        return false;
+    }
+
+    uint32_t buf = 0;
+    size_t r = storage_file_read(f, &buf, sizeof(buf));
+    if(r < sizeof(buf)) {
+        return false;
+    } else {
+        return buf == HEATSHRINK_MAGIC;
+    }
+}
+
+static bool try_gzip_magic(File* f) {
+    if(!storage_file_seek(f, 0, true)) {
+        return false;
+    }
+
+    uint32_t buf = 0;
+    size_t r = storage_file_read(f, &buf, sizeof(buf));
+    if(r < sizeof(buf)) {
+        return false;
+    } else {
+        return (buf & 0xffffff) == GZIP_MAGIC;
+    }
+}
+
+static bool try_ustar_magic(File* f) {
+    if(!storage_file_seek(f, 257, true)) {
+        return false;
+    }
+
+    uint64_t buf = 0;
+    size_t r = storage_file_read(f, &buf, sizeof(buf));
+    if(r < sizeof(buf)) {
+        return false;
+    } else {
+        return buf == USTAR_MAGIC;
+    }
+}
+/**
+ * Detect archive type by magic number.
+ * 
+ * @return true if detection succeeded, false on any error.
+ */
+static bool detect_archive_mode(Storage* storage, const char* path, TarOpenMode* out_mode) {
+    File* f = storage_file_alloc(storage);
+    bool result = false;
+    do {
+        if(!storage_file_open(f, path, FSAM_READ, FSOM_OPEN_EXISTING)) {
+            FURI_LOG_E(TAG, "Cannot open file: %s", path);
+            break;
+        }
+
+        if(try_heatshrink_magic(f)) {
+            FURI_LOG_D(TAG, "Heatshrink detected");
+            *out_mode = TarOpenModeReadHeatshrink;
+            result = true;
+        } else if(try_gzip_magic(f)) {
+            FURI_LOG_D(TAG, "Gzip detected");
+            *out_mode = TarOpenModeReadGzip;
+            result = true;
+        } else if(try_ustar_magic(f)) {
+            FURI_LOG_D(TAG, "Tarball detected");
+            *out_mode = TarOpenModeRead;
+            result = true;
+        } else {
+            FURI_LOG_W(TAG, "File format cannot be recognized, assuming TAR");
+            *out_mode = TarOpenModeRead;
+            result = true;
+        }
+    } while(false);
+    storage_file_free(f);
+    return result;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+TarArchive* tar_archive_alloc(Storage* storage) {
+    furi_check(storage);
+    TarArchive* archive = malloc(sizeof(TarArchive));
+    archive->storage = storage;
+    archive->stream = storage_file_alloc(archive->storage);
+    archive->unpack_cb = NULL;
+    return archive;
+}
+
+static ssize_t file_read_cb(void* context, uint8_t* buffer, size_t buffer_size) {
+    File* file = context;
+    return storage_file_read(file, buffer, buffer_size);
+}
+
+bool tar_archive_open(TarArchive* archive, const char* path, TarOpenMode mode) {
+    furi_check(archive);
+    FS_AccessMode access_mode;
+    FS_OpenMode open_mode;
+    int mtar_access = 0;
+
+    switch(mode) {
+    case TarOpenModeWrite:
+        mtar_access = MTAR_WRITE;
+        access_mode = FSAM_WRITE;
+        open_mode = FSOM_CREATE_ALWAYS;
+        break;
+    case TarOpenModeRead:
+    case TarOpenModeReadHeatshrink:
+    case TarOpenModeReadGzip:
+        mtar_access = MTAR_READ;
+        access_mode = FSAM_READ;
+        open_mode = FSOM_OPEN_EXISTING;
+        break;
+    case TarOpenModeReadAuto:
+        if(!detect_archive_mode(archive->storage, path, &mode)) {
+            return false;
+        }
+        mtar_access = MTAR_READ;
+        access_mode = FSAM_READ;
+        open_mode = FSOM_OPEN_EXISTING;
+        break;
+    default:
+        return false;
+    }
+
+    File* stream = archive->stream;
+    if(!storage_file_open(stream, path, access_mode, open_mode)) {
+        storage_file_close(stream);
+        return false;
+    }
+
+    switch(mode) {
+    case TarOpenModeReadHeatshrink: {
+        /* Read and validate stream header */
+        HeatshrinkStreamHeader header;
+        if(storage_file_read(stream, &header, sizeof(HeatshrinkStreamHeader)) !=
+               sizeof(HeatshrinkStreamHeader) ||
+           header.magic != HEATSHRINK_MAGIC) {
+            storage_file_close(stream);
+            return false;
+        }
+
+        CompressStream* hs_stream = malloc(sizeof(CompressStream));
+        hs_stream->stream = stream;
+        hs_stream->header_skip = sizeof(HeatshrinkStreamHeader);
+        CompressConfigHeatshrink heatshrink_config;
+        heatshrink_config.window_sz2 = header.window_sz2;
+        heatshrink_config.lookahead_sz2 = header.lookahead_sz2;
+        heatshrink_config.input_buffer_sz = FILE_BLOCK_SIZE;
+        hs_stream->decoder = compress_stream_decoder_alloc(
+            CompressTypeHeatshrink, &heatshrink_config, file_read_cb, stream);
+        mtar_init(&archive->tar, mtar_access, &compress_ops, hs_stream);
+        break;
+    }
+    case TarOpenModeReadGzip: {
+        CompressStream* gz_stream = malloc(sizeof(CompressStream));
+        gz_stream->stream = stream;
+        gz_stream->header_skip = 0;
+        gz_stream->decoder =
+            compress_stream_decoder_alloc(CompressTypeGzip, NULL, file_read_cb, stream);
+        mtar_init(&archive->tar, mtar_access, &compress_ops, gz_stream);
+        break;
+    }
+    case TarOpenModeRead:
+    case TarOpenModeWrite:
+        mtar_init(&archive->tar, mtar_access, &filesystem_ops, stream);
+        break;
+    case TarOpenModeReadAuto:
+    default:
+        furi_crash("unreachable");
+        break;
+    }
+
+    return true;
+}
+
+void tar_archive_free(TarArchive* archive) {
+    furi_check(archive);
+    if(mtar_is_open(&archive->tar)) {
+        mtar_close(&archive->tar);
+    }
+    storage_file_free(archive->stream);
+    free(archive);
+}
+
+void tar_archive_set_file_callback(TarArchive* archive, tar_unpack_file_cb callback, void* context) {
+    furi_check(archive);
+    archive->unpack_cb = callback;
+    archive->unpack_cb_context = context;
+}
+
+typedef struct CounterData {
+    int counter;
+    bool no_special;
+} CounterData;
+
+static int tar_archive_entry_counter(mtar_t* tar, const mtar_header_t* header, void* param) {
+    UNUSED(tar);
+    furi_assert(param);
+    CounterData* data = param;
+    int count = 1;
+    if(data->no_special) {
+        switch(header->type) {
+        case MTAR_TREG:
+        case MTAR_TDIR:
+            break;
+        default:
+            count = 0;
+            break;
+        }
+    }
+    data->counter += count;
+    return 0;
+}
+
+int32_t tar_archive_get_entries_count(TarArchive* archive, bool no_special) {
+    furi_check(archive);
+    CounterData data = {
+        .counter = 0,
+        .no_special = no_special,
+    };
+    if(mtar_foreach(&archive->tar, tar_archive_entry_counter, &data) != MTAR_ESUCCESS) {
+        data.counter = -1;
+    }
+    return data.counter;
+}
+
+bool tar_archive_get_read_progress(TarArchive* archive, int32_t* processed, int32_t* total) {
+    furi_check(archive);
+    if(mtar_access_mode(&archive->tar) != MTAR_READ) {
+        return false;
+    }
+
+    if(processed) {
+        *processed = storage_file_tell(archive->stream);
+    }
+    if(total) {
+        *total = storage_file_size(archive->stream);
+    }
+    return true;
+}
+
+bool tar_archive_dir_add_element(TarArchive* archive, const char* dirpath) {
+    furi_check(archive);
+    return mtar_write_dir_header(&archive->tar, dirpath) == MTAR_ESUCCESS;
+}
+
+bool tar_archive_finalize(TarArchive* archive) {
+    furi_check(archive);
+    return mtar_finalize(&archive->tar) == MTAR_ESUCCESS;
+}
+
+bool tar_archive_store_data(
+    TarArchive* archive,
+    const char* path,
+    const uint8_t* data,
+    const int32_t data_len) {
+    furi_check(archive);
+
+    return tar_archive_file_add_header(archive, path, data_len) &&
+           tar_archive_file_add_data_block(archive, data, data_len) &&
+           tar_archive_file_finalize(archive);
+}
+
+bool tar_archive_file_add_header(TarArchive* archive, const char* path, const int32_t data_len) {
+    furi_check(archive);
+
+    return mtar_write_file_header(&archive->tar, path, data_len) == MTAR_ESUCCESS;
+}
+
+bool tar_archive_file_add_data_block(
+    TarArchive* archive,
+    const uint8_t* data_block,
+    const int32_t block_len) {
+    furi_check(archive);
+
+    return mtar_write_data(&archive->tar, data_block, block_len) == block_len;
+}
+
+bool tar_archive_file_finalize(TarArchive* archive) {
+    furi_check(archive);
+    return mtar_end_data(&archive->tar) == MTAR_ESUCCESS;
+}
+
+typedef struct {
+    TarArchive* archive;
+    const char* work_dir;
+    TarArchiveNameConverter converter;
+} TarArchiveDirectoryOpParams;
+
+static bool create_parent_path(Storage* storage, const char* dst_path) {
+    FuriString* dirname = furi_string_alloc();
+    path_extract_dirname(dst_path, dirname);
+    bool result = storage_simply_mkpath(storage, furi_string_get_cstr(dirname));
+    furi_string_free(dirname);
+    return result;
+}
+
+static bool archive_extract_current_file(TarArchive* archive, const char* dst_path) {
+    mtar_t* tar = &archive->tar;
+    File* out_file = storage_file_alloc(archive->storage);
+    uint8_t* readbuf = malloc(FILE_BLOCK_SIZE);
+
+    bool success = true;
+    uint8_t n_tries = FILE_OPEN_NTRIES;
+    do {
+        while(n_tries-- > 0) {
+            if(!create_parent_path(archive->storage, dst_path)) {
+                FURI_LOG_W(
+                    TAG, "Failed to create parent path '%s', retries: %d", dst_path, n_tries);
+                continue;
+            }
+            if(storage_file_open(out_file, dst_path, FSAM_WRITE, FSOM_CREATE_ALWAYS)) {
+                break;
+            }
+            FURI_LOG_W(TAG, "Failed to open '%s', retries: %d", dst_path, n_tries);
+            storage_file_close(out_file);
+            furi_delay_ms(FILE_OPEN_RETRY_DELAY);
+        }
+
+        if(!storage_file_is_open(out_file)) {
+            success = false;
+            break;
+        }
+
+        while(!mtar_eof_data(tar)) {
+            int32_t readcnt = mtar_read_data(tar, readbuf, FILE_BLOCK_SIZE);
+            if(!readcnt || !storage_file_write(out_file, readbuf, readcnt)) {
+                success = false;
+                break;
+            }
+        }
+    } while(false);
+    storage_file_free(out_file);
+    free(readbuf);
+
+    return success;
+}
+
+static int archive_extract_foreach_cb(mtar_t* tar, const mtar_header_t* header, void* param) {
+    UNUSED(tar);
+    TarArchiveDirectoryOpParams* op_params = param;
+    TarArchive* archive = op_params->archive;
+
+    bool skip_entry = false;
+    if(archive->unpack_cb) {
+        skip_entry = !archive->unpack_cb(
+            header->name, header->type == MTAR_TDIR, archive->unpack_cb_context);
+    }
+
+    if(skip_entry) {
+        FURI_LOG_W(TAG, "filter: skipping entry \"%s\"", header->name);
+        return 0;
+    }
+
+    FuriString* full_extracted_fname;
+    if(header->type == MTAR_TDIR) {
+        // Skip "/" entry since concat would leave it dangling, also want caller to mkdir destination
+        if(strcmp(header->name, "/") == 0) {
+            return 0;
+        }
+
+        full_extracted_fname = furi_string_alloc();
+        path_concat(op_params->work_dir, header->name, full_extracted_fname);
+
+        bool create_res =
+            storage_simply_mkpath(archive->storage, furi_string_get_cstr(full_extracted_fname));
+        furi_string_free(full_extracted_fname);
+        return create_res ? 0 : -1;
+    }
+
+    if(header->type != MTAR_TREG) {
+        FURI_LOG_W(TAG, "not extracting unsupported type \"%s\"", header->name);
+        return 0;
+    }
+
+    FURI_LOG_D(TAG, "Extracting %u bytes to '%s'", header->size, header->name);
+
+    FuriString* converted_fname = furi_string_alloc_set(header->name);
+    if(op_params->converter) {
+        op_params->converter(converted_fname);
+    }
+
+    full_extracted_fname = furi_string_alloc();
+    path_concat(op_params->work_dir, furi_string_get_cstr(converted_fname), full_extracted_fname);
+
+    bool success =
+        archive_extract_current_file(archive, furi_string_get_cstr(full_extracted_fname));
+
+    furi_string_free(converted_fname);
+    furi_string_free(full_extracted_fname);
+    return success ? 0 : MTAR_EFAILURE;
+}
+
+bool tar_archive_unpack_to(
+    TarArchive* archive,
+    const char* destination,
+    TarArchiveNameConverter converter) {
+    furi_check(archive);
+    TarArchiveDirectoryOpParams param = {
+        .archive = archive,
+        .work_dir = destination,
+        .converter = converter,
+    };
+
+    FURI_LOG_I(TAG, "Restoring '%s'", destination);
+
+    return mtar_foreach(&archive->tar, archive_extract_foreach_cb, &param) == MTAR_ESUCCESS;
+}
+
+bool tar_archive_add_file(
+    TarArchive* archive,
+    const char* fs_file_path,
+    const char* archive_fname,
+    const int32_t file_size) {
+    furi_check(archive);
+    uint8_t* file_buffer = malloc(FILE_BLOCK_SIZE);
+    bool success = false;
+    File* src_file = storage_file_alloc(archive->storage);
+    uint8_t n_tries = FILE_OPEN_NTRIES;
+    do {
+        while(n_tries-- > 0) {
+            if(storage_file_open(src_file, fs_file_path, FSAM_READ, FSOM_OPEN_EXISTING)) {
+                break;
+            }
+            FURI_LOG_W(TAG, "Failed to open '%s', reties: %d", fs_file_path, n_tries);
+            storage_file_close(src_file);
+            furi_delay_ms(FILE_OPEN_RETRY_DELAY);
+        }
+
+        if(!storage_file_is_open(src_file) ||
+           !tar_archive_file_add_header(archive, archive_fname, file_size)) {
+            break;
+        }
+
+        success = true; // if file is empty, that's not an error
+        uint16_t bytes_read = 0;
+        while((bytes_read = storage_file_read(src_file, file_buffer, FILE_BLOCK_SIZE))) {
+            success = tar_archive_file_add_data_block(archive, file_buffer, bytes_read);
+            if(!success) {
+                break;
+            }
+        }
+
+        success = success && tar_archive_file_finalize(archive);
+    } while(false);
+
+    storage_file_free(src_file);
+    free(file_buffer);
+    return success;
+}
+
+bool tar_archive_add_dir(TarArchive* archive, const char* fs_full_path, const char* path_prefix) {
+    furi_check(archive);
+    furi_check(path_prefix);
+
+    File* directory = storage_file_alloc(archive->storage);
+    FileInfo file_info;
+
+    FURI_LOG_I(TAG, "Backing up '%s', '%s'", fs_full_path, path_prefix);
+    char* name = malloc(MAX_NAME_LEN);
+    bool success = false;
+
+    do {
+        if(!storage_dir_open(directory, fs_full_path)) {
+            break;
+        }
+
+        while(true) {
+            if(!storage_dir_read(directory, &file_info, name, MAX_NAME_LEN)) {
+                success = true; /* empty dir / no more files */
+                break;
+            }
+
+            FuriString* element_name = furi_string_alloc();
+            FuriString* element_fs_abs_path = furi_string_alloc();
+
+            path_concat(fs_full_path, name, element_fs_abs_path);
+            if(strlen(path_prefix)) {
+                path_concat(path_prefix, name, element_name);
+            } else {
+                furi_string_set(element_name, name);
+            }
+
+            if(file_info_is_dir(&file_info)) {
+                success =
+                    tar_archive_dir_add_element(archive, furi_string_get_cstr(element_name)) &&
+                    tar_archive_add_dir(
+                        archive,
+                        furi_string_get_cstr(element_fs_abs_path),
+                        furi_string_get_cstr(element_name));
+            } else {
+                success = tar_archive_add_file(
+                    archive,
+                    furi_string_get_cstr(element_fs_abs_path),
+                    furi_string_get_cstr(element_name),
+                    file_info.size);
+            }
+            furi_string_free(element_name);
+            furi_string_free(element_fs_abs_path);
+
+            if(!success) {
+                break;
+            }
+        }
+    } while(false);
+
+    free(name);
+    storage_file_free(directory);
+    return success;
+}
+
+bool tar_archive_unpack_file(
+    TarArchive* archive,
+    const char* archive_fname,
+    const char* destination) {
+    furi_check(archive);
+    furi_check(archive_fname);
+    furi_check(destination);
+    if(mtar_find(&archive->tar, archive_fname) != MTAR_ESUCCESS) {
+        return false;
+    }
+    return archive_extract_current_file(archive, destination);
+}

@@ -1,0 +1,104 @@
+App(
+    appid="cli",
+    name="CLI commands",
+    apptype=FlipperAppType.METAPACKAGE,
+    provides=[
+        "cli_commands_common",
+        "cli_commands_target_specific",
+    ],
+)
+
+App(
+    appid="basic_services",
+    name="Basic services",
+    apptype=FlipperAppType.METAPACKAGE,
+    provides=[
+        "storage",
+        "input",
+        "gui",
+        "front_display",
+        "back_display",
+        "font_registry",
+        "power_srv",
+        "status_bar",
+        "brightness_control",
+        "device_info",
+        "log_storage",
+    ],
+    targets=["f20", "f21", "f22"],
+)
+
+
+App(
+    appid="extended_services",
+    name="Extended services",
+    apptype=FlipperAppType.METAPACKAGE,
+    provides=[
+        "audio",
+        "loader",
+        "desktop",
+        "cli",
+        "sysctl",
+        "cli_socket",
+        "cli_intercom",
+        "usb_srv",
+        "web_server",
+        "mqtt",
+        "intercom",
+        "wifi",
+        "status_lights",
+        "light_sensor",
+        "supervisor",
+        "ble",
+        "network",
+        "time",
+        "tls_crypto",
+        "tls_crypto_test_cmd",
+        "matter",
+        "device_name",
+        "busy_timer",
+        "sl_info",
+        "state_publisher",
+        "discovery",
+        "low_power",
+        "api_tokens",
+        "js_runner",
+        "ca_storage",
+        "js_app_installer",
+    ],
+    targets=["f20", "f21", "f22"],
+)
+
+App(
+    appid="basic_services",
+    name="Basic services",
+    apptype=FlipperAppType.METAPACKAGE,
+    provides=[
+        "cli",
+        "input",
+        "network",
+        "wifi",
+        "nvm",
+        "matter",
+        "startup_dfu_hook",
+        "device_info",
+    ],
+    targets=["f64", "f65"],
+)
+
+App(
+    appid="intercom_services",
+    name="U5<>917 intercom services",
+    apptype=FlipperAppType.METAPACKAGE,
+    provides=[
+        # "intercom",  # Enabled in default fw config
+        # "wifi",
+        "status_lights",
+        "cli_intercom",
+        "ble",
+        "tls_crypto",
+        "sl_info",
+        "supervisor",
+    ],
+    targets=["f64", "f65"],
+)

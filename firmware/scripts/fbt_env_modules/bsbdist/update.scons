@@ -1,0 +1,263 @@
+from enum import IntFlag
+
+from SCons.Errors import UserError
+
+Import("U5_ENV", "SIL_ENV", "DIST_ENV")
+
+
+# Must match UpdateManifestSecurityFlag in update_manifest.h
+class UpdateManifestSecurityFlag(IntFlag):
+    NwpSigned = 1 << 0
+    M4Signed = 1 << 1
+    NwpEncrypted = 1 << 2
+    M4Encrypted = 1 << 3
+    U5Encrypted = 1 << 4
+
+
+dist_env = DIST_ENV
+u5_env = U5_ENV
+sil_env = SIL_ENV
+fw_env = u5_env["FW_ENV"]
+
+_fw_version_json = fw_env.get("FW_VERSION_JSON")
+
+# Base environment with the update bundle builder. Si917 images are added per-bundle.
+bundle_env = dist_env.Clone(
+    tools=["bsb_update_bundle"],
+    BUNDLE_TARGET_HW=u5_env.subst("$TARGET_HW"),
+    BUNDLE_STAGE=u5_env["UPD_ENV"]["FW_BIN"][0],
+    BUNDLE_DFU=fw_env["FW_DFU"][0],
+    **({"BUNDLE_VERSION_JSON": _fw_version_json} if _fw_version_json else {}),
+)
+
+
+def _update_bundle(name, use_resources, use_sil_m4, use_sil_nwp, signed=False, bkp=False):
+    overrides = {}
+    dependencies = [
+        u5_env["UPD_ENV"]["FW_BIN"],
+        fw_env["FW_DFU"],
+        *([_fw_version_json] if _fw_version_json else []),
+    ]
+
+    if use_resources:
+        overrides["BUNDLE_RESOURCES"] = fw_env["RESOURCES_ROOT"]
+        dependencies.append(fw_env["FW_RESOURCES_MANIFEST"])
+
+    if bkp:
+        overrides["BUNDLE_BKP_RESOURCES"] = fw_env["BKP_RESOURCES_ROOT"]
+        dependencies.append(fw_env["FW_BKP_RESOURCES"])
+
+    if use_sil_m4:
+        if signed and signed_fw_rps is None:
+            raise UserError(
+                "--signed with Si917 M4 firmware in the bundle requires signing to be "
+                "configured. Provide SI917_SIGN_KEYSTORE, or all of "
+                "SI917_SIGN_SERVICE_URL, SI917_SIGN_SERVICE_TOKEN, and "
+                "SI917_SIGN_SERVICE_PROFILE."
+            )
+        sil_fw = (
+            signed_fw_rps[0]
+            if signed
+            else sil_env["FW_ENV"]["FW_RPS"][0]
+        )
+        overrides["BUNDLE_SIL_FW"] = sil_fw
+        dependencies.append(sil_fw)
+
+    if use_sil_nwp:
+        if signed and signed_nwp_rps is None:
+            raise UserError(
+                "--signed with Si917 NWP firmware in the bundle requires signing to be "
+                "configured. Provide SI917_SIGN_KEYSTORE, or all of "
+                "SI917_SIGN_SERVICE_URL, SI917_SIGN_SERVICE_TOKEN, and "
+                "SI917_SIGN_SERVICE_PROFILE."
+            )
+        sil_radio = (
+            signed_nwp_rps[0]
+            if signed
+            else dist_env.Real(sil_env["SI917_NWP_STACK"])
+        )
+        overrides["BUNDLE_SIL_RADIO_FW"] = sil_radio
+        dependencies.append(sil_radio)
+
+    if signed:
+        overrides["BUNDLE_SECURITY_FLAGS"] = str(
+            int(UpdateManifestSecurityFlag.NwpSigned | UpdateManifestSecurityFlag.M4Signed)
+        )
+
+    env = bundle_env.Clone(**overrides)
+    tgz = env.UpdateBundle(fw_env.File(f"${{BUILD_DIR}}/{name}_${{F_TARGET_HW}}.tgz"), [])
+    Depends(tgz, dependencies)
+    return tgz
+
+update_tgz = _update_bundle(
+    "update", use_resources=True, use_sil_m4=True, use_sil_nwp=True
+)
+
+update_bkp_tgz = _update_bundle(
+    "bkp", use_resources=True, use_sil_m4=True, use_sil_nwp=True, bkp=True
+)
+
+# --- Dist folder ---
+
+dist_flavor = "".join(
+    ["C" if u5_env["COMPACT"] else "", "D" if u5_env["DEBUG"] else ""]
+)
+
+dist_dir_path = "${PROJECT_ROOT}/dist/${F_TARGET_HW}"
+if dist_flavor:
+    dist_dir_path += f"-{dist_flavor}"
+
+dist_dir = u5_env.Dir(dist_dir_path)
+
+
+def _dist_file(name, ext):
+    return dist_dir.File(
+        u5_env.subst(f"busybar-${{F_TARGET_HW}}-{name}-${{DIST_SUFFIX}}.{ext}")
+    )
+
+
+installs = [
+    # Update bundles
+    InstallAs(_dist_file("update", "tgz"), update_tgz),
+    InstallAs(_dist_file("bkp", "tgz"), update_bkp_tgz),
+    # U5 firmware artifacts
+    InstallAs(_dist_file("firmware", "elf"), fw_env["FW_ELF"][0]),
+    InstallAs(_dist_file("firmware", "dfu"), fw_env["FW_DFU"][0]),
+    InstallAs(_dist_file("firmware", "bin"), fw_env["FW_BIN"][0]),
+    # Updater artifacts
+    InstallAs(_dist_file("updater", "elf"), u5_env["UPD_ENV"]["FW_ELF"][0]),
+    InstallAs(_dist_file("updater", "bin"), u5_env["UPD_ENV"]["FW_BIN"][0]),
+    # Silabs artifacts
+    InstallAs(_dist_file("sil_firmware", "rps"), sil_env["FW_ENV"]["FW_RPS"][0]),
+    InstallAs(_dist_file("sil_firmware", "elf"), sil_env["FW_ENV"]["FW_ELF"][0]),
+    InstallAs(_dist_file("sil_nwp", "rps"), sil_env["FW_ENV"]["SI917_NWP_STACK"]),
+]
+
+_openapi_dist = InstallAs(_dist_file("openapi", "yaml"), fw_env["FW_OPENAPI_YAML"])
+installs.append(_openapi_dist)
+
+Default(installs)
+
+dist_env.Alias("openapi_dist", _openapi_dist)
+
+dist_env.Alias("update_bundle", update_tgz)
+dist_env.Alias("dist", installs)
+
+# --- Signed builds (local keystore signing or signing-service signing) ---
+
+sil_sign_keystore = sil_env.subst("${SI917_SIGN_KEYSTORE}")
+sil_sign_service_url = sil_env.subst("${SI917_SIGN_SERVICE_URL}")
+sil_sign_service_token = sil_env.subst("${SI917_SIGN_SERVICE_TOKEN}")
+sil_sign_service_profile = sil_env.subst("${SI917_SIGN_SERVICE_PROFILE}")
+
+service_signing_configured = any(
+    [
+        sil_sign_service_url,
+        sil_sign_service_token,
+        sil_sign_service_profile,
+    ]
+)
+service_signing_enabled = all(
+    [
+        sil_sign_service_url,
+        sil_sign_service_token,
+        sil_sign_service_profile,
+    ]
+)
+
+if service_signing_configured and not service_signing_enabled:
+    raise UserError(
+        "SI917 signing service requires SI917_SIGN_SERVICE_URL, "
+        "SI917_SIGN_SERVICE_TOKEN, and SI917_SIGN_SERVICE_PROFILE"
+    )
+
+signed_fw_rps = None
+signed_nwp_rps = None
+if sil_sign_keystore or service_signing_enabled:
+    sign_env = dist_env.Clone(
+        tools=["fwsign_silabs"],
+        SI917_SIGN_KEYSTORE=sil_sign_keystore,
+        SI917_SIGN_SERVICE_URL=sil_sign_service_url,
+        SI917_SIGN_SERVICE_TOKEN=sil_sign_service_token,
+        SI917_SIGN_SERVICE_PROFILE=sil_sign_service_profile,
+        COMMANDER_CLI=sil_env.subst("${COMMANDER_CLI}"),
+    )
+
+    # Sign firmware RPS
+    signed_fw_rps = sign_env.RPSSign(
+        fw_env.File("${BUILD_DIR}/sil_firmware_signed.rps"),
+        sil_env["FW_ENV"]["FW_RPS"][0],
+    )
+
+    # Sign NWP stack RPS
+    signed_nwp_rps = sign_env.RPSSign(
+        fw_env.File("${BUILD_DIR}/sil_nwp_signed.rps"),
+        dist_env.File(sil_env["SI917_NWP_STACK"]),
+    )
+
+    signed_update_tgz = _update_bundle(
+        "update_signed",
+        use_resources=True,
+        use_sil_m4=True,
+        use_sil_nwp=True,
+        signed=True,
+    )
+
+    signed_bkp_tgz = _update_bundle(
+        "bkp_signed",
+        use_resources=True,
+        use_sil_m4=True,
+        use_sil_nwp=True,
+        signed=True,
+        bkp=True,
+    )
+
+    signed_installs = [
+        InstallAs(_dist_file("update_signed", "tgz"), signed_update_tgz),
+        InstallAs(_dist_file("bkp_signed", "tgz"), signed_bkp_tgz),
+        InstallAs(_dist_file("sil_firmware_signed", "rps"), signed_fw_rps),
+        InstallAs(_dist_file("sil_nwp_signed", "rps"), signed_nwp_rps),
+    ]
+
+    dist_env.Alias("dist_signed", signed_installs)
+
+# --- flash_usb targets: presets are defaults; component flags override them ---
+
+_FLASH_USB_PRESETS = {
+    "flash_usb":               {"use_resources": True,  "use_sil_m4": False, "use_sil_nwp": False, "signed": True},
+    "flash_usb_full":          {"use_resources": True,  "use_sil_m4": True,  "use_sil_nwp": True,  "signed": True},
+    "flash_usb_min":           {"use_resources": False, "use_sil_m4": False, "use_sil_nwp": False, "signed": True},
+    "flash_usb_main":          {"use_resources": False, "use_sil_m4": True,  "use_sil_nwp": False, "signed": True},
+    "flash_usb_unsigned":      {"use_resources": True,  "use_sil_m4": False, "use_sil_nwp": False, "signed": False},
+    "flash_usb_full_unsigned": {"use_resources": True,  "use_sil_m4": True,  "use_sil_nwp": True,  "signed": False},
+    "flash_usb_min_unsigned":  {"use_resources": False, "use_sil_m4": False, "use_sil_nwp": False, "signed": False},
+    "flash_usb_main_unsigned": {"use_resources": False, "use_sil_m4": True,  "use_sil_nwp": False, "signed": False},
+}
+
+_flash_usb_targets = [n for n in _FLASH_USB_PRESETS if n in BUILD_TARGETS]
+if _flash_usb_targets:
+    if len(_flash_usb_targets) > 1:
+        raise UserError(
+            "Only one flash_usb preset may be built at a time; got: "
+            + ", ".join(sorted(_flash_usb_targets))
+        )
+    
+    _name = _flash_usb_targets[0]
+    _params = dict(_FLASH_USB_PRESETS[_name])
+    _params.update(
+        (k, v)
+        for k, v in {
+            "use_resources": GetOption("flash_resources"),
+            "use_sil_m4": GetOption("flash_sil_m4"),
+            "use_sil_nwp": GetOption("flash_sil_nwp"),
+            "signed": GetOption("flash_signed"),
+        }.items()
+        if v is not None
+    )
+    
+    _preset_tgz = _update_bundle("flash_usb", **_params)
+    _intercom_force_version = None if _params.get("use_sil_m4") else bundle_env.subst("$INTERCOM_FORCE_VERSION")
+    bundle_env.FlashOverHttp(_name, _preset_tgz, intercom_version=_intercom_force_version)
+
+# `fbt -c` cleans update_tgz; also remove the flash_usb bundle then
+Clean(update_tgz, fw_env.File("${BUILD_DIR}/flash_usb_${F_TARGET_HW}.tgz"))

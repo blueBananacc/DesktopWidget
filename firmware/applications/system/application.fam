@@ -1,0 +1,57 @@
+App(
+    appid="system_apps",
+    name="Applications not shown in menus",
+    apptype=FlipperAppType.METAPACKAGE,
+    provides=[
+        "js_app_launcher",
+        "message",
+        "system_apps_on_start",
+        "system_apps_cli",
+        "updater",
+    ],
+    targets=["f20", "f21", "f22"],
+)
+
+App(
+    appid="system_apps_cli",
+    name="On start hooks",
+    apptype=FlipperAppType.METAPACKAGE,
+    provides=[
+        "update_cli",
+        "crypto_backup",
+        "fetch_cli",
+        "tar_cli",
+    ],
+    targets=["f20", "f21", "f22"],
+)
+
+App(
+    appid="system_apps_on_start",
+    name="On start hooks",
+    apptype=FlipperAppType.METAPACKAGE,
+    provides=[
+        "update_ui",
+    ],
+    targets=["f20", "f21", "f22"],
+)
+
+App(
+    appid="system_apps",
+    name="Basic applications for system menu",
+    apptype=FlipperAppType.METAPACKAGE,
+    provides=[
+        "system_apps_on_start",
+        "crypto",
+    ],
+    targets=["f64", "f65"],
+)
+
+App(
+    appid="system_apps_on_start",
+    name="On start hooks",
+    apptype=FlipperAppType.METAPACKAGE,
+    provides=[
+        "crypto_backup_server",
+    ],
+    targets=["f64", "f65"],
+)

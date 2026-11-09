@@ -1,0 +1,29 @@
+App(
+    appid="log_storage",
+    name="LogStorageSrv",
+    apptype=FlipperAppType.SERVICE,
+    entry_point="log_storage_srv",
+    stack_size=2 * 1024,
+    order=3,
+    cdefines=["SRV_LOG_STORAGE"],
+    provides=["log_storage_cli"],
+    targets=["f20", "f21", "f22"],
+    sdk_headers=["log_storage.h"],
+    requires=["storage"],
+    sources=[
+        "log_storage_base.c",
+        "log_storage_local.c",
+        "log_storage_remote.c",
+        "log_storage.c",
+    ],
+)
+
+App(
+    appid="log_storage_cli",
+    name="log_dump",
+    apptype=FlipperAppType.CLICMD,
+    entry_point="log_storage_cli_command_entry",
+    sources=["log_storage_cli.c"],
+    requires=["log_storage"],
+    targets=["f20", "f21", "f22"],
+)

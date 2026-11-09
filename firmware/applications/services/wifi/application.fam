@@ -1,0 +1,43 @@
+App(
+    appid="wifi",
+    name="WifiSrv",
+    apptype=FlipperAppType.SERVICE,
+    entry_point="wifi_srv",
+    stack_size=4 * 1024,
+    cdefines=["SRV_WIFI"],
+    order=110,
+    targets=["f20", "f21", "f22"],
+    requires=[
+        "intercom",
+        "network",
+    ],
+    sources=[
+        "wifi.c",
+        "wifi_api.c",
+        "wifi_net.c",
+        "settings/*.c",
+        "wifi_state.c",
+        "wifi_util.c",
+        "wifi_power.c",
+    ],
+)
+
+App(
+    appid="wifi",
+    name="WifiSrv",
+    apptype=FlipperAppType.SERVICE,
+    entry_point="wifi_srv",
+    stack_size=4 * 1024,
+    order=110,
+    targets=["f64", "f65"],
+    requires=[
+        "intercom",
+        "network",
+    ],
+    sources=[
+        "wifi_backend.c",
+        "wifi_backend_net.c",
+        "wifi_backend_util.c",
+        "wifi_util.c",
+    ],
+)

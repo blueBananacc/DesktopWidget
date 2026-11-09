@@ -1,0 +1,8 @@
+App(
+    appid="crypto_test",
+    name="crypto_test",
+    targets=["f64", "f65"],
+    apptype=FlipperAppType.CLICMD,
+    entry_point="crypto_test_command",
+    stack_size=1024 * 4,
+)

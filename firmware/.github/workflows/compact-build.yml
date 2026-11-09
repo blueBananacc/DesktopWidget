@@ -1,0 +1,52 @@
+name: "Compact build"
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+
+env:
+  FBT_GIT_SUBMODULE_SHALLOW: 0
+  DEFAULT_TARGET_SPEC: 22_65
+  FBT_TOOLCHAIN_PATH: /runner/_work
+
+jobs:
+  compact-build:
+    runs-on: BsbShell
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target_spec: ["21_64", "22_65"]
+    outputs:
+      default_target_spec: ${{ env.DEFAULT_TARGET_SPEC }}
+    concurrency:
+      group: compact-build-${{ github.workflow }}-${{ github.ref }}-${{ matrix.target_spec }}
+      cancel-in-progress: true
+
+    steps:
+      - name: "Wipe workspace"
+        run: |
+          # Self-hosted runners persist $HOME across jobs.
+          rm -f "${HOME}/.git-credentials"
+          find ./ -mount -maxdepth 1 -exec rm -rf {} \;
+
+      - name: "Checkout code"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "Authenticate git for the job"
+        uses: ./.github/actions/authenticate-git
+
+      - name: "Build firmware artifacts"
+        id: build-fw
+        uses: ./.github/actions/build-artifacts
+        with:
+          target_spec: ${{ matrix.target_spec }}
+          build_type: release
+          artifact_path: artifacts

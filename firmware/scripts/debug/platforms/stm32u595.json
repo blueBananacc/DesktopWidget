@@ -1,0 +1,12 @@
+{
+    "name": "stm32u595",
+    "flash_address": "0x08000000",
+    "ram_address": "0x20000000",
+    "svd_file": "stm32u5/STM32U595.svd",
+    "openocd": {
+        "chip_config": "stm32u5/stm32u5x.cfg",
+        "init_commands": [
+            "stm32u5x.cpu configure -rtos auto"
+        ]
+    }
+}
