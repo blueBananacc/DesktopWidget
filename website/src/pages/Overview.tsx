@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Bell, Search, CircleHelp, Monitor, CalendarDays, Sparkles, Mic, Coffee, Plus, Sunset, RotateCcw, Lock, Fingerprint, Gauge, ShieldCheck, Timer, AlarmClock,
+  CodeXml,
 } from "lucide-react";
 import { useStore } from "../store/AppStore";
 import { SOURCE_LABEL, customStatusDefs, keyActionLabel, statusMeta } from "../domain/statuses";
@@ -82,6 +83,9 @@ export function Overview() {
             <Bell className="i" />
             {openReminders.length > 0 && <span className="dot-alert" />}
           </Link>
+          <a className="icon-btn" href="https://github.com/blueBananacc/DesktopWidget/tree/main" target="_blank" rel="noreferrer" aria-label="项目源码" title="项目源码">
+            <CodeXml className="i" />
+          </a>
         </div>
       </div>
 
