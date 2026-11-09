@@ -83,8 +83,8 @@ export function Overview() {
             <Bell className="i" />
             {openReminders.length > 0 && <span className="dot-alert" />}
           </Link>
-          <a className="icon-btn" href="https://github.com/blueBananacc/DesktopWidget/tree/main" target="_blank" rel="noreferrer" aria-label="项目源码" title="项目源码">
-            <CodeXml className="i" />
+          <a className="btn btn-secondary btn-sm" href="https://github.com/blueBananacc/DesktopWidget/tree/main" target="_blank" rel="noreferrer">
+            <CodeXml />项目源码
           </a>
         </div>
       </div>
