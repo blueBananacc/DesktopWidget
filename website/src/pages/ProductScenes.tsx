@@ -26,10 +26,18 @@ export function LedMatrix({ draw, className = "" }: { draw: DrawFn; className?: 
       g.fillStyle = "#000"; g.fillRect(0, 0, MW, MH);
       drawRef.current(g, (now - t0) / 1000);
       const d = g.getImageData(0, 0, MW, MH).data;
-      ctx.fillStyle = "#0B0C0E"; ctx.fillRect(0, 0, cv.width, cv.height);
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      const lit: [number, number, string][] = [];
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = "#16181B";
       for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
         const i = (y * MW + x) * 4, r = d[i], gg = d[i + 1], b = d[i + 2], m = Math.max(r, gg, b);
-        ctx.fillStyle = m < 110 ? "#1A1C20" : `rgb(${Math.round(r * 255 / m)},${Math.round(gg * 255 / m)},${Math.round(b * 255 / m)})`;
+        if (m >= 110) { lit.push([x, y, `rgb(${Math.round(r * 255 / m)},${Math.round(gg * 255 / m)},${Math.round(b * 255 / m)})`]); continue; }
+        ctx.beginPath(); ctx.arc(x * DOT + DOT / 2, y * DOT + DOT / 2, DOT * 0.36, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.shadowBlur = DOT * 1.1;
+      for (const [x, y, c] of lit) {
+        ctx.fillStyle = c; ctx.shadowColor = c;
         ctx.beginPath(); ctx.arc(x * DOT + DOT / 2, y * DOT + DOT / 2, DOT * 0.4, 0, Math.PI * 2); ctx.fill();
       }
     };
@@ -49,12 +57,13 @@ export function LedMatrix({ draw, className = "" }: { draw: DrawFn; className?: 
   return <canvas ref={ref} className={`pd-led ${className}`} aria-hidden="true" />;
 }
 
-/** 带外壳的点阵设备：顶部两枚按键 + 横条 + 旋钮 */
-export function MatrixDevice({ draw, light, className = "" }: { draw: DrawFn; light?: boolean; className?: string }) {
+/** 与“点一点看看”同一外壳（pd-dev：顶部 4 键 + 最右旋钮 + 底部光晕），屏幕换成可编程点阵；small = 小尺寸场景（门牌等） */
+export function MatrixDevice({ draw, color, small, className = "" }: { draw: DrawFn; color: string; small?: boolean; className?: string }) {
   return (
-    <div className={`pd-mdev ${light ? "is-light" : ""} ${className}`}>
-      <div className="pd-mdev-top"><i /><i className="bar" /><i className="key" /><b /></div>
-      <div className="pd-mdev-body"><LedMatrix draw={draw} /></div>
+    <div className={`pd-dev is-matrix ${small ? "is-tiny" : ""} ${className}`} style={{ ["--c" as string]: color }}>
+      <div className="pd-dev-keys"><i /><i /><i /><i /><b /></div>
+      <div className="pd-dev-body"><div className="pd-dev-screen"><LedMatrix draw={draw} /></div></div>
+      <div className="pd-dev-glow" />
     </div>
   );
 }
@@ -154,7 +163,7 @@ function PhoneLock() {
 function MuteAllArt() {
   return (
     <div className="pd-lineart" aria-hidden="true">
-      <div className="pd-la-door"><MatrixDevice draw={drawDoor} light className="pd-la-sign" /></div>
+      <div className="pd-la-door"><MatrixDevice draw={drawDoor} color="#FF4D57" small className="pd-la-sign" /></div>
       <div className="pd-la-laptop">
         <div className="pd-la-scr"><i className="pd-la-pill"><MicOff />勿扰</i><span /><span /><span /></div>
         <div className="pd-la-base" />
@@ -187,7 +196,7 @@ function CallArt() {
         </div>
       </div>
       </div>
-      <div className="pd-callart-door"><span className="pd-signal" /><MatrixDevice draw={drawCall} light /></div>
+      <div className="pd-callart-door"><span className="pd-signal" /><MatrixDevice draw={drawCall} color="#FF4D57" small /></div>
     </div>
   );
 }
@@ -202,7 +211,7 @@ export function Highlights() {
         </div>
         <div className="pd-tile-art pd-art-status">
           <Laptop className="pd-art-status-laptop" />
-          <MatrixDevice draw={drawHeadline} light className="pd-art-status-dev" />
+          <MatrixDevice draw={drawHeadline} color="#FF6A3D" className="pd-art-status-dev" />
         </div>
       </article>
 
@@ -214,7 +223,7 @@ export function Highlights() {
         <div className="pd-tile-art pd-art-timer">
           <Laptop code className="pd-art-timer-laptop" />
           <div className="pd-art-timer-main">
-            <MatrixDevice draw={drawRest} light />
+            <MatrixDevice draw={drawRest} color="#3BE08F" />
             <IntervalTrack />
           </div>
         </div>
@@ -224,11 +233,11 @@ export function Highlights() {
         <article className="pd-tile is-stack">
           <div className="pd-tile-txt">
             <h3>屏蔽干扰</h3>
-            <p>进入勿扰后，收工牌会自动静音手机和电脑上的通知，帮你在工作时挡掉分心的事。</p>
+            <p>切到“勿扰”时，已配对的手机和电脑自动静音通知、进入专注模式，帮你在工作时挡掉分心的事；离开勿扰后，按你的设置恢复原样。</p>
           </div>
           <div className="pd-tile-art pd-art-block">
             <PhoneLock />
-            <MatrixDevice draw={drawBlock} className="pd-art-block-dev" />
+            <MatrixDevice draw={drawBlock} color="#FF4D57" className="pd-art-block-dev" />
           </div>
         </article>
         <article className="pd-tile is-stack">
@@ -384,13 +393,7 @@ function CodeLine({ line }: { line: string }) {
     : <span key={i} dangerouslySetInnerHTML={{ __html: p.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\b(import|from|const|let|await|async|function|export|return|if|setInterval)\b/g, '<span class="k">$1</span>') || " " }} />))}</>;
 }
 
-function GithubMark() {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z" />
-    </svg>
-  );
-}
+const DEMO_GLOW: Record<string, string> = { cpu: "#FF3958", agent: "#A88BFF", hello: "#FF6A3D", weather: "#FFC53D", game: "#3BE08F" };
 
 export function DevPlayground() {
   const [idx, setIdx] = useState(0);
@@ -401,7 +404,7 @@ export function DevPlayground() {
     <div className="pd-devbox">
       <h2>开发者和 Vibe Coder 都能玩</h2>
       <div className="pd-devbox-dev">
-        <MatrixDevice key={`${demo.id}-${run}`} draw={demo.draw} />
+        <MatrixDevice key={`${demo.id}-${run}`} draw={demo.draw} color={DEMO_GLOW[demo.id]} />
       </div>
       <div className="pd-devtabs" role="tablist">
         {DEMOS.map((d, i) => (
@@ -424,7 +427,6 @@ export function DevPlayground() {
           <div><h3>开放 HTTP API</h3><p>从任何脚本、应用或智能家居系统，把文字和图片发到屏幕上。</p></div>
           <div><h3>TypeScript 与 Python 库</h3><p>几行代码，就能用自己的程序画出自定义消息和图像。</p></div>
           <div><h3>开源固件</h3><p>出厂的就是这份代码：Fork 一份，刷入你自己的版本。</p></div>
-          <span className="pd-gh"><GithubMark /><span><em>源码托管于</em>GitHub</span></span>
         </div>
       </div>
     </div>

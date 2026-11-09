@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowRight, BatteryCharging, BellOff, Bluetooth, Bot, CalendarClock, Check, ChevronDown, Cloud, Coffee, Cpu, Eye, Gift, Hand,
+  ArrowRight, BatteryCharging, Bluetooth, Bot, CalendarClock, Check, ChevronDown, Cloud, Coffee, Cpu, Eye, Gift, Hand,
   House, Keyboard, KeyRound, LayoutDashboard, LayoutGrid, Lightbulb, Lock, Mic, MicOff, Moon, Package, Palette, Radio, Repeat,
   RotateCcw, ShieldCheck, Smartphone, Sparkles, Sun, Sunset, Timer, Truck, Usb, Users, Volume2, Wifi, X,
 } from "lucide-react";
@@ -456,12 +456,6 @@ export function ProductPage() {
             <h3>AI Agent 状态联动</h3>
             <p>电脑上的 Agent 在跑、等你输入、已完成还是出错了，抬头看一眼桌牌就知道。不显示任何代码和 Prompt。</p>
             <AppShot name="app-agent" alt="Agent 联动界面" />
-          </div>
-          <div className="pd-card">
-            <span className="pd-card-ico" style={{ background: "var(--t-teal)", color: "var(--t-teal-i)" }}><BellOff /></span>
-            <h3>手机自动进入专注模式</h3>
-            <p>切到“勿扰”时，已配对手机自动静音或开启专注模式；离开时按你的设置恢复。</p>
-            <Shot name="scene-phone" alt="手机联动" hint="桌牌显示“请勿打扰”，旁边手机进入勿扰模式" ratio="16 / 10" />
           </div>
           <div className="pd-card">
             <span className="pd-card-ico" style={{ background: "var(--t-orange)", color: "var(--t-orange-i)" }}><House /></span>
