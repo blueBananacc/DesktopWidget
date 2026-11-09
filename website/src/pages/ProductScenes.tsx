@@ -1,5 +1,33 @@
 import { useEffect, useRef, useState } from "react";
-import { BellOff, Mic, MicOff, Pause, PhoneOff, RotateCcw, Play, Video, Wifi } from "lucide-react";
+import { BellOff, ChevronLeft, ChevronRight, Mic, MicOff, Pause, PhoneOff, RotateCcw, Play, Sunset, Video, Wifi } from "lucide-react";
+import type { ReactNode } from "react";
+
+// ===== 商品图：顶部俯视（纯 CSS，尺寸全部按容器宽度 cqw 缩放，主图与缩略图共用） =====
+const TOP_KEYS: [ReactNode, string][] = [[<Sunset />, "收工"], [<BellOff />, "勿扰"], [<ChevronLeft />, "上一个"], [<ChevronRight />, "下一个"]];
+export function TopView() {
+  return (
+    <div className="pd-top" role="img" aria-label="顶部俯视：4 枚按键与最右侧旋钮">
+      <div className="pd-top-shadow" />
+      <div className="pd-top-spill" />
+      <div className="pd-top-body">
+        <div className="pd-top-keys">
+          {TOP_KEYS.map(([icon, label]) => (
+            <div key={label} className="pd-top-key">
+              <span className="pd-top-label">{label}</span>
+              <i>{icon}</i>
+            </div>
+          ))}
+        </div>
+        <span className="pd-top-mark">收工牌</span>
+        <div className="pd-top-knob">
+          <span className="pd-top-label">旋钮 · 定时</span>
+          <i><b /></i>
+        </div>
+        <div className="pd-top-lip" />
+      </div>
+    </div>
+  );
+}
 
 // ===== 72×16 全彩 LED 点阵屏：在 72×16 离屏画布上画内容，再逐像素放大成圆点（进视口才刷新） =====
 export const MW = 72, MH = 16;

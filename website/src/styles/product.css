@@ -239,6 +239,28 @@ html:has(.pd) { scroll-behavior: smooth; scroll-padding-top: 72px; }
 .pd-foot-in > span { display: inline-flex; align-items: center; gap: 6px; }
 .pd-foot svg { width: 14px; height: 14px; }
 
+/* 商品图：顶部俯视（全部按容器宽度 cqw 缩放） */
+.pd-top { position: absolute; inset: 0; container-type: inline-size; overflow: hidden; background: radial-gradient(120% 90% at 50% 30%, #F5F6F8 0%, #E6E8EC 55%, #D5D8DE 100%); }
+.pd-top-shadow { position: absolute; left: 14cqw; right: 14cqw; top: 41cqw; height: 6cqw; border-radius: 50%; background: rgba(20,22,28,.45); filter: blur(3.2cqw); }
+.pd-top-spill { position: absolute; left: 20cqw; right: 20cqw; top: 44.5cqw; height: 5cqw; border-radius: 50%; background: #FF4D57; opacity: .32; filter: blur(3cqw); }
+.pd-top-body { position: absolute; left: 11cqw; right: 11cqw; top: 22.5cqw; height: 20cqw; border-radius: 4.6cqw; background: radial-gradient(90% 140% at 30% 0%, #575B63 0%, #383B41 38%, #26282C 80%), #2B2E33; box-shadow: inset 0 .22cqw 0 rgba(255,255,255,.16), inset 0 -.5cqw .6cqw rgba(0,0,0,.45), 0 .3cqw .5cqw rgba(0,0,0,.25); }
+.pd-top-keys { position: absolute; left: 6.5cqw; top: 50%; transform: translateY(-50%); display: flex; gap: 3.4cqw; }
+.pd-top-key, .pd-top-knob { position: relative; }
+.pd-top-key i { display: flex; align-items: center; justify-content: center; width: 6cqw; height: 6cqw; border-radius: 50%; color: #7D838D; background: radial-gradient(circle at 38% 30%, #5E636B 0%, #3B3E44 55%, #2A2D31 100%); box-shadow: 0 0 0 .32cqw #1A1C1F, 0 0 0 .42cqw rgba(255,255,255,.06), 0 .6cqw .9cqw rgba(0,0,0,.55), inset 0 .18cqw 0 rgba(255,255,255,.2); }
+.pd-top-key i svg { width: 2.4cqw; height: 2.4cqw; stroke-width: 2.2; }
+.pd-top-key:first-child i { color: #FF8A5C; }
+.pd-top-mark { position: absolute; left: 65%; top: 50%; transform: translate(-50%, -50%); padding-left: .5em; font-size: 1.9cqw; font-weight: 800; letter-spacing: .5em; color: #2E3135; text-shadow: 0 .1cqw 0 rgba(255,255,255,.09); }
+.pd-top-knob { position: absolute; right: 5cqw; top: 50%; transform: translateY(-50%); }
+.pd-top-knob i { position: relative; display: block; width: 12.5cqw; height: 12.5cqw; border-radius: 50%; background: repeating-conic-gradient(#43474E 0 3deg, #24272B 3deg 6deg); box-shadow: 0 0 0 .35cqw #1A1C1F, 0 1cqw 1.6cqw rgba(0,0,0,.6); }
+.pd-top-knob i::before { content: ""; position: absolute; inset: 1.1cqw; border-radius: 50%; background: repeating-radial-gradient(circle at 50% 50%, rgba(255,255,255,.035) 0 .18cqw, rgba(0,0,0,.05) .18cqw .36cqw), radial-gradient(circle at 36% 30%, #7A7F88 0%, #4A4E55 40%, #2C2F33 85%); box-shadow: inset 0 .2cqw .2cqw rgba(255,255,255,.22), inset 0 -.4cqw .6cqw rgba(0,0,0,.5); }
+.pd-top-knob b { position: absolute; left: 50%; top: 2.2cqw; width: .8cqw; height: .8cqw; margin-left: -.4cqw; border-radius: 50%; background: #F1F2F4; box-shadow: 0 0 .5cqw rgba(255,255,255,.6); z-index: 1; }
+.pd-top-lip { position: absolute; left: 3.5cqw; right: 3.5cqw; bottom: -.5cqw; height: 1cqw; border-radius: 0 0 1cqw 1cqw; background: linear-gradient(180deg, #0E0F11, #050506); box-shadow: 0 .5cqw 1.4cqw rgba(255,77,87,.55); }
+.pd-top-lip::after { content: ""; position: absolute; left: 4%; right: 4%; bottom: .15cqw; height: .18cqw; border-radius: .1cqw; background: #FF4D57; box-shadow: 0 0 .8cqw #FF4D57; opacity: .85; }
+.pd-top-label { --gap: 10.5cqw; position: absolute; left: 50%; bottom: calc(100% + var(--gap)); transform: translateX(-50%); white-space: nowrap; font-size: 1.6cqw; font-weight: 600; color: #4E5460; }
+.pd-top-label::after { content: ""; position: absolute; left: 50%; top: calc(100% + .7cqw); height: calc(var(--gap) - 1.6cqw); border-left: 1px solid rgba(120,128,140,.55); }
+.pd-top-knob .pd-top-label { --gap: 7cqw; }
+.pd-thumbs .pd-top-label { display: none; }
+
 /* LED 点阵设备（72×16，canvas 绘制） */
 .pd-led { display: block; width: 100%; max-width: 100%; min-width: 0; height: auto; aspect-ratio: 72 / 16; border-radius: 10px; background: #0B0C0E; }
 .pd-dev.is-matrix .pd-dev-screen { display: block; aspect-ratio: auto; padding: 4% 3%; animation: none; }

@@ -9,7 +9,7 @@ import {
 import { STATUSES } from "../domain/statuses";
 import type { StatusId } from "../domain/types";
 import { HoldButton } from "../ui/HoldButton";
-import { DevPlayground, Highlights } from "./ProductScenes";
+import { DevPlayground, Highlights, TopView } from "./ProductScenes";
 import "../styles/product.css";
 
 // ===== 可直接改的商品信息（价格/配色为占位，正式开售前替换） =====
@@ -253,10 +253,10 @@ export function ProductPage() {
     return () => clearInterval(t);
   }, [auto]);
 
-  const gallery = [
+  const gallery: { name: string; alt: string; hint: string; render?: ReactNode }[] = [
     { name: color === "mist" ? "g-white" : "hero", alt: color === "mist" ? "云雾白配色 3/4 视角" : "收工牌 3/4 视角", hint: "与主图同角度的浅色版本" },
     { name: "g-front", alt: "正面平视", hint: "展示点阵屏与机身比例" },
-    { name: "g-top", alt: "顶部俯视", hint: "4 枚按键 + 最右侧旋钮" },
+    { name: "g-top", alt: "顶部俯视", hint: "4 枚按键 + 最右侧旋钮", render: <TopView /> },
     { name: "g-side", alt: "侧面与接口", hint: "USB-C 接口、静音开关" },
     { name: "scene-desk", alt: "桌面场景", hint: "放在显示器下方的工位" },
   ];
@@ -280,11 +280,15 @@ export function ProductPage() {
       <header id="top" className="pd-hero">
         <div className="pd-wrap pd-hero-in">
           <div className="pd-gallery">
-            <Shot name={gallery[shot].name} alt={gallery[shot].alt} hint={gallery[shot].hint} ratio="16 / 10" className="pd-gallery-main" />
+            {gallery[shot].render
+              ? <div className="pd-shot pd-gallery-main" style={{ aspectRatio: "16 / 10" }}>{gallery[shot].render}</div>
+              : <Shot name={gallery[shot].name} alt={gallery[shot].alt} hint={gallery[shot].hint} ratio="16 / 10" className="pd-gallery-main" />}
             <div className="pd-thumbs">
               {gallery.map((g, i) => (
                 <button key={g.name} type="button" className={i === shot ? "on" : ""} onClick={() => setShot(i)} aria-label={g.alt}>
-                  <Shot name={g.name} alt={g.alt} ratio="16 / 10" />
+                  {g.render
+                    ? <div className="pd-shot" style={{ aspectRatio: "16 / 10" }}>{g.render}</div>
+                    : <Shot name={g.name} alt={g.alt} ratio="16 / 10" />}
                 </button>
               ))}
             </div>
