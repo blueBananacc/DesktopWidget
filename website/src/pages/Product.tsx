@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowRight, BatteryCharging, Bluetooth, Bot, CalendarClock, Check, ChevronDown, Cloud, Coffee, Cpu, Eye, Gift, Hand,
-  House, Keyboard, KeyRound, LayoutDashboard, LayoutGrid, Lightbulb, Lock, Mic, MicOff, Moon, Package, Palette, Radio, Repeat,
-  RotateCcw, ShieldCheck, Smartphone, Sparkles, Sun, Sunset, Timer, Truck, Usb, Users, Volume2, Wifi, X,
+  ArrowRight, BatteryCharging, Bluetooth, CalendarClock, Check, ChevronDown, Cloud, Coffee, Cpu, Eye, Hand,
+  House, Keyboard, KeyRound, LayoutDashboard, Lightbulb, Lock, Mic, Moon, Palette, Radio, Repeat,
+  RotateCcw, ShieldCheck, Smartphone, Sparkles, Sun, Sunset, Truck, Usb, Users, Volume2, Wifi, X,
 } from "lucide-react";
 import { STATUSES } from "../domain/statuses";
 import type { StatusId } from "../domain/types";
@@ -267,7 +267,7 @@ export function ProductPage() {
         <div className="pd-wrap pd-nav-in">
           <a href="#top" className="pd-logo"><span className="pd-logo-mark" />收工牌</a>
           <div className="pd-nav-links">
-            <a href="#highlights">功能</a><a href="#how">怎么用</a><a href="#app">配套软件</a><a href="#dev">开发者</a><a href="#specs">规格</a><a href="#faq">常见问题</a>
+            <a href="#highlights">功能</a><a href="#app">配套软件</a><a href="#dev">开发者</a><a href="#specs">规格</a><a href="#faq">常见问题</a>
           </div>
           <div className="pd-nav-cta">
             <Link to="/" className="btn btn-ghost">打开控制台</Link>
@@ -358,6 +358,26 @@ export function ProductPage() {
           <div className="pd-pain"><Coffee /><b>“你还没下班？”</b><span>工作和生活没有边界，人走了，脑子还在工位。</span></div>
           <div className="pd-pain"><Users /><b>“他在开会吗？”</b><span>开放办公区里，谁在忙、谁有空，全靠猜。</span></div>
         </div>
+        <div className="pd-vs pd-vs-inline">
+          <div className="pd-vs-col">
+            <h3>便利贴 / 耳机 / 聊天软件签名</h3>
+            <ul>
+              <li><X />状态写上去就忘了改</li>
+              <li><X />同事看不见，或者看见了也不确定</li>
+              <li><X />下班没有仪式，工作一直拖着</li>
+              <li><X />不知道一天的时间花在了哪里</li>
+            </ul>
+          </div>
+          <div className="pd-vs-col is-us">
+            <h3>收工牌：便利贴会被忽略，它不会</h3>
+            <ul>
+              <li><Check />计划表到点自动切换，不用记</li>
+              <li><Check />大字 + 灯光，远处也一眼看懂</li>
+              <li><Check />长按收工，给一天画上句号</li>
+              <li><Check />自动生成状态回顾，只给你自己看</li>
+            </ul>
+          </div>
+        </div>
         <VideoShot name="scene-office" alt="开放办公区工位场景：同事路过，看到桌上的收工牌显示“会议中”" className="pd-wide">
           <h3>他在忙吗？抬头看一眼</h3>
           <p>开放工位里，同事路过时自己找答案——不用开口问，也不会真的打断你。</p>
@@ -367,28 +387,6 @@ export function ProductPage() {
       {/* ===== 核心功能 ===== */}
       <Section id="highlights" eyebrow="核心功能" title="从专注到收工，它都替你照看" className="pd-alt">
         <Highlights />
-      </Section>
-
-      {/* ===== 怎么用 ===== */}
-      <Section id="how" eyebrow="怎么用" title="按一下、旋一下、长按收工" desc="不用打开手机，也不用切到某个软件。三个动作覆盖一整天。">
-        <div className="pd-steps">
-          <div className="pd-step">
-            <span className="pd-step-n">01 · 按</span>
-            <h3>按一下，切换状态</h3>
-            <p>顶部四枚实体按键，可以分别设成“工作中”“勿扰”“会议中”或任意自定义状态。按下即刻生效，屏幕与灯光同步变化。</p>
-          </div>
-          <div className="pd-step">
-            <span className="pd-step-n">02 · 旋</span>
-            <h3>旋一下，开始专注</h3>
-            <p>转动右侧旋钮，每格 5 分钟，按下开始倒计时。屏幕显示剩余时间，结束时灯光轻闪一次提醒你。</p>
-          </div>
-          <div className="pd-step">
-            <span className="pd-step-n">03 · 长按</span>
-            <h3>长按收工键，结束今天</h3>
-            <p>长按约 2 秒，桌牌显示“已收工”，当天的状态记录随之结束，打开手机就能看到今天的回顾。</p>
-          </div>
-        </div>
-        <Shot name="g-top" alt="顶部按键与旋钮特写" hint="俯视角度，标注 4 枚按键和旋钮的功能" ratio="21 / 9" className="pd-wide" />
       </Section>
 
       {/* ===== 功能 ===== */}
@@ -409,18 +407,6 @@ export function ProductPage() {
           media={<ReviewMock />}>
           <p>每种状态的累计时长、占比、切换次数和起止时间一目了然。没有记录的时段就写“未记录”，不会替你猜是工作还是休息。</p>
           <Bullets items={["支持修正明显错误的区间", "数据只保存在你自己的设备和浏览器里", "不出现“效率”“绩效”“排名”"]} />
-        </Feature>
-
-        <Feature flip icon={<Timer />} eyebrow="旋钮定时 · 休息提醒" title="专注有计时，久坐有提醒"
-          media={<Shot name="macro-knob" alt="旋钮特写" hint="金属旋钮微距，屏幕显示倒计时 25:00" ratio="4 / 3" />}>
-          <p>旋钮每格 5 分钟，5 分钟到 24 小时随手设定。累计处于工作状态 45 分钟后，灯光会温和地提醒你起来活动一下。</p>
-          <Bullets items={["计时结束不会擅自改变你的状态", "会议中、已收工时休息计时自动暂停", "可以稍后提醒、今天不再提醒或彻底关闭"]} />
-        </Feature>
-
-        <Feature icon={<Repeat />} eyebrow="番茄钟 · 间隔计时" title="专注一段，休息一下，自动循环"
-          media={<Shot name="scene-pomodoro" alt="番茄钟计时" hint="屏幕显示“专注 18:42 · 第 2/3 轮”" ratio="4 / 3" />}>
-          <p>除了单次倒计时，收工牌还能按“工作 → 休息”的节奏自动循环：默认专注 20 分钟、休息 5 分钟、共 3 轮，每段都可以在 5 分钟到 8 小时之间调整，轮数 2 到 35 轮。</p>
-          <Bullets items={["单次计时最长 24 小时，每次 ±5 分钟", "随时暂停、跳过当前一段或延长时间", "可设置开机自动开始，常用配置一键调用"]} />
         </Feature>
 
         <Feature flip icon={<Lightbulb />} eyebrow="RGB 状态灯 · 自定义按键" title="远远看一眼，颜色就告诉你"
@@ -452,50 +438,15 @@ export function ProductPage() {
             <AppShot name="app-screen" alt="屏幕内容编辑界面" />
           </div>
           <div className="pd-card">
-            <span className="pd-card-ico" style={{ background: "var(--t-blue)", color: "var(--t-blue-i)" }}><Bot /></span>
-            <h3>AI Agent 状态联动</h3>
-            <p>电脑上的 Agent 在跑、等你输入、已完成还是出错了，抬头看一眼桌牌就知道。不显示任何代码和 Prompt。</p>
-            <AppShot name="app-agent" alt="Agent 联动界面" />
-          </div>
-          <div className="pd-card">
             <span className="pd-card-ico" style={{ background: "var(--t-orange)", color: "var(--t-orange-i)" }}><House /></span>
             <h3>接入智能家居</h3>
             <p>支持 Matter 协议，扫码加入智能家居后，收工牌就是一个“专注开关”：开始专注时门口提示灯自动亮起，休息时熄灭；在智能家居里打开它，也能直接开始一轮专注。</p>
-          </div>
-          <div className="pd-card">
-            <span className="pd-card-ico" style={{ background: "var(--t-green)", color: "var(--t-green-i)" }}><LayoutGrid /></span>
-            <h3>装上更多小应用</h3>
-            <p>内置 JavaScript 应用引擎，时钟、天气等应用一键安装；开发者可以用官方工具链几分钟搭好一个应用，通过 USB 或 Wi-Fi 装进设备，在沙箱里独立运行。</p>
-          </div>
-        </div>
-      </Section>
-
-      {/* ===== 对比 ===== */}
-      <Section eyebrow="和别的办法比" title="便利贴会被忽略，收工牌不会">
-        <div className="pd-vs">
-          <div className="pd-vs-col">
-            <h3>便利贴 / 耳机 / 聊天软件签名</h3>
-            <ul>
-              <li><X />状态写上去就忘了改</li>
-              <li><X />同事看不见，或者看见了也不确定</li>
-              <li><X />下班没有仪式，工作一直拖着</li>
-              <li><X />不知道一天的时间花在了哪里</li>
-            </ul>
-          </div>
-          <div className="pd-vs-col is-us">
-            <h3>收工牌</h3>
-            <ul>
-              <li><Check />计划表到点自动切换，不用记</li>
-              <li><Check />大字 + 灯光，远处也一眼看懂</li>
-              <li><Check />长按收工，给一天画上句号</li>
-              <li><Check />自动生成状态回顾，只给你自己看</li>
-            </ul>
           </div>
         </div>
       </Section>
 
       {/* ===== 配套软件 ===== */}
-      <Section id="app" eyebrow="配套软件" title="打开浏览器就能用的控制台" desc="用 Chrome / Edge 打开控制台，蓝牙或 USB 连上收工牌即可，不用安装任何东西。手机端 App 同步上线。" className="pd-alt">
+      <Section id="app" eyebrow="配套软件" title="打开浏览器就能用的控制台" desc="用 Chrome / Edge 打开控制台，蓝牙或 USB 连上收工牌即可，不用安装任何东西。手机端 App 同步上线。">
         <AppShot name="app-overview" alt="控制台总览" />
         <div className="pd-app-pts">
           <div><Bluetooth /><b>蓝牙 / USB 直连</b><span>Web Bluetooth 与 Web Serial，免驱动</span></div>
@@ -514,16 +465,6 @@ export function ProductPage() {
       <section id="dev" className="pd-sec">
         <div className="pd-wrap"><DevPlayground /></div>
       </section>
-
-      {/* ===== 隐私 ===== */}
-      <Section eyebrow="隐私优先" title="它为你工作，不替任何人盯着你">
-        <div className="pd-privacy">
-          <div><MicOff /><b>物理静音开关</b><span>关掉就是真的关掉。语音只用于解析提醒，不保存原始音频。</span></div>
-          <div><Eye /><b>屏幕不泄露细节</b><span>会议标题、参会人、待办正文默认都不上屏。</span></div>
-          <div><Users /><b>分享由你决定</b><span>默认不分享；只分享当前状态，不分享计划与历史。</span></div>
-          <div><ShieldCheck /><b>没有效率评分</b><span>不检测你是否在座位上，不做绩效统计和排名。</span></div>
-        </div>
-      </Section>
 
       {/* ===== 幕后 ===== */}
       <section className="pd-sec pd-story">
@@ -552,21 +493,8 @@ export function ProductPage() {
         </div>
       </Section>
 
-      {/* ===== 包装清单 ===== */}
-      <Section eyebrow="包装清单" title="打开盒子，你会得到">
-        <div className="pd-box">
-          <Shot name="box" alt="包装内容平铺" hint="收工牌、USB-C 线、防滑垫、快速上手卡平铺" ratio="4 / 3" />
-          <ul className="pd-box-list">
-            <li><Package /><b>收工牌</b><span>× 1</span></li>
-            <li><Usb /><b>USB-C 数据线</b><span>× 1</span></li>
-            <li><Hand /><b>硅胶防滑底垫</b><span>× 1</span></li>
-            <li><Gift /><b>快速上手卡</b><span>× 1</span></li>
-          </ul>
-        </div>
-      </Section>
-
       {/* ===== FAQ ===== */}
-      <Section id="faq" eyebrow="常见问题" title="你可能想知道" className="pd-alt">
+      <Section id="faq" eyebrow="常见问题" title="你可能想知道">
         <div className="pd-faq">
           {FAQ.map(([q, a]) => (
             <details key={q}>

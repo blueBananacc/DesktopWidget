@@ -160,7 +160,7 @@ html:has(.pd) { scroll-behavior: smooth; scroll-padding-top: 72px; }
 .pd-offwork .card-b { padding: 26px; }
 
 /* 更多能力卡片 */
-.pd-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+.pd-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
 .pd-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 28px; display: flex; flex-direction: column; }
 .pd-card-ico { width: 44px; height: 44px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 16px; }
 .pd-card-ico svg { width: 22px; height: 22px; }
@@ -259,6 +259,11 @@ html:has(.pd) { scroll-behavior: smooth; scroll-padding-top: 72px; }
 .pd-tile-txt h3 { font-size: 32px; font-weight: 800; letter-spacing: -.02em; line-height: 1.2; }
 .pd-tile-txt p { margin-top: 12px; max-width: 340px; color: var(--ink-2); font-size: 16px; line-height: 1.7; }
 .pd-tile-txt p b { color: var(--ink); }
+.pd-tile-facts { display: grid; gap: 14px; margin: 26px 0 0; max-width: 340px; }
+.pd-tile-facts div { display: grid; grid-template-columns: 76px 1fr; gap: 12px; align-items: baseline; padding-top: 14px; border-top: 1px solid var(--line); }
+.pd-tile-facts dt { font: 800 18px var(--font-num); color: var(--ink); letter-spacing: -.02em; }
+.pd-tile-facts dd { margin: 0; color: var(--ink-2); font-size: 14px; }
+.pd-vs-inline { margin-top: 20px; max-width: none; }
 .pd-tile-art { position: relative; min-height: 360px; }
 .pd-tile-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 .pd-tile.is-stack { grid-template-columns: 1fr; grid-template-rows: auto 1fr; min-height: 560px; }
@@ -371,7 +376,7 @@ html:has(.pd) { scroll-behavior: smooth; scroll-padding-top: 72px; }
 .pd-code .s { color: #E5B567; }
 .pd-code .k { color: #FF7AA8; }
 .pd-code-f { padding: 12px 16px; border-top: 1px solid #22242A; font: 12px var(--font-num); color: #6B7180; }
-.pd-devpts { display: grid; gap: 28px; }
+.pd-devpts { display: grid; gap: 22px; }
 .pd-devpts h3 { color: #fff; font-size: 20px; font-weight: 700; margin-bottom: 6px; }
 .pd-devpts p { color: #8D93A1; font-size: 15px; }
 

@@ -218,7 +218,12 @@ export function Highlights() {
       <article className="pd-tile">
         <div className="pd-tile-txt">
           <h3>间隔专注计时</h3>
-          <p>受番茄工作法启发的专注计时器：把工作拆成一段段短时冲刺，专注 25 分钟、休息 5 分钟，自动循环。转一下旋钮就能开始。</p>
+          <p>受番茄工作法启发的专注计时器：把工作拆成一段段短时冲刺，专注 25 分钟、休息 5 分钟，自动循环。转一下旋钮就能开始，随时暂停、跳过或延长；计时结束也不会擅自改变你的状态。</p>
+          <dl className="pd-tile-facts">
+            <div><dt>5′ / 格</dt><dd>旋钮调时，单次最长 24 小时</dd></div>
+            <div><dt>2–35 轮</dt><dd>专注、休息各 5 分钟到 8 小时</dd></div>
+            <div><dt>45′</dt><dd>久坐提醒，开会、收工时自动暂停</dd></div>
+          </dl>
         </div>
         <div className="pd-tile-art pd-art-timer">
           <Laptop code className="pd-art-timer-laptop" />
@@ -426,6 +431,8 @@ export function DevPlayground() {
         <div className="pd-devpts">
           <div><h3>开放 HTTP API</h3><p>从任何脚本、应用或智能家居系统，把文字和图片发到屏幕上。</p></div>
           <div><h3>TypeScript 与 Python 库</h3><p>几行代码，就能用自己的程序画出自定义消息和图像。</p></div>
+          <div><h3>AI Agent 状态联动</h3><p>电脑上的 Agent 在跑、等你输入、已完成还是出错了，抬头看一眼就知道；不显示任何代码和 Prompt。</p></div>
+          <div><h3>装上更多小应用</h3><p>内置 JavaScript 应用引擎，时钟、天气一键安装；自己写的应用经 USB 或 Wi-Fi 装进设备，在沙箱里独立运行。</p></div>
           <div><h3>开源固件</h3><p>出厂的就是这份代码：Fork 一份，刷入你自己的版本。</p></div>
         </div>
       </div>
