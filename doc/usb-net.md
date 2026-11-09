@@ -113,7 +113,7 @@ Microsoft OS 描述符自报 compatible id `"WINNCM"`。固件备好两条通路
 CDC+NIC 复合固件只在 TinyUSB 构建生效（`usb_net.cpp` 内 `#if !ARDUINO_USB_MODE && CFG_TUD_NCM`）：
 
 ```
-esp32:esp32:esp32s3:USBMode=default,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=esp_sr_16
+<板型 FQBN>:USBMode=default,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=esp_sr_16
 ```
 
 - **一根线即可完成烧录**：原生口 CDC 置 1200 波特触发下载模式（`USBCDC` 内置 esptool

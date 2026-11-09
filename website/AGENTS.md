@@ -1,6 +1,6 @@
 # 收工牌 · 网站
 
-隐私优先的桌面工作状态设备（ESP32-S3 + OLED 屏 + RGB 灯）的配套网站。Vite + React + TS。
+隐私优先的桌面工作状态设备（MCU + OLED 屏 + RGB 灯）的配套网站。Vite + React + TS。
 
 ## 信息去哪看
 

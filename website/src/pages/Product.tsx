@@ -477,7 +477,7 @@ export function ProductPage() {
           <div>
             <span className="pd-eyebrow">幕后</span>
             <h2>从一块面包板开始</h2>
-            <p>收工牌最初只是一块面包板：一颗 ESP32-S3、一块小屏幕、几个按键和一个旋钮。我们每天把它放在自己的工位上，改了几十版交互，直到“按一下、旋一下、长按收工”变成不需要思考的动作。</p>
+            <p>收工牌最初只是一块面包板：一块开发板、一块小屏幕、几个按键和一个旋钮。我们每天把它放在自己的工位上，改了几十版交互，直到“按一下、旋一下、长按收工”变成不需要思考的动作。</p>
             <p>现在它有了正式的外壳，但初衷没变：做一个由你自己掌控的小工具，帮你守住专注，也帮你按时下班。</p>
           </div>
         </div>
@@ -490,7 +490,7 @@ export function ProductPage() {
           <div><h4><Keyboard />操作</h4><ul><li>4 枚实体按键（收工键 + 3 枚可自定义）</li><li>金属旋钮，带按压确认，每格 5 分钟</li><li>机身电容触摸区</li></ul></div>
           <div><h4><Lightbulb />灯光</h4><ul><li>RGB 状态灯带</li><li>常亮 / 呼吸 / 闪烁，亮度可调</li><li>渐变、彩虹、通知等预设灯效</li><li>夜间关闭时段、无灯光模式</li></ul></div>
           <div><h4><Volume2 />声音</h4><ul><li>MEMS 数字麦克风</li><li>物理麦克风静音开关 + 录音指示</li><li>提示音扬声器，音量可调</li></ul></div>
-          <div><h4><Cpu />处理器</h4><ul><li>STM32U5 主控 · Cortex-M33 160 MHz</li><li>SiWG917 独立无线协处理器</li><li>屏幕程序沙箱运行</li><li>JavaScript 应用引擎</li></ul></div>
+          <div><h4><Cpu />处理器</h4><ul><li>低功耗主控 · 160 MHz</li><li>独立无线协处理器</li><li>屏幕程序沙箱运行</li><li>JavaScript 应用引擎</li></ul></div>
           <div><h4><Radio />连接</h4><ul><li>Bluetooth LE 5.0</li><li>2.4 GHz Wi-Fi 6</li><li>USB-C 数据连接 · USB 虚拟网卡</li><li>Matter 智能家居 · MQTT（TLS）云连接</li><li>mDNS 局域网自动发现</li></ul></div>
           <div><h4><BatteryCharging />供电</h4><ul><li>内置可充电锂电池</li><li>USB-C 充电</li><li>低电量时才在屏幕提示</li><li>空闲自动进入低功耗模式，支持软关机</li></ul></div>
           <div><h4><Wifi />软件</h4><ul><li>网页控制台：Chrome / Edge</li><li>手机 App：iOS / Android</li><li>固件在线升级</li><li>设备内置网页管理界面与 HTTP API</li></ul></div>

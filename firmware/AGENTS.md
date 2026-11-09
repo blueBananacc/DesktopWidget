@@ -26,8 +26,8 @@ Instructions for coding agents working on the BUSY Bar firmware.
 ## Project overview
 
 - The firmware runs on two MCUs:
-  - STM32U595 ("U5", main firmware, targets `f2x`, built with `TARGET_HW=22`).
-  - SiWG917 ("Si917", wireless co-processor, targets `f6x`, built with `TARGET_HW=65`).
+  - Main MCU (targets `f2x`, built with `TARGET_HW=22`).
+  - Wireless co-processor (targets `f6x`, built with `TARGET_HW=65`).
   The two talk to each other over the `intercom` service.
 - The OS layer is Furi (records, threads, event loops, message queues, pubsub, `FuriString`). It lives in the
   `fbt_layers/core_libs` submodule.

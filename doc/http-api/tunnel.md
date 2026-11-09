@@ -106,7 +106,7 @@ HTTP/1.1 是请求-响应模型；设备主动推送（按键、状态快照、�
 | 通道 | 物理层 | 设备 → 客户端 | 客户端 → 设备 |
 |---|---|---|---|
 | BLE | NUS 风格 GATT 服务 `6e400001-…`，设备名前缀 `Shougong` | TX 特征 `6e400003-…` notify，每次 ≤200 B | RX 特征 `6e400002-…` write，每次 ≤180 B |
-| USB 串口 | CH343，460800 8N1（默认构建）**或** ESP32-S3 原生 USB-OTG CDC（`USBMode=default,CDCOnBoot=cdc` 构建，`Serial` 改绑原生口；Windows 首用需手动指派 COM，详见 doc/HARDWARE.md §15） | UART/CDC TX | UART/CDC RX |
+| USB 串口 | CH343，460800 8N1（默认构建）**或** 主控原生 USB-OTG CDC（`USBMode=default,CDCOnBoot=cdc` 构建，`Serial` 改绑原生口；Windows 首用需手动指派 COM，详见 doc/HARDWARE.md §15） | UART/CDC TX | UART/CDC RX |
 | 本地桥 | TCP（`127.0.0.1:8787`，真 HTTP/1.1） | 见 [bridge/README.md](../../bridge/README.md) | 同左 |
 | USB 网卡 | USB NCM + IPv4 + TCP `192.168.55.1:80`（`USBMode=default,CDCOnBoot=cdc` 构建；真 HTTP/1.1，无杂散字节） | socket 字节流 | socket 字节流；满槽时首响应为 `503` |
 

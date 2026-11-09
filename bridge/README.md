@@ -47,7 +47,7 @@ NCM 复合固件下原生口一根线即可完成刷机与串口访问（本机 
 
 | 脚本 | 用途 |
 |---|---|
-| `find-serial-paths.ps1` | 枚举 ESP32-S3（VID_303A）串行接口设备路径，输出可直接给下面两个脚本 |
+| `find-serial-paths.ps1` | 枚举设备串行接口设备路径（按设备 VID 过滤），输出可直接给下面两个脚本 |
 | `cdc-1200-touch.ps1 -Path <路径>` | CDC 置 1200 波特触发 ROM 下载模式（`USBCDC` 内置 esptool 兼容复位），原生口回落 `PID_1001` 后用 esptool 直刷 |
 | `read-serial-path.ps1` | 直接以设备路径开 CDC 读写（可置 DTR/RTS、可发隧道请求），无需 COM 号 |
 | `dump-usbdesc.ps1` | 用 SetupApi/配置管理 API 抓取设备实际发出的 USB 描述符字节（排障用） |
@@ -58,5 +58,5 @@ NCM 复合固件下原生口一根线即可完成刷机与串口访问（本机 
 $path = (& .\find-serial-paths.ps1)[0]            # 应用态 CDC 路径
 .\cdc-1200-touch.ps1 -Path $path                  # 进下载模式（PID_1001）
 $dl = (& .\find-serial-paths.ps1)[0]              # 下载器串行路径
-esptool --chip esp32s3 --port $dl write_flash ... # 见 firmware/README.md
+esptool --port $dl write_flash ...             # 芯片型号与镜像参数见固件烧录说明
 ```

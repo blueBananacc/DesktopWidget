@@ -1,6 +1,6 @@
 # 收工牌
 
-隐私优先的桌面工作状态设备（ESP32-S3 + OLED + RGB + 麦克风）+ 配套 Vite/React/TS 网站。仓库根即 `code/`：`firmware/`（Arduino）、`website/`（网页）、`bridge/`（电脑侧本地 HTTP 桥）、`doc/`（PRD/协议/部署）。
+隐私优先的桌面工作状态设备（MCU + OLED + RGB + 麦克风）+ 配套 Vite/React/TS 网站。仓库根即 `code/`：`firmware/`（Arduino）、`website/`（网页）、`bridge/`（电脑侧本地 HTTP 桥）、`doc/`（PRD/协议/部署）。
 
 ## 设备接口（HTTP 隧道，v0.9 起）
 

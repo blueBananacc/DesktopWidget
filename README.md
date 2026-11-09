@@ -4,7 +4,7 @@
 
 - 正面 72×16 全彩 RGB LED 点阵屏 + 背面 160×80 灰阶副屏，RGB 状态灯，环境光自动调光
 - 4 枚实体按键 + 旋钮，内置电池，USB-C
-- 主控 STM32U595（U5）+ 无线协处理器 SiWG917（Si917，Wi-Fi 6 / BLE），二者经 `intercom` 服务通信
+- 主控 MCU + 无线协处理器（Wi-Fi 6 / BLE），二者经 `intercom` 服务通信
 
 产品介绍页见配套网站仓库（`shangxiabanbaijian/code/website`，路由 `/sgp/product`）。
 
@@ -15,7 +15,7 @@
 | [`applications/`](applications/) | 固件内应用与服务：`main`（主界面）、`services`（后台服务）、`settings`（设置）、`system`（升级等系统应用）、`debug`（调试，不进发布版）；每个应用由 `application.fam` 声明 |
 | [`applications_js/`](applications_js/) | 默认 JavaScript 应用（时钟、天气、示例），开发说明见 [applications_js/AGENTS.md](applications_js/AGENTS.md) |
 | [`lib/`](lib/) | 自研与第三方库：显示 / 网络（lwIP、mongoose）/ JerryScript / Matter / mbedTLS / TinyUSB 等 |
-| [`targets/`](targets/) | HAL 与各硬件目标配置（`f2x` = U5，`f6x` = Si917） |
+| [`targets/`](targets/) | HAL 与各硬件目标配置（`f2x` = 主控，`f6x` = 无线协处理器） |
 | [`fbt_layers/`](fbt_layers/) | 构建系统层（fbtng、core_libs / Furi、FreeRTOS），均为子模块 |
 | [`assets/`](assets/) | 图片、动画、声音、前端资源、OpenAPI（swagger） |
 | [`documentation/`](documentation/) | Doxygen 文档源：[快速上手](documentation/Quick%20Start.dox.md)、[构建系统](documentation/Build%20System.dox.md)、[JS 应用](documentation/JavaScript%20Applications.dox.md)、[代码规范](documentation/Code%20Style.dox.md) |
@@ -103,7 +103,7 @@ flowchart LR
   C --> D[unpack<br/>/ext/update/staging]
   D --> E[installation prepare<br/>manifest · 安全标志 · 会话配置 · 指针文件]
   E --> F[apply<br/>NVM 置升级启动模式并重启]
-  F --> G[升级执行器<br/>U5 闪存写入/校验 · Si917 固件 · 资源]
+  F --> G[升级执行器<br/>主控闪存写入/校验 · 无线协处理器固件 · 资源]
   G --> H[正常启动]
   G -- 失败 --> X[失败界面]
   X -.-> R[recovery 恢复服务<br/>恢复出厂]
@@ -114,7 +114,7 @@ flowchart LR
 - **前置条件**：电量 ≥ 40%（调试模式下插 USB 可放行）；升级会话由信号量保证互斥，重复发起返回 `Busy`。
 - **安装准备**：校验 manifest 存在且合法，比对升级包与设备的签名 / 加密标志（不一致直接拒绝），写入会话配置与指针文件；指针文件写失败会回滚删除会话配置。
 - **启动切换**：`apply` 把 NVM 启动模式置为"升级"后重启；启动代码**先把启动模式清回"正常"再跳转升级**，跳转失败则直接复位，回到原固件。
-- **升级执行**：读 manifest → 校验 DFU 镜像 → 写入并校验 U5 闪存 → 写入并安装 Si917 无线与应用固件 → 清理并解包资源，每阶段独立上报进度与错误。
+- **升级执行**：读 manifest → 校验 DFU 镜像 → 写入并校验主控闪存 → 写入并安装无线协处理器固件与应用固件 → 清理并解包资源，每阶段独立上报进度与错误。
 
 ### 失败判定与降级路径
 
@@ -141,8 +141,8 @@ flowchart LR
 ./fbt
 
 # 只构建某一颗
-./fbt TARGET_HW=22     # STM32U595（主固件）
-./fbt TARGET_HW=65     # SiWG917（无线协处理器）
+./fbt TARGET_HW=22     # 主控固件
+./fbt TARGET_HW=65     # 无线协处理器固件
 
 # 经 USB 刷写（需设备的 USB 虚拟网卡已就绪，默认包含资源文件）
 ./fbt flash_usb
