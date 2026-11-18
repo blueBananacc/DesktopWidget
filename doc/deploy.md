@@ -32,7 +32,9 @@ https://hr.120.55.125.13.sslip.io ──443（同 nginx，按 server_name 分流
 http://120.55.125.13  ──80───► free-hire-frontend（原有系统，零改动；/main 入口是它的可选重定向）
 ```
 
-**HR 入口说明**：浏览器会把 `http://IP` 自动升级成 `https://IP`（本站），裸 IP 已回不去 HR——用 `https://hr.120.55.125.13.sslip.io` 访问 HR（sslip.io 免费通配 DNS，解析回 120.55.125.13）。独立 origin 避免了 `/api` 路径冲突（本站和 HR 都用 `/api/`，同域无法分流）。HR 容器零改动，流量经 docker0 网关进其发布的 :80。
+**HR 入口说明**：浏览器会把 `http://IP` 自动升级成 `https://IP`（本站）。nginx 把 `location /` 及未占用路径整体反代回 HR 的 :80——**裸 IP（http 或 https）打开都是 HR**，恢复换证书前的老行为，`/hronfire` 是跳转别名。`https://hr.120.55.125.13.sslip.io` 保留作备用独立入口（sslip.io 免费通配 DNS，解析回 120.55.125.13，90 天证书同 cron 续期）。HR 容器零改动，流量经 docker0 网关 `172.17.0.1:80` 进其发布的 :80。
+
+**`/api/` 分流规则**：模拟器固件只认 15 个前缀（`access|apps|assets|audio|busy|display|input|log_dump|screen|status|storage|time|update|version|wifi`，grep 自 emu-image）走 regex location 到 sgp-emu；其余 `/api/*` 全部透传 HR 后端。两套 API 前缀当前零重叠；**重新部署/升级模拟器后重新 grep 一次这个清单**。
 
 URL 约定：**本站入口固定 `https://120.55.125.13/sgp/`**——用路径区分两个项目，不用记 http/https 端口差异。Vite `base:"/sgp/"` + React Router `basename=BASE_URL` 配套，资源都在 `/sgp/assets/` 下。
 
