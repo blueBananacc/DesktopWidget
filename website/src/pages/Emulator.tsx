@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, Unplug } from "lucide-react";
 import { Card, PageHeader } from "../ui/Primitives";
-import { QuickApp } from "./QuickApp";
 
 // 模拟器窗口文件 vendored 在 public/emulator/（源自 BUSY Bar Emulator 的 device window，
 // 已换为收工牌设计规范）；其 API 与事件流由 vite 代理转给本机模拟器服务（127.0.0.1:8640）。
@@ -69,7 +68,6 @@ export function Emulator() {
           )}
         </Card>
       )}
-      <QuickApp alive={alive} />
     </>
   );
 }
