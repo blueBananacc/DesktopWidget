@@ -633,7 +633,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
               offworkToday: s.offworkToday || m.status === "off",
             };
             stateRef.current = next;   // 同步写：防紧随的 sendSnapshot 回显把旧状态推回去
-            set(() => next);
+            // 只改本事件负责的字段：整替换会吞掉同一批快照里还没 flush 的 set（schedules/todos/...）
+            set((prev) => ({ ...prev, current: next.current, offworkToday: next.offworkToday }));
           }
           break;
         }
@@ -710,7 +711,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
                   offworkToday: s.offworkToday || last.status === "off",
                 };
                 stateRef.current = next;
-                set(() => next);
+                // 只改本事件负责的字段：整替换会吞掉同一批快照里还没 flush 的 set（schedules/todos/...）
+                set((prev) => ({ ...prev, segments: list, current: next.current, offworkToday: next.offworkToday }));
               }
             }
           }
