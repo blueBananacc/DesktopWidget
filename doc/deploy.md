@@ -24,12 +24,15 @@ https://120.55.125.13 ──443──► sgp-web 容器（nginx:1.27-alpine → 
                                ├─ 裸域 / → 302 到 /sgp/；应用 base=/sgp/
                                ├─ /_emu、/api、/docs、/emulator、stage3d → sgp-emu:8642（TCP 转发口）
                                └─ /emu-shell → sgp-emu:8641（浏览器工具桥，NDJSON 流）
+https://hr.120.55.125.13.sslip.io ──443（同 nginx，按 server_name 分流）──► 反代 172.17.0.1:80 → free-hire-frontend
                               sgp-emu 容器（node:20-alpine，不发布端口）：
                                ├─ packages/server/index.mjs —— 模拟器本体，只绑 127.0.0.1:8640
                                ├─ run.mjs 里的 TCP 转发 0.0.0.0:8642 → 127.0.0.1:8640（跨容器入口）
                                └─ shell/emu-shell-server.mjs —— /call、/ping → sgp-emulator CLI
 http://120.55.125.13  ──80───► free-hire-frontend（原有系统，零改动；/main 入口是它的可选重定向）
 ```
+
+**HR 入口说明**：浏览器会把 `http://IP` 自动升级成 `https://IP`（本站），裸 IP 已回不去 HR——用 `https://hr.120.55.125.13.sslip.io` 访问 HR（sslip.io 免费通配 DNS，解析回 120.55.125.13）。独立 origin 避免了 `/api` 路径冲突（本站和 HR 都用 `/api/`，同域无法分流）。HR 容器零改动，流量经 docker0 网关进其发布的 :80。
 
 URL 约定：**本站入口固定 `https://120.55.125.13/sgp/`**——用路径区分两个项目，不用记 http/https 端口差异。Vite `base:"/sgp/"` + React Router `basename=BASE_URL` 配套，资源都在 `/sgp/assets/` 下。
 
@@ -41,6 +44,7 @@ URL 约定：**本站入口固定 `https://120.55.125.13/sgp/`**——用路径�
 | `nginx.conf` | TLS + `/`→302 `/sgp/` + SPA fallback + 模拟器反代（Host/Origin 改写回环，等价 vite `changeOrigin`；`/_emu` SSE 关缓冲长超时；`/emu-shell` 转发到 8641） |
 | `emu-image/` | 模拟器构建上下文：`emulator/`（packages/server 全量 + engine 顶层 .mjs + firmware.json + build/{1.3.1,apps-assets}）、`shell/`（emulator-shell.mjs + emu-shell-server.mjs）、`Dockerfile`、`run.mjs` |
 | `tls/cert.pem` `key.pem` | Let's Encrypt IP 证书（shortlived profile，~6.7 天），acme.sh 自动续期，见下节 |
+| `tls/hr-cert.pem` `hr-key.pem` | HR 域名证书（`hr.120.55.125.13.sslip.io`，90 天），同一 acme.sh 续期 |
 | `site/sgp/` | 网站静态文件（构建产物直接铺这里，容器只读挂载） |
 
 模拟器数据持久在两个 compose 卷：`emu-data`（/data：应用、信任表、server key）、`emu-projects`（/projects：网页创建的应用项目）。**所有访客共享同一台云端模拟设备**——谁装的应用、按的按键大家都能看到。
@@ -54,7 +58,7 @@ URL 约定：**本站入口固定 `https://120.55.125.13/sgp/`**——用路径�
   - `pre-hook`：`docker stop sgp-web`（alpn 校验要独占 443，停机 ~15 秒）
   - 证书落到 `/opt/sgp-web/tls/{cert,key}.pem`（`--install-cert` 记下的路径）
   - `post-hook`：`docker start sgp-web` + `reloadcmd` 里 `nginx -s reload`（顺序无关，容器起来必带新证）
-- 手动重签：`acme.sh --issue -d 120.55.125.13 --alpn --server letsencrypt --cert-profile shortlived --days 4 --force`
+- 手动重签：`acme.sh --issue -d 120.55.125.13 --alpn --server letsencrypt --cert-profile shortlived --days 4 --force`（HR 域名证书同理，去掉 `--cert-profile`，`-d hr.120.55.125.13.sslip.io`）
 - 风险：IP 证书寿命短，续期依赖 cron + 443 可用；若连续失败证书过期会回到证书警告——巡检时 `echo | openssl s_client -connect 120.55.125.13:443 | openssl x509 -noout -dates` 看有效期
 
 ## 部署云端模拟器
