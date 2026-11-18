@@ -119,24 +119,22 @@ export class MockDevice {
         { t: "09:30", st: "meet", n: "复盘会" }, { t: "11:00", st: "work", n: "写总结" },
         { t: "12:00", st: "rest" }, { t: "14:00", st: "meet", n: "一对一" }, { t: "17:00", st: "off" }] },
     ];
-    const SCHED_SEED_VER = 2;
-    const schedVer = +(localStorage.getItem("sgp-mock-schedver") ?? 0);
     if (!load<Json>("sgp-mock-scheds", (j) => { this.scheds = (j.list as DevSched[]) ?? []; this.schedAct = (j.act as string) ?? ""; this.schedMode = (j.mode as "next" | "today") ?? "next"; this.schedPausedDay = (j.pday as string) ?? ""; this.schedNextId = (j.nextId as number) ?? 1; }) || !this.scheds.length) {
       // 无存档或存档已清空：重新播种（演示设备回到"开箱有数据"，nextId 保留防发重号）
       this.scheds = seedScheds();
       this.schedAct = "s1";
       this.schedNextId = Math.max(8, this.schedNextId);
-    } else if (schedVer < SCHED_SEED_VER) {
-      // 存档有数据但种子升级过：按名字/id 去重补新示例，用户自建表不受影响
+    } else {
+      // 存档有数据：每次启动都补齐缺失的种子示例（被删过/老存档都自愈，演示站点不指望用户维护示例表），
+      // 按名字/id 去重、不超设备上限 8 张；用户自建表原样保留。date 种子刷新成当天，"单日优先"规则常演常新
       for (const sc of seedScheds()) {
-        if (this.scheds.some((x) => x.id === sc.id || x.name === sc.name)) continue;
-        const copy = { ...sc, ns: sc.ns.map((n) => ({ ...n })) };
-        while (this.scheds.some((x) => x.id === copy.id)) copy.id = `s${this.schedNextId++}`;
-        this.scheds.push(copy);
+        const hit = this.scheds.find((x) => x.id === sc.id || x.name === sc.name);
+        if (!hit && this.scheds.length < 8) this.scheds.push(sc);
+        else if (hit?.kind === "date") hit.date = this.dayKey();
       }
-      this.schedAct ||= "s1";
+      // 生效指针若指向已不存在的表，回退到第一张重复表
+      if (!this.scheds.some((x) => x.id === this.schedAct && x.kind === "repeat")) this.schedAct = this.scheds.find((x) => x.kind === "repeat")?.id ?? "";
     }
-    localStorage.setItem("sgp-mock-schedver", String(SCHED_SEED_VER));
     if (!load<Json>("sgp-mock-stdefs", (j) => { this.stdefs = (j.list as DevStdef[]) ?? []; this.stdefNextId = (j.nextId as number) ?? 1; }) || !this.stdefs.length) {
       this.stdefs = [
         { id: "c1", zh: "写文档", hint: "整理中，轻扰", c: 0x5b8ff9, work: true },
