@@ -40,12 +40,22 @@ URL 约定：**本站入口固定 `https://120.55.125.13/sgp/`**——用路径�
 | `docker-compose.yml` | 独立 compose 项目：web（nginx:1.27-alpine，`443:443`）+ emu（构建自 ./emu-image），`restart: unless-stopped` |
 | `nginx.conf` | TLS + `/`→302 `/sgp/` + SPA fallback + 模拟器反代（Host/Origin 改写回环，等价 vite `changeOrigin`；`/_emu` SSE 关缓冲长超时；`/emu-shell` 转发到 8641） |
 | `emu-image/` | 模拟器构建上下文：`emulator/`（packages/server 全量 + engine 顶层 .mjs + firmware.json + build/{1.3.1,apps-assets}）、`shell/`（emulator-shell.mjs + emu-shell-server.mjs）、`Dockerfile`、`run.mjs` |
-| `tls/cert.pem` `key.pem` | 自签证书，`CN=SAN=120.55.125.13`，3650 天，2036 年到期 |
+| `tls/cert.pem` `key.pem` | Let's Encrypt IP 证书（shortlived profile，~6.7 天），acme.sh 自动续期，见下节 |
 | `site/sgp/` | 网站静态文件（构建产物直接铺这里，容器只读挂载） |
 
 模拟器数据持久在两个 compose 卷：`emu-data`（/data：应用、信任表、server key）、`emu-projects`（/projects：网页创建的应用项目）。**所有访客共享同一台云端模拟设备**——谁装的应用、按的按键大家都能看到。
 
-证书是**自签**的——浏览器首次访问要点「高级 → 继续访问」，例外会被记住。要消掉警告需要域名 + 真证书（Let's Encrypt），目前没有域名。
+## TLS 证书（Let's Encrypt IP 证书，2026-11-18 起）
+
+- 证书：Let's Encrypt **IP 证书**（SAN=`IP:120.55.125.13`，shortlived profile，有效期 ~6.7 天），无域名也可签发；浏览器/系统信任链完整，无「不安全」警告
+- 校验方式：**tls-alpn-01**（LE 对 IP 证书只支持 http-01/tls-alpn-01，80 口被 free-hire 占用 → 选 alpn 走 443）
+- 工具：服务器 `/root/.acme.sh`（git clone 安装，raw.githubusercontent.com 被运营商 reset）；账号注册时**不能带邮箱**（LE 会校验邮箱域名有合法公共后缀，`--register-account` 不带 `-m` 即可）
+- 续期闭环：acme.sh cron 每天 4 次 `--cron`；到期前（ARI 建议窗口，约签发后 3 天）自动续期——
+  - `pre-hook`：`docker stop sgp-web`（alpn 校验要独占 443，停机 ~15 秒）
+  - 证书落到 `/opt/sgp-web/tls/{cert,key}.pem`（`--install-cert` 记下的路径）
+  - `post-hook`：`docker start sgp-web` + `reloadcmd` 里 `nginx -s reload`（顺序无关，容器起来必带新证）
+- 手动重签：`acme.sh --issue -d 120.55.125.13 --alpn --server letsencrypt --cert-profile shortlived --days 4 --force`
+- 风险：IP 证书寿命短，续期依赖 cron + 443 可用；若连续失败证书过期会回到证书警告——巡检时 `echo | openssl s_client -connect 120.55.125.13:443 | openssl x509 -noout -dates` 看有效期
 
 ## 部署云端模拟器
 

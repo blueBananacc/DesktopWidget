@@ -98,20 +98,45 @@ export class MockDevice {
     }
     // nextId 对齐现存 id：存档里可能已有 t1..tN，新建待办不能再发重号
     this.nextId = Math.max(1, ...this.todos.filter((t) => /^t\d+$/.test(t.id)).map((t) => +t.id.slice(1) + 1));
+    // 演示计划表：覆盖重复/单日、密度差异、各状态与备注；kind:"date" 取当天，展示"单日优先"规则
+    const seedScheds = (): DevSched[] => [
+      { id: "s1", name: "标准工作日", kind: "repeat", wd: [1, 2, 3, 4, 5], ns: [
+        { t: "09:00", st: "work" }, { t: "10:30", st: "meet", n: "周会" }, { t: "11:30", st: "work" },
+        { t: "12:00", st: "rest", n: "午休" }, { t: "13:30", st: "focus", n: "深度工作" },
+        { t: "15:00", st: "work" }, { t: "18:00", st: "off" }] },
+      { id: "s2", name: "居家办公", kind: "repeat", wd: [1, 2, 3, 4, 5], ns: [
+        { t: "09:30", st: "work" }, { t: "12:00", st: "rest" }, { t: "13:00", st: "focus", n: "深度工作" }, { t: "18:30", st: "off" }] },
+      { id: "s3", name: "周五短工作日", kind: "repeat", wd: [5], ns: [{ t: "09:00", st: "work" }, { t: "16:00", st: "off" }] },
+      { id: "s4", name: "深度冲刺日", kind: "repeat", wd: [2, 4], ns: [
+        { t: "08:30", st: "work" }, { t: "09:00", st: "focus", n: "深度工作" }, { t: "11:30", st: "work" },
+        { t: "12:00", st: "rest" }, { t: "14:00", st: "focus", n: "深度工作" }, { t: "17:00", st: "work" }, { t: "19:00", st: "off" }] },
+      { id: "s5", name: "加班晚场", kind: "repeat", wd: [1, 3], ns: [
+        { t: "10:00", st: "work" }, { t: "12:30", st: "rest" }, { t: "14:00", st: "meet", n: "评审" },
+        { t: "15:30", st: "busy", n: "勿扰" }, { t: "17:00", st: "work" }, { t: "21:00", st: "off" }] },
+      { id: "s6", name: "周末值守", kind: "repeat", wd: [6, 0], ns: [
+        { t: "10:00", st: "work" }, { t: "12:00", st: "rest" }, { t: "16:00", st: "off" }] },
+      { id: "s7", name: "季度复盘日", kind: "date", date: this.dayKey(), ns: [
+        { t: "09:30", st: "meet", n: "复盘会" }, { t: "11:00", st: "work", n: "写总结" },
+        { t: "12:00", st: "rest" }, { t: "14:00", st: "meet", n: "一对一" }, { t: "17:00", st: "off" }] },
+    ];
+    const SCHED_SEED_VER = 2;
+    const schedVer = +(localStorage.getItem("sgp-mock-schedver") ?? 0);
     if (!load<Json>("sgp-mock-scheds", (j) => { this.scheds = (j.list as DevSched[]) ?? []; this.schedAct = (j.act as string) ?? ""; this.schedMode = (j.mode as "next" | "today") ?? "next"; this.schedPausedDay = (j.pday as string) ?? ""; this.schedNextId = (j.nextId as number) ?? 1; }) || !this.scheds.length) {
       // 无存档或存档已清空：重新播种（演示设备回到"开箱有数据"，nextId 保留防发重号）
-      this.scheds = [
-        { id: "s1", name: "标准工作日", kind: "repeat", wd: [1, 2, 3, 4, 5], ns: [
-          { t: "09:00", st: "work" }, { t: "10:30", st: "meet", n: "周会" }, { t: "11:30", st: "work" },
-          { t: "12:00", st: "rest", n: "午休" }, { t: "13:30", st: "focus", n: "深度工作" },
-          { t: "15:00", st: "work" }, { t: "18:00", st: "off" }] },
-        { id: "s2", name: "居家办公", kind: "repeat", wd: [1, 2, 3, 4, 5], ns: [
-          { t: "09:30", st: "work" }, { t: "12:00", st: "rest" }, { t: "13:00", st: "focus", n: "深度工作" }, { t: "18:30", st: "off" }] },
-        { id: "s3", name: "周五短工作日", kind: "repeat", wd: [5], ns: [{ t: "09:00", st: "work" }, { t: "16:00", st: "off" }] },
-      ];
+      this.scheds = seedScheds();
       this.schedAct = "s1";
-      this.schedNextId = Math.max(4, this.schedNextId);
+      this.schedNextId = Math.max(8, this.schedNextId);
+    } else if (schedVer < SCHED_SEED_VER) {
+      // 存档有数据但种子升级过：按名字/id 去重补新示例，用户自建表不受影响
+      for (const sc of seedScheds()) {
+        if (this.scheds.some((x) => x.id === sc.id || x.name === sc.name)) continue;
+        const copy = { ...sc, ns: sc.ns.map((n) => ({ ...n })) };
+        while (this.scheds.some((x) => x.id === copy.id)) copy.id = `s${this.schedNextId++}`;
+        this.scheds.push(copy);
+      }
+      this.schedAct ||= "s1";
     }
+    localStorage.setItem("sgp-mock-schedver", String(SCHED_SEED_VER));
     if (!load<Json>("sgp-mock-stdefs", (j) => { this.stdefs = (j.list as DevStdef[]) ?? []; this.stdefNextId = (j.nextId as number) ?? 1; }) || !this.stdefs.length) {
       this.stdefs = [
         { id: "c1", zh: "写文档", hint: "整理中，轻扰", c: 0x5b8ff9, work: true },
