@@ -1,15 +1,14 @@
-import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  Bell, Search, CircleHelp, Monitor, CalendarDays, Sparkles, Mic, Coffee, Plus, Sunset, RotateCcw, Lock, Fingerprint, Gauge, ShieldCheck, Timer, AlarmClock,
+  Bell, Search, CircleHelp, Monitor, CalendarDays, Mic, Coffee, Plus, Sunset, RotateCcw, Lock, ShieldCheck, Timer, AlarmClock,
   CodeXml,
 } from "lucide-react";
 import { useStore } from "../store/AppStore";
-import { SOURCE_LABEL, customStatusDefs, keyActionLabel, statusMeta } from "../domain/statuses";
+import { SOURCE_LABEL, customStatusDefs, statusMeta } from "../domain/statuses";
 import type { StatusId } from "../domain/types";
 import { atToday, clock, dateKey, duration, greeting, hhmm, weekday, ago, startOfDay } from "../domain/time";
 import { nextNode, scheduleForDay, sortedNodes } from "../domain/schedule";
-import { Card, CardHeader, ConnBadge, Modal, RowItem, Segmented, SettingRow, StatusChip, Tile, UnknownChip, Banner } from "../ui/Primitives";
+import { Card, CardHeader, ConnBadge, RowItem, StatusChip, Tile, UnknownChip, Banner } from "../ui/Primitives";
 import { DeviceMirror } from "../ui/DeviceMirror";
 import { HoldButton } from "../ui/HoldButton";
 import { useToast } from "../ui/Toast";
@@ -29,7 +28,6 @@ export function Overview() {
   const { s, now, device, actions } = useStore();
   const toast = useToast();
   const offwork = useOffwork();
-  const [knobOpen, setKnobOpen] = useState(false);
   const meta = statusMeta(s.current.id);
   const connected = device.state === "connected"; // 未连接时网页不能声称知道设备状态
   const sched = scheduleForDay(s.schedules, s.activeScheduleId, now);
@@ -186,42 +184,10 @@ export function Overview() {
                 </div>
               </div>
             </div>
-            <div className="dev-meta">
-              <Link to="/lighting" className="dev-meta-link" title="打开灯效设置">
-                <span className="swatch-led" style={{ background: !connected || s.settings.led[s.current.id] === "off" ? "var(--line-2)" : meta.color }} />
-                <span><b>RGB 灯</b>{!connected ? "未连接" : s.settings.led[s.current.id] === "off" ? "已关闭" : `${s.settings.led[s.current.id] === "breath" ? "呼吸" : "常亮"} · 亮度 ${s.settings.ledBrightness}%`}</span>
-              </Link>
-              <Link to="/controls" className="dev-meta-link" title="打开触摸与快捷键设置">
-                <Tile color="blue" size={30}><Fingerprint /></Tile>
-                <span><b>触摸键</b>{keyActionLabel(s.settings.keys.t)} · K1–K4 {([s.settings.keys.k1, s.settings.keys.k2, s.settings.keys.k3, s.settings.keys.k4]).map(keyActionLabel).join("/")}</span>
-              </Link>
-              <div className="dev-meta-link" role="button" tabIndex={0} title="调节旋钮每格时长"
-                style={{ cursor: "pointer" }}
-                onClick={() => setKnobOpen(true)}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setKnobOpen(true); } }}>
-                <Tile color="orange" size={30}><Gauge /></Tile>
-                <span><b>旋钮</b>{!connected ? "未连接"
-                  : s.knobTimer?.mode === "run" ? `倒计时 ${clock(Math.max(0, (s.knobTimer.endsAt ?? now) - now), false)}`
-                  : s.knobTimer?.mode === "select" ? `设定 ${s.knobTimer.minutes} 分钟`
-                  : s.knobTimer?.mode === "expired" ? "时间到"
-                  : `每格 ±${s.settings.knobStep} 分钟`}</span>
-              </div>
-            </div>
           </Card>
 
           <Card>
-            <CardHeader title="今天要做的" count={openReminders.length + (s.agent.state === "needsInput" && s.settings.agentEnabled ? 1 : 0)} to="/reminders" />
-            {s.settings.agentEnabled && s.agent.state === "needsInput" && (
-              <Link to="/agent" style={{ color: "inherit" }}>
-                <RowItem
-                  lead={<Tile color="blue"><Sparkles /></Tile>}
-                  title={<>Agent 需要你的输入 <span className="badge b-warn">待处理</span></>}
-                  desc={`“${s.agent.task}”任务正在等待你确认`}
-                  meta={ago(s.agent.updatedAt, now)}
-                  onClick={() => {}}
-                />
-              </Link>
-            )}
+            <CardHeader title="今天要做的" count={openReminders.length} to="/reminders" />
             {openReminders.slice(0, 4).map((r) => (
               <RowItem
                 key={r.id}
@@ -335,30 +301,6 @@ export function Overview() {
         </div>
       </div>
 
-      {knobOpen && (
-        <Modal title="旋钮定时" onClose={() => setKnobOpen(false)}>
-          <div className="form">
-            <SettingRow title="每格时长" desc="旋转一格增加/减少的分钟数">
-              <Segmented
-                disabled={!connected}
-                value={String(s.settings.knobStep)}
-                options={[{ value: "1", label: "±1 分钟" }, { value: "5", label: "±5 分钟" }, { value: "10", label: "±10 分钟" }]}
-                onChange={(v) => actions.updateSettings({ knobStep: Number(v) })}
-              />
-            </SettingRow>
-            <SettingRow title="最长时长" desc="可以选到的最大倒计时时长">
-              <select className="input input-sm" disabled={!connected} value={s.settings.knobMax} onChange={(e) => actions.updateSettings({ knobMax: Number(e.target.value) })}>
-                {[60, 120, 180].map((m) => <option key={m} value={m}>{m} 分钟</option>)}
-              </select>
-            </SettingRow>
-            <p className="hint" style={{ margin: 0 }}>
-              {connected
-                ? "配置写入设备并断电保留。在桌牌上旋转调时长、按下开始、长按取消；倒计时由设备独立执行，网页关闭也照常计时。"
-                : "设备未连接：该配置保存在设备上，连接后才能修改。"}
-            </p>
-          </div>
-        </Modal>
-      )}
     </>
   );
 }

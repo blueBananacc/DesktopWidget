@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
-  LayoutDashboard, CalendarDays, ListChecks, BarChart3, Users, Sparkles, Monitor, Fingerprint, Image, Palette, ShieldCheck,
+  LayoutDashboard, CalendarDays, ListChecks, BarChart3, Users, Monitor, Image, ShieldCheck,
   Mic, MoreHorizontal, User,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -30,7 +30,6 @@ const GROUPS: { label?: string; items: NavItem[] }[] = [
     label: "协作",
     items: [
       { to: "/board", label: "共享看板", icon: Users },
-      { to: "/agent", label: "Agent 联动", icon: Sparkles, badge: "beta" },
     ],
   },
   {
@@ -38,9 +37,7 @@ const GROUPS: { label?: string; items: NavItem[] }[] = [
     items: [
       { to: "/device", label: "我的设备", icon: Monitor },
       { to: "/stt", label: "语音转文字", icon: Mic },
-      { to: "/controls", label: "触摸与快捷键", icon: Fingerprint },
       { to: "/screen", label: "屏幕内容", icon: Image },
-      { to: "/lighting", label: "灯效", icon: Palette },
     ],
   },
 ];
@@ -53,7 +50,7 @@ const TABS: NavItem[] = [
   { to: "/me", label: "我的", icon: User },
 ];
 
-const ME_PATHS = ["/me", "/review", "/agent", "/device", "/stt", "/controls", "/screen", "/lighting", "/settings"];
+const ME_PATHS = ["/me", "/review", "/device", "/stt", "/screen", "/settings"];
 
 export function AppShell() {
   const { s, actions } = useStore();

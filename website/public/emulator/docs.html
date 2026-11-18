@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>应用开发文档 · 收工牌模拟器</title>
+<style>
+  :root {
+    --font: "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+    --bg: #F5F6F8;
+    --surface: #FFFFFF;
+    --surface-2: #F7F8FA;
+    --line: #ECEEF2;
+    --text: #1F2329;
+    --text-strong: #101114;
+    --muted: #646A75;
+    --dimmed: #9AA0AB;
+    --primary: #4C5CF6;
+    --primary-weak: #EEF0FE;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; display: flex; height: 100vh; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.75; }
+  nav { flex: none; width: 250px; padding: 22px 14px; border-right: 1px solid var(--line); background: var(--surface); overflow-y: auto; }
+  nav h1 { margin: 0 8px 14px; color: var(--text-strong); font-size: 16px; font-weight: 700; }
+  nav .back { display: inline-block; margin: 0 8px 14px; color: var(--dimmed); font-size: 12px; text-decoration: none; }
+  nav .back:hover { color: var(--primary); }
+  nav a.doc { display: block; margin: 2px 0; padding: 8px 12px; border-radius: 8px; color: var(--muted); font-size: 13px; text-decoration: none; }
+  nav a.doc:hover { background: var(--surface-2); color: var(--text); }
+  nav a.doc.on { background: var(--primary-weak); color: var(--primary); font-weight: 600; }
+  nav a.doc small { display: block; color: var(--dimmed); font-size: 11px; font-weight: 400; }
+  main { flex: 1; min-width: 0; overflow-y: auto; }
+  article { max-width: 860px; margin: 0 auto; padding: 40px 48px 80px; }
+  article h1, article h2, article h3, article h4 { color: var(--text-strong); line-height: 1.35; }
+  article h1 { margin: 0 0 24px; padding-bottom: 14px; border-bottom: 1px solid var(--line); font-size: 26px; }
+  article h2 { margin: 36px 0 12px; font-size: 20px; }
+  article h3 { margin: 28px 0 10px; font-size: 16px; }
+  article h4 { margin: 22px 0 8px; font-size: 14px; }
+  article p { margin: 10px 0; }
+  article a { color: var(--primary); text-decoration: none; }
+  article a:hover { text-decoration: underline; }
+  article code { padding: 2px 6px; border-radius: 5px; background: var(--surface-2); font-family: var(--mono); font-size: 12.5px; }
+  article pre { margin: 14px 0; padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: #16181D; overflow-x: auto; }
+  article pre code { padding: 0; background: none; color: #E8EAED; font-size: 12.5px; line-height: 1.7; }
+  article ul, article ol { margin: 10px 0; padding-left: 26px; }
+  article li { margin: 4px 0; }
+  article blockquote { margin: 14px 0; padding: 4px 16px; border-left: 3px solid var(--primary); background: var(--surface-2); border-radius: 0 8px 8px 0; color: var(--muted); }
+  article table { margin: 14px 0; border-collapse: collapse; width: 100%; font-size: 13px; }
+  article th, article td { padding: 8px 12px; border: 1px solid var(--line); text-align: left; }
+  article th { background: var(--surface-2); font-weight: 600; }
+  article img { max-width: 100%; margin: 10px 0; border: 1px solid var(--line); border-radius: 10px; }
+  article hr { margin: 28px 0; border: 0; border-top: 1px solid var(--line); }
+  .err { padding: 60px 40px; color: var(--muted); text-align: center; }
+  @media (max-width: 720px) {
+    body { flex-direction: column; height: auto; }
+    nav { width: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+    article { padding: 24px 20px 60px; }
+  }
+</style>
+</head>
+<body>
+<nav>
+  <h1>应用开发文档</h1>
+  <a class="back" href="/sgp/emulator/">← 返回模拟器</a>
+  <div id="toc"></div>
+</nav>
+<main><article id="page"><div class="err">载入中…</div></article></main>
+<script>
+"use strict";
+const DOCS = [
+  { file: "first-app.md",            title: "你的第一个应用",   sub: "从零写出一个能在模拟器上运行的 App" },
+  { file: "from-zero-to-catalog.md", title: "从零到上架",       sub: "开发、校验、打包、发布的完整流程" },
+  { file: "agents.md",               title: "AGENTS.md 规范",   sub: "项目文件夹里给 AI 助手读的开发说明" },
+  { file: "network-and-disk.md",     title: "网络与存储",       sub: "应用可用的网络请求与文件存储 API" },
+  { file: "differences.md",          title: "模拟器与真机差异", sub: "哪些行为在真机上不一样" },
+  { file: "mcp.md",                  title: "MCP 接入",         sub: "把模拟器作为 MCP 服务接入 AI 助手" },
+  { file: "troubleshooting.md",      title: "常见问题",         sub: "安装、运行、构建出问题时看这里" },
+  { file: "README.md",               title: "文档总览",         sub: "官方文档目录与说明" },
+];
+
+// ---------------------------------------------------------------------------
+// 一个够用的 Markdown 渲染器：代码块 / 表格 / 标题 / 列表 / 引用 / 行内样式
+// ---------------------------------------------------------------------------
+function esc(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function inline(s) {
+  s = esc(s);
+  s = s.replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`);
+  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_, a, u) => `<img src="${u}" alt="${a}" loading="lazy">`);
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_, t, u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${t}</a>`);
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\*([^*\n]+)\*/g, "<i>$1</i>");
+  return s;
+}
+function md(src) {
+  const lines = src.replace(/\r\n?/g, "\n").split("\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) { i++; continue; }
+    // fenced code
+    const fence = line.match(/^```(\w*)/);
+    if (fence) {
+      const buf = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
+      i++;
+      out.push(`<pre><code>${esc(buf.join("\n"))}</code></pre>`);
+      continue;
+    }
+    // heading
+    const h = line.match(/^(#{1,6})\s+(.*)/);
+    if (h) {
+      const text = h[2].trim();
+      const slug = text.toLowerCase().replace(/<[^>]+>/g, "").replace(/[^\w\u4e00-\u9fff]+/g, "-").replace(/^-+|-+$/g, "");
+      out.push(`<h${h[1].length} id="${slug}">${inline(text)}</h${h[1].length}>`);
+      i++;
+      continue;
+    }
+    // hr
+    if (/^\s*(-{3,}|_{3,}|\*{3,})\s*$/.test(line)) { out.push("<hr>"); i++; continue; }
+    // table
+    if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
+      const rows = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(lines[i++].trim().slice(1, -1).split("|").map((c) => c.trim()));
+      const head = rows.shift(); rows.shift();
+      out.push(`<table><thead><tr>${head.map((c) => `<th>${inline(c)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
+      continue;
+    }
+    // blockquote
+    if (/^\s*>/.test(line)) {
+      const buf = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, ""));
+      out.push(`<blockquote>${md(buf.join("\n"))}</blockquote>`);
+      continue;
+    }
+    // list (nested by 2-space indent)
+    if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
+      const buf = [];
+      while (i < lines.length && (/^\s*([-*+]|\d+\.)\s+/.test(lines[i]) || (/^\s{2,}\S/.test(lines[i]) && !/^\s*([-*+]|\d+\.)\s+/.test(lines[i])) || !lines[i].trim())) {
+        if (!lines[i].trim() && (i + 1 >= lines.length || !/^\s*([-*+]|\d+\.)\s+|^\s{2,}\S/.test(lines[i + 1]))) break;
+        buf.push(lines[i++]);
+      }
+      out.push(renderList(buf));
+      continue;
+    }
+    // paragraph
+    const buf = [];
+    while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|```|\s*>|\s*([-*+]|\d+\.)\s|\s*\||-{3,}\s*$)/.test(lines[i])) buf.push(lines[i++].trim());
+    out.push(`<p>${inline(buf.join(" "))}</p>`);
+  }
+  return out.join("\n");
+}
+function renderList(buf) {
+  const items = [];
+  let cur = null;
+  for (const line of buf) {
+    const m = line.match(/^(\s*)([-*+]|\d+\.)\s+(.*)/);
+    if (m && m[1].length < 2) { cur = { t: m[3], sub: [] }; items.push(cur); }
+    else if (cur && m) cur.sub.push(m[3]);
+    else if (cur && line.trim()) cur.t += " " + line.trim();
+  }
+  const ordered = /^\s*\d+\./.test(buf[0] || "");
+  const tag = ordered ? "ol" : "ul";
+  return `<${tag}>${items.map((it) => `<li>${inline(it.t)}${it.sub.length ? `<ul>${it.sub.map((s) => `<li>${inline(s)}</li>`).join("")}</ul>` : ""}</li>`).join("")}</${tag}>`;
+}
+
+// ---------------------------------------------------------------------------
+const toc = document.getElementById("toc");
+const page = document.getElementById("page");
+async function open(file, anchorFor = null) {
+  for (const a of toc.querySelectorAll("a.doc")) a.classList.toggle("on", a.dataset.file === file);
+  page.innerHTML = '<div class="err">载入中…</div>';
+  if (!anchorFor) document.querySelector("main").scrollTop = 0;
+  try {
+    const res = await fetch(`docs/${file}`);
+    if (!res.ok) throw new Error(String(res.status));
+    page.innerHTML = md(await res.text());
+    // 相对路径的图补 docs/ 前缀
+    for (const img of page.querySelectorAll("img")) {
+      const src = img.getAttribute("src") ?? "";
+      if (!/^(https?:|\/|data:)/.test(src)) img.src = `docs/${src}`;
+    }
+    // 文档间的相对链接改走本页的 ?doc=，#锚点滚动到对应标题
+    for (const a of page.querySelectorAll("a")) {
+      const href = a.getAttribute("href") ?? "";
+      const [target, anchor] = href.split("#");
+      if (/^https?:/.test(target) || !/\.md$/.test(target)) {
+        if (target.startsWith("#")) { a.href = `#${anchor}`; }
+        continue;
+      }
+      const doc = target.replace(/^\.\//, "");
+      a.href = `?doc=${doc}${anchor ? `#${anchor}` : ""}`;
+      a.removeAttribute("target");
+      a.addEventListener("click", (e) => { e.preventDefault(); history.replaceState(null, "", a.href); open(doc, anchor); });
+    }
+    if (anchorFor) {
+      const el = document.getElementById(anchorFor);
+      if (el) el.scrollIntoView({ block: "start" });
+    }
+  } catch (e) {
+    page.innerHTML = `<div class="err">文档未能载入（${esc(String(e.message ?? e))}）</div>`;
+  }
+}
+for (const d of DOCS) {
+  const a = document.createElement("a");
+  a.className = "doc";
+  a.dataset.file = d.file;
+  a.href = `?doc=${d.file}`;
+  a.innerHTML = `${d.title}<small>${d.sub}</small>`;
+  a.addEventListener("click", (e) => { e.preventDefault(); history.replaceState(null, "", a.href); open(d.file); });
+  toc.append(a);
+}
+const params = new URLSearchParams(location.search);
+const first = params.get("doc");
+const firstDoc = DOCS.some((d) => d.file === first) ? first : DOCS[0].file;
+open(firstDoc, location.hash ? location.hash.slice(1) : null);
+</script>
+</body>
+</html>
