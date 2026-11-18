@@ -1,20 +1,12 @@
 # 故障排查
 
-每条 `busy-emulator` 命令都会说明出了什么问题、该怎么办；加 `--json` 时，回答里带有 `code` 和 `hint`。本页介绍命令本身无法告诉你的内容，以及你最常遇到的错误码。命令行程序在 macOS 上位于 `~/.busy-emulator/bin/busy-emulator`，在 Windows 上位于 `%LOCALAPPDATA%\busy-emulator\bin\busy-emulator.exe`；本页统一称其为 `busy-emulator`。
+每条 `sgp-emulator` 命令都会说明出了什么问题、该怎么办；加 `--json` 时，回答里带有 `code` 和 `hint`。本页介绍命令本身无法告诉你的内容，以及你最常遇到的错误码。命令行程序位于 `%LOCALAPPDATA%\busy-emulator\bin\busy-emulator.exe`；本页统一称其为 `sgp-emulator`。
 
 ## 所有系统通用
 
-### 系统首次无法打开应用
+### `sgp-emulator: command not found`
 
-在 macOS 上，0.1.0-beta.4 之前的版本未经公证，会出现这种情况；自 0.1.0-beta.4 起，应用已经过 Apple 签名和公证。Windows 安装程序目前还没有签名。按 [install.md](install.md#首次打开) 中的方法放行一次；之后它就能像其他应用一样正常打开。
-
-### “Move BUSY Bar Emulator to Applications”（macOS）
-
-应用是从磁盘镜像或“下载”文件夹打开的，macOS 会在一个临时的只读位置运行它。退出它，把收工牌模拟器拖进“应用程序”文件夹，再从那里打开。
-
-### `busy-emulator: command not found`
-
-命令行不在你的 `PATH` 上。如上所示，用它的完整路径调用。该文件是应用启动时写入的，所以先打开一次应用再使用它。
+命令行不在你的 `PATH` 上。本仓库的模拟器从源码检出运行：在检出目录里用 `node packages/server/cli/busy-emulator.mjs` 调用（后文记作 `<cli>`）。
 
 ### 端口 8640 被占用
 
@@ -40,17 +32,17 @@ netsh int ipv4 show excludedportrange protocol=tcp
 
 ### `not_running`
 
-模拟器没在运行，或它的收工牌还没完成启动。只有 `start` 才会启动它——这样你重复执行的命令不会把它的窗口带到前台。运行 `busy-emulator start`；它会在收工牌应答后返回。
+模拟器没在运行，或它的收工牌还没完成启动。在检出目录启动后端 `node packages/server/index.mjs`（它常驻占用终端），等收工牌应答后窗口在 `/sgp/emulator/` 打开。
 
 ### `blocked_network` 或 `blocked_file`
 
-命令运行在 AI 代理的沙箱里，沙箱不让它访问 `127.0.0.1`（`blocked_network`）或模拟器的数据文件夹（`blocked_file`）。让你的代理在沙箱外运行 `busy-emulator`，这样它才能在你的电脑上启动模拟器、构建并运行项目的代码。以 Claude Code 为例：当 Claude 请求在沙箱外运行该命令时批准它，或者在项目的 `.claude/settings.local.json` 中加入 `"sandbox": {"network": {"allowLocalBinding": true}}`。
+命令运行在 AI 代理的沙箱里，沙箱不让它访问 `127.0.0.1`（`blocked_network`）或模拟器的数据文件夹（`blocked_file`）。让你的代理在沙箱外运行 `sgp-emulator`，这样它才能在你的电脑上启动模拟器、构建并运行项目的代码。以 Claude Code 为例：当 Claude 请求在沙箱外运行该命令时批准它，或者在项目的 `.claude/settings.local.json` 中加入 `"sandbox": {"network": {"allowLocalBinding": true}}`。
 
 ### `untrusted_project`
 
 构建一个项目会运行它文件夹里的代码：它的依赖、它的 npm 设置、它的构建配置。模拟器直接构建它自己的 `create` 创建的项目；其他任何文件夹（用 `npm create` 建的、克隆的、复制的）都要在你信任一次之后才会构建。只信任你愿意运行其代码的项目。
 
-`busy-emulator trust my-app` 会让模拟器在窗口里弹出对话框询问你。对话框会写明文件夹名；按钮是 **不信任** 和 **信任**。你或你的 AI 代理运行命令，但由你点击。没有别的途径能信任一个文件夹：命令行没有这样的选项（`--trust` 会回答 `trust_needs_person`），代理也不能替你回答。模拟器必须正在运行且开着窗口（`busy-emulator start`）。命令会等你点击 120 秒（用 `--wait <秒数>` 可以等更久，最长 600）。
+`sgp-emulator trust my-app` 会让模拟器在窗口里弹出对话框询问你。对话框会写明文件夹名；按钮是 **不信任** 和 **信任**。你或你的 AI 代理运行命令，但由你点击。没有别的途径能信任一个文件夹：命令行没有这样的选项（`--trust` 会回答 `trust_needs_person`），代理也不能替你回答。模拟器必须正在运行且开着窗口（`sgp-emulator start`）。命令会等你点击 120 秒（用 `--wait <秒数>` 可以等更久，最长 600）。
 
 | 错误码 | 发生了什么 |
 |---|---|
@@ -67,35 +59,35 @@ netsh int ipv4 show excludedportrange protocol=tcp
 
 ### `app_crashed`，或 `run` 后收工牌无显示
 
-`run` 启动应用并观察一秒。`app_crashed` 表示应用脚本立刻因错误停止了；提示会带上错误的第一行。`busy-emulator logs` 显示应用的控制台：它用 `console.log` 打印的内容、错误以及结束原因。修好脚本，再 `build` 并 `run`。
+`run` 启动应用并观察一秒。`app_crashed` 表示应用脚本立刻因错误停止了；提示会带上错误的第一行。`sgp-emulator logs` 显示应用的控制台：它用 `console.log` 打印的内容、错误以及结束原因。修好脚本，再 `build` 并 `run`。
 
 ### `start_interrupted`
 
-模拟器在它的收工牌就绪之前就退出了：启动过程中有人调用了 `quit`、有人关掉了它，或它失败了。再运行一次 `busy-emulator start`；如果它又自己退出，见下文“模拟器反复停止”。
+模拟器在它的收工牌就绪之前就退出了：启动过程中有人调用了 `quit`、有人关掉了它，或它失败了。在检出目录重新运行 `node packages/server/index.mjs`；如果它又自己退出，见下文“模拟器反复停止”。
 
 ### `no_dependencies`、`install_running`、`network_failed`、`network_stalled`、`tool_failed`
 
-- `no_dependencies`：项目还没有 `node_modules`。先运行 `busy-emulator build`，它会安装依赖。
+- `no_dependencies`：项目还没有 `node_modules`。先运行 `sgp-emulator build`，它会安装依赖。
 - `install_running`：另一条命令（窗口里的“构建”按钮、另一个代理）正在安装这个项目的依赖。等它结束后再运行该命令。
-- `network_failed`：npm 连不上 registry。检查你的连接，以及 `~/.npmrc`（Windows 上是 `%USERPROFILE%\.npmrc`）里的 registry 和代理——如果你设置过的话。
+- `network_failed`：npm 连不上 registry。检查你的连接，以及 `%USERPROFILE%\.npmrc` 里的 registry 和代理——如果你设置过的话。
 - `network_stalled`：registry 45 秒没有应答（Wi-Fi 信号差、代理挂起连接等），模拟器于是终止了 npm，不让它再等上几分钟。之前 create 拉取过的包可以走 npm 缓存，无需联网。
 - `tool_failed`：模板的生成器、npm 或 busy-cli 失败了。回答末尾附有该工具打印的内容和它的退出码：按它说的修。失败的 `build` 不会改变收工牌上已有的应用。
 
 ### 应用行上显示“Dependencies not installed”
 
-项目已建好，但 npm 没能取到它的依赖包：那一行会写明原因（“no network”、“no answer from the npm registry”、“the install was stopped”）。**重试** 即可安装；电脑恢复联网后窗口也会自动再试。命令行里 `busy-emulator build --dependencies-only` 效果相同。然后 **刷新** 把应用装到收工牌上。
+项目已建好，但 npm 没能取到它的依赖包：那一行会写明原因（“no network”、“no answer from the npm registry”、“the install was stopped”）。**重试** 即可安装；电脑恢复联网后窗口也会自动再试。命令行里 `sgp-emulator build --dependencies-only` 效果相同。然后 **刷新** 把应用装到收工牌上。
 
 ### 应用被停止：“did not return for 2 s”
 
-应用的 JavaScript 连续运行 2 秒没有返回——比如 `for (;;) {}` 或 `while (!ready) {}` 这样的循环——模拟器便停止了它，如同收工牌上长按 Back 会停止应用一样。`run` 回答 `app_crashed`，`busy-emulator logs` 里有原因。改用 `setTimeout` 或 `await` 来等待，不要用循环：[永不返回的循环](differences.md#我们已知的其他差异)。
+应用的 JavaScript 连续运行 2 秒没有返回——比如 `for (;;) {}` 或 `while (!ready) {}` 这样的循环——模拟器便停止了它，如同收工牌上长按 Back 会停止应用一样。`run` 回答 `app_crashed`，`sgp-emulator logs` 里有原因。改用 `setTimeout` 或 `await` 来等待，不要用循环：永不返回的循环。
 
 ### 收工牌卡死
 
-有的应用会让收工牌不再响应按键：其 JavaScript 内存耗尽后监督程序发出的警告，或定格在不再变化的画面。真机收工牌上要同时按住 Back 和 Start；在这里按窗口中收工牌卡片上（背面屏幕下方）的 **重启收工牌**，或运行 `busy-emulator restart-bar`（MCP 工具 `restart_bar`），它会等到收工牌重新应答。已安装的应用及其设置都会保留。如果应用启动后再次卡死，对它执行 `busy-emulator uninstall` 并修复它。
+有的应用会让收工牌不再响应按键：其 JavaScript 内存耗尽后监督程序发出的警告，或定格在不再变化的画面。真机收工牌上要同时按住 Back 和 Start；在这里按窗口中收工牌卡片上（背面屏幕下方）的 **重启收工牌**，或运行 `sgp-emulator restart-bar`（MCP 工具 `restart_bar`），它会等到收工牌重新应答。已安装的应用及其设置都会保留。如果应用启动后再次卡死，对它执行 `sgp-emulator uninstall` 并修复它。
 
 ### `10.0.4.20` 无应答
 
-那是通过 USB 连接的收工牌的地址；模拟器没有。用 `busy-emulator status` 打印的地址，默认是 `http://127.0.0.1:8640`；busy-cli 用 `--addr 127.0.0.1:8640`。API 文档在该地址的 `/docs/` 下。
+那是通过 USB 连接的收工牌的地址；模拟器没有。用 `sgp-emulator status` 打印的地址，默认是 `http://127.0.0.1:8640`；busy-cli 用 `--addr 127.0.0.1:8640`。API 文档在该地址的 `/docs/` 下。
 
 ### 收工牌上仍是我应用的旧版本
 
@@ -103,19 +95,19 @@ netsh int ipv4 show excludedportrange protocol=tcp
 
 ### 我的应用访问不到我电脑上的服务
 
-这是有意为之：在收工牌上，`localhost` 就是收工牌自己；而在模拟器里，同一地址会连到你自己的数据库和开发服务器。应用的控制台会说明请求被拒绝的原因。`busy-emulator allow-local <port>` 会在模拟器的对话框里询问你；选择 **允许** 后，那个端口在模拟器退出前都可以访问：[收工牌上的应用可以访问什么](differences.md#收工牌上的应用可以访问什么)。
+这是有意为之：在收工牌上，`localhost` 就是收工牌自己；而在模拟器里，同一地址会连到你自己的数据库和开发服务器。应用的控制台会说明请求被拒绝的原因。`sgp-emulator allow-local <port>` 会在模拟器的对话框里询问你；选择 **允许** 后，那个端口在模拟器退出前都可以访问：收工牌上的应用可以访问什么。
 
 ### 网页无法调用模拟器（`403`）
 
-与收工牌不同，模拟器会拒绝其他网站的页面：[谁可以调用模拟器](differences.md#谁可以调用模拟器)。不带浏览器的程序（`busy-cli`、`curl`、脚本）不受影响，所以你自己的页面可以请你电脑上的某个程序代为发请求。桌面应用没有放行页面的设置；拒绝信息里提到的 `--allow-origin` 是从模拟器源码启动的服务端的选项。
+与收工牌不同，模拟器会拒绝其他网站的页面：谁可以调用模拟器。不带浏览器的程序（`busy-cli`、`curl`、脚本）不受影响，所以你自己的页面可以请你电脑上的某个程序代为发请求。桌面应用没有放行页面的设置；拒绝信息里提到的 `--allow-origin` 是从模拟器源码启动的服务端的选项。
 
 ### 模拟器反复停止，或没能启动
 
-在窗口里选择 **重试**。再次失败的话，日志是数据文件夹里的 `logs/shell.log`（macOS 为 `~/Library/Application Support/BUSY Bar Emulator/`，Windows 为 `%LOCALAPPDATA%\BUSY Bar Emulator\`）。带上这个文件报告此问题。
+在窗口里选择 **重试**。再次失败的话，日志是数据文件夹里的 `logs/shell.log`（`%LOCALAPPDATA%\BUSY Bar Emulator\`）。带上这个文件报告此问题。
 
 ### 动画跳帧，或录出的短片中有跳帧
 
-模拟的收工牌跟着你电脑的时钟走；当电脑把模拟器卡住超过半秒（高负载、睡眠、调试器），收工牌会跳过那段时间里没能画出的内容：[电脑很忙时](differences.md#我们已知的其他差异)。关掉占资源的东西再录。真的收工牌不会这样。
+模拟的收工牌跟着你电脑的时钟走；当电脑把模拟器卡住超过半秒（高负载、睡眠、调试器），收工牌会跳过那段时间里没能画出的内容：电脑很忙时。关掉占资源的东西再录。真的收工牌不会这样。
 
 ### `record` 回答无法生成短片
 
@@ -127,7 +119,7 @@ netsh int ipv4 show excludedportrange protocol=tcp
 
 这个登录属于这台电脑上的 GitHub CLI：其他程序，包括 AI 代理，也能使用它。模拟器的确认只覆盖它自己的命令；自己运行 `gh` 的程序不会被模拟器询问任何事。如果你不想要这样，在模拟器中退出登录时勾选“同时在此电脑上退出 GitHub CLI 登录”（如果 GitHub CLI 此前没有账号，它一开始就是勾选的），或者改用手动发布（`SUBMIT.md`）。
 
-要收回这份授权：在“发布到 GitHub”中退出登录（如果该登录是模拟器建立的，勾选“同时在此电脑上退出 GitHub CLI 登录”），然后到 github.com/settings/applications 的 Authorized OAuth Apps 下撤销 **GitHub CLI**。这会让此账号下所有地方的 GitHub CLI 都退出登录。
+要收回这份授权：在“发布到 GitHub”中退出登录（如果该登录是模拟器建立的，勾选“同时在此电脑上退出 GitHub CLI 登录”），然后到 GitHub 设置里的 Authorized OAuth Apps 页下撤销 **GitHub CLI**。这会让此账号下所有地方的 GitHub CLI 都退出登录。
 
 ### 发布到 GitHub：“此电脑上的 GitHub CLI 已登录为 <login>”
 
@@ -137,57 +129,44 @@ netsh int ipv4 show excludedportrange protocol=tcp
 
 ### 发布到 GitHub 看不到 GitHub CLI 的账号
 
-模拟器在 GitHub CLI 的默认位置找它的设置：macOS 上是 `~/.config/gh`，Windows 上是 `%APPDATA%\GitHub CLI`。如果你用 `GH_CONFIG_DIR` 或 `XDG_CONFIG_HOME` 改过位置，模拟器不会跟随——它不读环境变量，而环境变量决定程序去哪里找设置，进而（通过 GitHub CLI 的设置）决定 GitHub CLI 带着你的令牌把请求发到哪里。改为在模拟器里用另一个账号登录，或把设置移回去。
+模拟器在 GitHub CLI 的默认位置找它的设置：`%APPDATA%\GitHub CLI`。如果你用 `GH_CONFIG_DIR` 或 `XDG_CONFIG_HOME` 改过位置，模拟器不会跟随——它不读环境变量，而环境变量决定程序去哪里找设置，进而（通过 GitHub CLI 的设置）决定 GitHub CLI 带着你的令牌把请求发到哪里。改为在模拟器里用另一个账号登录，或把设置移回去。
 
 ### “系统的密码存储未能保存登录信息”
 
-GitHub CLI 无法把令牌存进登录钥匙串（macOS）或凭据管理器（Windows），而模拟器不允许它把令牌存成明文文件：于是会把该账号再从 GitHub CLI 退出。在“钥匙串访问”（macOS）里解锁登录钥匙串，然后重新登录。
-
-## macOS
-
-### macOS 询问钥匙串条目
-
-模拟器自身的代码不在钥匙串里存任何东西。内置的 GitHub CLI 通过系统的 `security` 工具把登录存在 `gh:github.com` 下，所以 macOS 不应询问。如果它问了，请[报告](#报告问题)，并说明你当时在做什么。
+GitHub CLI 无法把令牌存进凭据管理器，而模拟器不允许它把令牌存成明文文件：于是会把该账号再从 GitHub CLI 退出。在凭据管理器中检查并解锁对应条目，然后重新登录。
 
 ## Windows
-
-### “Windows 已保护你的电脑”
-
-SmartScreen 会对尚未签名的安装程序显示它。选择 **更多信息**，确认文件是 `busybar-emulator-win-x64-setup.exe`，然后点 **仍要运行**。详见 [install.md](install.md#windows)。
 
 ### Windows 防火墙询问收工牌模拟器
 
 模拟器只监听 `127.0.0.1`，不需要防火墙规则，所以 Windows 不应询问。如果它问了，选 **取消**：模拟器照常工作。然后报告此问题，并说明你当时在做什么。
 
-### 卸载程序提示模拟器或某条命令正在运行
-
-只要有模拟器的程序从应用文件夹里运行着，卸载程序就不会删任何东西。它自己不结束任何进程，只是请模拟器退出；提示里会写明进程名。仍在运行的 `busy-emulator` 命令（如 `build` 或 `dev`）必须先结束：等它跑完，或在它运行的地方按 Ctrl+C。如果是模拟器本身没退，在它的菜单里选 **退出**。然后重跑卸载程序（[install.md](install.md#卸载)）。
-
 ### 在 PowerShell、Git Bash 或 cmd 中运行命令行
 
-Windows 上的代理在不同的 shell 里跑命令：Codex 和 Cursor 用 PowerShell，Claude Code 用 PowerShell 或 Git Bash。完整路径不含空格时，用正斜杠书写、不加引号，同一条命令在 PowerShell、Git Bash 和 cmd 里都能运行（含英文字母以外的字符也没关系）：
+Windows 上的代理在不同的 shell 里跑命令：Codex 和 Cursor 用 PowerShell，Claude Code 用 PowerShell 或 Git Bash。本仓库的模拟器从源码检出运行，命令行是检出目录里的 `busy-emulator.mjs`，统一用 `node` 调用（`<emu>` 换成你的检出目录，路径不含空格时三种 shell 写法相同）：
 
 ```sh
-C:/Users/you/AppData/Local/busy-emulator/bin/busy-emulator.exe status
+node <emu>/packages/server/cli/busy-emulator.mjs status
 ```
 
-带空格的路径需要引号，每种 shell 写法不同。PowerShell 里，以引号路径或变量给出程序时前面要加 `&`；不加的话它只会把这串字符打印出来：
+路径含空格时需要引号，每种 shell 写法不同。PowerShell 里以变量给出脚本路径时直接传给 `node` 即可：
 
 ```powershell
-& "$env:LOCALAPPDATA\busy-emulator\bin\busy-emulator.exe" status
+$cli = "<emu>/packages/server/cli/busy-emulator.mjs"
+node $cli status
 ```
 
 在 Git Bash 和 cmd 中：
 
 ```sh
-"$LOCALAPPDATA/busy-emulator/bin/busy-emulator.exe" status
+node "<emu>/packages/server/cli/busy-emulator.mjs" status
 ```
 
 ```bat
-"%LOCALAPPDATA%\busy-emulator\bin\busy-emulator.exe" status
+node "<emu>\packages\server\cli\busy-emulator.mjs" status
 ```
 
-在 Git Bash 里反斜杠是转义符：`C:\Users\you\…` 不加引号会丢掉反斜杠。`busy-emulator help` 会按各 shell 需要的形式打印命令：一种写法在三个 shell 里都通用时只给一行。`--out` 的文件夹绝不能以 `\"` 结尾：PowerShell 会把这个引号传下去并吞掉该行剩下的部分。以 `/` 结尾或不带斜杠。
+在 Git Bash 里反斜杠是转义符：`C:\Users\you\…` 不加引号会丢掉反斜杠。`sgp-emulator help` 会按各 shell 需要的形式打印命令：一种写法在三个 shell 里都通用时只给一行。`--out` 的文件夹绝不能以 `\"` 结尾：PowerShell 会把这个引号传下去并吞掉该行剩下的部分。以 `/` 结尾或不带斜杠。
 
 ### 删除（或 `uninstall --delete-files`）仍保留文件夹
 
@@ -199,11 +178,11 @@ busy-cli 用 Windows 自带的 `tar.exe` 打包应用，而 `tar.exe` 处理不�
 
 ### `npm run build` 报 `Rolldown failed to resolve import`，或 `npm create @busy-app/app` 什么都没装
 
-这两个都是 busy-tools 在 Windows 上的 bug（busy-cli 0.6.0 和 create-app 0.5.0）。`busy-emulator create` 和 `busy-emulator build` 已绕开它们；请用这两个命令代替 npm 脚本。
+这两个都是 busy-tools 在 Windows 上的 bug（busy-cli 0.6.0 和 create-app 0.5.0）。`sgp-emulator create` 和 `sgp-emulator build` 已绕开它们；请用这两个命令代替 npm 脚本。
 
 ## 全部错误码（按字母排序）
 
-回答中每个 `code` 的含义和应对方法。命令行的回答和窗口中发布相关的提示使用同一套错误码。上文有对应小节的错误码会链接过去。退出码：`usage` 和 `unknown_command` 为 2，其余一律为 1。发布步骤见[从零到提交应用目录](from-zero-to-catalog.md)。
+回答中每个 `code` 的含义和应对方法。命令行的回答和窗口中发布相关的提示使用同一套错误码。上文有对应小节的错误码会链接过去。退出码：`usage` 和 `unknown_command` 为 2，其余一律为 1。发布步骤见窗口中的 Publish 向导。
 
 ### 创建与运行应用
 
@@ -217,7 +196,6 @@ busy-cli 用 Windows 自带的 `tar.exe` 打包应用，而 `tar.exe` 处理不�
 | `folder_not_empty` | `create` 需要新文件夹名，或空文件夹 | 给个没被占用的名字：`create` 自己建文件夹 |
 | `icon_exists` | 项目已有图标，会保留 | 加 `--force` 替换 |
 | `interrupted` | npm 或 busy-cli 没跑完就被中止 | 重新运行该命令 |
-| `move_app` | macOS 从磁盘镜像或“下载”运行应用 | [移到“应用程序”](#move-busy-bar-emulator-to-applications-macos) |
 | `network_failed`、`network_stalled`、`no_dependencies`、`tool_failed` | npm 或 busy-cli 没完成它那份工作 | [项目的工具](#no_dependencies-install_running-network_failed-network_stalled-tool_failed) |
 | `no_node_tools` | 这份模拟器缺少自带的 Node | 重装模拟器 |
 | `no_settings` | 应用没有 `src/appmeta/settings.json` | 补一个：[你的第一个应用](first-app.md#每条命令的作用) |
@@ -270,7 +248,7 @@ busy-cli 用 Windows 自带的 `tar.exe` 打包应用，而 `tar.exe` 处理不�
 |---|---|---|
 | `account_gone` | GitHub CLI 不再有该账号的登录 | 重新选择账号 |
 | `bad_answer` | GitHub CLI 给出了不属于 GitHub 的代码或页面 | 稍后再试 |
-| `bad_catalog` | `--catalog` 的值不是 GitHub 仓库 | 写成 `owner/name`，或它在 github.com 上的地址 |
+| `bad_catalog` | `--catalog` 的值不是 GitHub 仓库 | 写成 `owner/name`，或它在 GitHub 上的地址 |
 | `busy` | 有上传正在进行 | 等它，或取消 |
 | `canceled`、`upload_canceled` | 登录或上传被中止；仓库保持原样 | 想发的时候再开始 |
 | `catalog_closed` | 看不到应用目录仓库（是私有的，或不存在） | 核对地址，稍后再试，或[手动发送](first-app.md#手动发送) |
@@ -297,8 +275,8 @@ busy-cli 用 Windows 自带的 `tar.exe` 打包应用，而 `tar.exe` 处理不�
 | `not_packaged` | 还没有应用目录条目 | 先构建打包 |
 | `not_pushed` | 应用还没从这台电脑上发到 GitHub | 先发布到 GitHub |
 | `not_signed_in`、`not_signing_in`、`signing_in`、`unauthorized` | 未登录、已有登录在进行中，或 GitHub 不再认它 | 登录 GitHub，或完成进行中的登录 |
-| `not_ticked` | 应用目录的 checklist 没有逐项勾完（可选项可以不勾）；什么都没发出 | 把属实的项都勾上：[发送到应用目录](from-zero-to-catalog.md#发送到应用目录) |
-| `other_catalog` | 应用目录不是 BUSY 的（busy-app/busy-apps-catalog 或其开发副本），而你没确认它的名字 | 发给 busy-app/busy-apps-catalog，或在模拟器询问时按名字确认该应用目录 |
+| `not_ticked` | 应用目录的 checklist 没有逐项勾完（可选项可以不勾）；什么都没发出 | 把属实的项都勾上 |
+| `other_catalog` | 应用目录不是官方的那个（或其开发副本），而你没确认它的名字 | 发给官方应用目录仓库，或在模拟器询问时按名字确认该应用目录 |
 | `outside`、`bad_path`、`too_large`、`too_many_files` | 文件在项目之外、文件名 GitHub 不接受、超过 50 MB，或文件太多 | 在“仓库文件”里排除它，或改名 |
 | `rate_limited` | 触到 GitHub 的请求频率上限 | 按提示说的时间再试 |
 | `refused` | 你选了取消；什么都没发出 | 除非你发话，代理不应再次询问 |
@@ -315,16 +293,16 @@ busy-cli 用 Windows 自带的 `tar.exe` 打包应用，而 `tar.exe` 处理不�
 | `no_project_folder`、`several_folders`、`trash_failed`、`not_deletable` | `uninstall --delete-files` 移不走项目文件夹 | [删除保留文件夹](#删除-或-uninstall-delete-files-仍保留文件夹) |
 | `quit_failed`、`quit_timeout` | 让模拟器退出它没退 | 在它的菜单里选 **退出** |
 | `tool_timeout` | 某个 MCP 工具超时被中止 | 再跑一次 |
-| `unknown_command`、`usage` | 没有此命令，或选项不对 | `busy-emulator help` 列出全部命令和选项 |
+| `unknown_command`、`usage` | 没有此命令，或选项不对 | `sgp-emulator help` 列出全部命令和选项 |
 
 ## 报告问题
 
-在 https://github.com/busy-app/busybar-emulator/issues 开一个 issue。写入：
+在模拟器仓库的 issues 区开一个 issue。写入：
 
-- `busy-emulator version` 的输出（模拟器版本、它的固件和它使用的工具；代理用 `--json`），以及你的系统：macOS 版本、Mac 是 Apple Silicon 还是 Intel，或 Windows 版本；
+- `sgp-emulator version` 的输出（模拟器版本、它的固件和它使用的工具；代理用 `--json`），以及你的 Windows 版本；
 - 你做了什么、预期什么、实际发生了什么：命令及其完整回答（如果是代理运行的，带 `--json`），或你在窗口里点了什么；
-- 与收工牌显示内容有关时，一张截图（`busy-emulator screenshot --scale 8`）或一段短片（`busy-emulator record`）；
-- 模拟器停止或没能启动时，数据文件夹里的 `logs/shell.log`（macOS 为 `~/Library/Application Support/BUSY Bar Emulator/`，Windows 为 `%LOCALAPPDATA%\BUSY Bar Emulator\`）；
+- 与收工牌显示内容有关时，一张截图（`sgp-emulator screenshot --scale 8`）或一段短片（`sgp-emulator record`）；
+- 模拟器停止或没能启动时，数据文件夹里的 `logs/shell.log`（`%LOCALAPPDATA%\BUSY Bar Emulator\`）；
 - 如果可以分享，能复现问题的最小项目。
 
 日志和回答会写出你工作用的文件夹名，也就是你的用户名：附上前先过一遍。如果你的应用在收工牌上表现不同，请说明并附上收工牌的固件版本：以收工牌为准。

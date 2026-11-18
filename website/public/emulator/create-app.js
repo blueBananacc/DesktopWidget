@@ -489,23 +489,37 @@
   }
   const installFailed = (e, again) => (e?.code === NO_GESTURE ? { text: `请再点一次${again}` } : { failed: true, text: [e?.message ?? String(e), e?.hint].filter(Boolean).join(" ") });
 
-  /** Install a package's Choose: the system's file dialog, the look, the trust dialog, the install. */
-  async function installPackage() {
+  /** Install a package's Choose: the browser's file input, the package as data:, then stage→install on the bar. */
+  function installPackage() {
     if (!state || state.busy) return;
-    state.busy = "在系统对话框里选择应用包，然后回答关于它的问题";
-    state.said = null;
-    state.installed = null;
-    render();
-    let result;
-    try {
-      result = await actions().projects.installPackage();
-    } catch (e) {
-      if (!state) return;
-      state.busy = null;
-      state.said = installFailed(e, "选择");
-      return render();
-    }
-    installAnswered(result);
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".tgz,.tar.gz,application/gzip,application/x-tar";
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file || !state || state.busy) return;
+      state.busy = `正在安装 ${file.name}`;
+      state.said = null;
+      state.installed = null;
+      render();
+      let result;
+      try {
+        const data = await new Promise((resolve, reject) => {
+          const rd = new FileReader();
+          rd.onload = () => resolve(rd.result);
+          rd.onerror = () => reject(rd.error);
+          rd.readAsDataURL(file);
+        });
+        result = await actions().projects.installPackage({ data, name: file.name });
+      } catch (e) {
+        if (!state) return;
+        state.busy = null;
+        state.said = installFailed(e, "选择");
+        return render();
+      }
+      installAnswered(result);
+    });
+    input.click();
   }
 
   /** Import from GitHub of a repository that is no app project: its latest release's package, installed. */
@@ -725,11 +739,18 @@
       // A control without a caret.
     }
     const head = make("header", "create-app-head");
+    const doc = make("a", "top-btn create-app-doc");
+    doc.href = "/sgp/emulator/docs.html";
+    doc.target = "_blank";
+    doc.rel = "noopener";
+    doc.title = "如何写出一个能在设备上运行的应用：开发规范、API 与发布流程";
+    doc.innerHTML = icon("file-document");
+    doc.append(make("span", "", "应用开发文档"));
     const title = make("h2", "", "创建应用");
     title.id = "create-app-title";
     const shut = button("icon-btn create-app-close", "", close, { picture: "cross", title: "关闭（Esc）" });
     shut.ariaLabel = "关闭";
-    head.append(title, shut);
+    head.append(doc, title, shut);
 
     // The ways, one row of tabs in the middle; what the chosen one offers below them.
     const rail = make("div", "create-app-rail");
@@ -1044,7 +1065,7 @@
       const parts = [];
       const steps = make("div", "create-app-result none");
       steps.innerHTML = icon("box-open");
-      steps.append(make("p", "", "在系统对话框里选择 .tgz 应用包。模拟器会像真机一样读取它的清单并校验，然后告诉你应用的名称、ID、版本和文件来源，等你确认后才安装。"));
+      steps.append(make("p", "", "选择本机上的 .tgz 应用包。模拟器会像真机一样读取它的清单并校验，然后告诉你应用的名称、ID、版本，安装后直接启动。"));
       parts.push(steps);
       const last = state.installed;
       if (last?.ok) {

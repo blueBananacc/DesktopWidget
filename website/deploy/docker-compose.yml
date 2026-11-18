@@ -1,0 +1,27 @@
+services:
+  web:
+    image: nginx:1.27-alpine
+    container_name: sgp-web
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    volumes:
+      - ./site:/usr/share/nginx/html:ro
+      - ./tls:/etc/nginx/tls:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - emu
+
+  # 云端模拟器：固件 wasm 运行时 + /emu-shell 工具桥。
+  # 不发布端口——只经 sgp-web 反代可达；数据与项目持久在两个卷里。
+  emu:
+    build: ./emu-image
+    container_name: sgp-emu
+    restart: unless-stopped
+    volumes:
+      - emu-data:/data
+      - emu-projects:/projects
+
+volumes:
+  emu-data:
+  emu-projects:

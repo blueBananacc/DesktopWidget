@@ -1,7 +1,7 @@
 # 设备端自定义屏幕（路径 B）：C/WAT → WebAssembly → wasm3
 
 > 状态：**已实现**（2026-11-03；可行性验证 + 完整落地，替代原"JS→帧上传"方案）
-> 结论：wasm3 沙箱按状态执行 .wasm 屏幕 app，成本远低于 Busy Bar 的 JerryScript 方案。
+> 结论：wasm3 沙箱按状态执行 .wasm 屏幕 app，成本远低于参考固件的 JerryScript 方案。
 
 ## 方案
 
@@ -23,7 +23,7 @@ Agent/用户按宿主 API 规范写的 C 代码
 |---|---|---|
 | wasm3 引擎 flash | **+57KB** | 基线（core+Wire+u8g2）349,612B → +wasm3 406,716B |
 | 合并进主固件预估 | 1,256KB / 1,310KB（≈96%） | 不需要换芯片；更宽裕需调分区表（8MB flash 有空间） |
-| 运行时堆占用 | **~23KB** | env + 16KB wasm 栈/线性内存 + 模块；对比 Busy Bar 每 app 128–512KB JS 堆 |
+| 运行时堆占用 | **~23KB** | env + 16KB wasm 栈/线性内存 + 模块；对比参考固件每 app 128–512KB JS 堆 |
 | 静态 RAM 增量 | +184B | 可忽略 |
 | wasm 模块大小 | **228B**（弹跳小球） | LittleFS 轻松存几十个 app |
 
@@ -64,6 +64,6 @@ Agent/用户按宿主 API 规范写的 C 代码
 
 ## 对比参照
 
-- Busy Bar：JerryScript + 设备内 HTTP 服务器 + tar.gz 包管理——重一个数量级（每 app 128–512KB 堆、引擎 200KB+ flash）
+- 参考固件：JerryScript + 设备内 HTTP 服务器 + tar.gz 包管理——重一个数量级（每 app 128–512KB 堆、引擎 200KB+ flash）
 - 本方案：wasm3（57KB flash）+ 固定线性内存 + 几 KB 的 wasm 模块——**同能力、低一个量级**
 - 现有 anim 帧方案：动画在上传时定格；wasm 方案屏幕可以是活的（按键交互、实时数据）

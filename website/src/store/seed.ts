@@ -81,9 +81,9 @@ export const seedReminders = (now: number): Reminder[] => {
 };
 
 export const seedMembers = (now: number): Member[] => [
-  { id: "lin", name: "小林", status: "work", via: "espnow", updatedAt: now - 60_000 },
+  { id: "lin", name: "小林", status: "work", via: "cloud", updatedAt: now - 60_000 },
   { id: "zhou", name: "老周", status: "busy", until: "15:30", via: "gateway", updatedAt: now - 3 * 60_000 },
-  { id: "chen", name: "陈姐", status: "meet", via: "espnow", updatedAt: now - 3 * 3600_000 },
+  { id: "chen", name: "陈姐", status: "meet", via: "cloud", updatedAt: now - 3 * 3600_000 },
 ];
 
 /** 根据计划表生成今天到目前为止的状态区间，用于演示回顾数据 */

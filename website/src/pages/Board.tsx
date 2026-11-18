@@ -1,6 +1,7 @@
 import { Lock, Radio, Users, QrCode, LogOut, Unplug } from "lucide-react";
 import { useStore } from "../store/AppStore";
 import { statusMeta } from "../domain/statuses";
+import { memberViaLabel } from "../domain/types";
 import { ago, hhmm } from "../domain/time";
 import { Banner, Card, CardHeader, EmptyState, PageHeader, RowItem, SettingRow, StatusChip, Tile, Toggle, UnknownChip } from "../ui/Primitives";
 import { useToast } from "../ui/Toast";
@@ -42,13 +43,13 @@ export function BoardPage() {
                 className={isStale ? "stale" : ""}
                 lead={<span className={`avatar ${AV[i % AV.length]}`}>{m.name.slice(-1)}{!isStale && m.status && <span className="pres" style={{ background: statusMeta(m.status).color }} />}</span>}
                 title={m.name}
-                desc={isStale ? `最后更新 ${hhmm(m.updatedAt)} · 可能已过期` : `${m.via === "espnow" ? "ESP-NOW" : "网关转发"} · ${ago(m.updatedAt, now)}`}
+                desc={isStale ? `最后更新 ${hhmm(m.updatedAt)} · 可能已过期` : `${memberViaLabel(m.via)} · ${ago(m.updatedAt, now)}`}
                 meta={isStale || !m.status ? <UnknownChip /> : <StatusChip id={m.status}>{statusMeta(m.status).label}{m.until ? ` · 至 ${m.until}` : ""}</StatusChip>}
               />
             );
           })}
           {s.membersLive && s.members.length === 0 && (
-            <div className="card-b"><p className="hint" style={{ margin: 0 }}>区域内还没有其他成员广播。其他收工牌开启「分享我的当前状态」且区域码一致时会出现在这里。</p></div>
+            <div className="card-b"><p className="hint" style={{ margin: 0 }}>区域内还没有其他成员。同一区域码的成员开启「分享我的当前状态」后，状态会同步到云端并出现在这里。</p></div>
           )}
         </Card>
         <div className="stack">
@@ -70,7 +71,7 @@ export function BoardPage() {
             </div>
           </Card>
           <Banner tone="info" icon={<Radio className="i" />}>
-            <b>数据从哪里来</b>同一区域的设备之间用 ESP-NOW 互相广播状态，网页不能直接收到。看板上的成员状态由连接到网页的设备作为网关转发；跨区域查看需要以后接入联网服务。
+            <b>数据从哪里来</b>成员把当前状态发布到云端同步服务（与固件的 MQTT 同模型），同一区域码的成员实时看到彼此；连接的设备转发的局域网成员也会一并列出。只同步显式分享的当前状态，不包含计划、待办和历史。
           </Banner>
           {!s.membersLive && <Banner tone="info" icon={<Users className="i" />}>当前成员数据为演示数据，接入网关设备后显示真实成员。</Banner>}
         </div>

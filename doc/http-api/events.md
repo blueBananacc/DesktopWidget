@@ -59,7 +59,7 @@ data: <JSON，含 "type": "<名称>">
 | `schedules` | 计划表增删改/启用/暂停/模式切换、跨天 | 快照 |
 | `stdefs` | 自定义状态增删改 | 快照 |
 | `keys` / `led` / `share` | 对应设置改变 | 快照 |
-| `peers` | ESP-NOW 成员表变化；有成员时每 30 s | 快照，成员 10 min 未听到即移除 |
+| `peers` | 局域网成员表变化（mDNS 发现模型）；有成员时每 30 s | 快照，成员 10 min 未听到即移除 |
 | `sttState` | 录音开始/结束/出错 | `ms` 已录时长 |
 | `aud` | 录音中约 68 帧/秒 | IMA-ADPCM 帧（base64），帧内自带解码状态 |
 | `agentReq` | 设备 agent 循环需要 LLM | 客户端调 LLM 后回 `POST /api/agent/response` |

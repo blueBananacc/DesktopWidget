@@ -1,6 +1,6 @@
 import { defineConfig, type Plugin, type ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react";
-import { emulatorShell, emulatorHtmlInjection } from "./scripts/emulator-shell.mjs";
+import { emulatorShell } from "./scripts/emulator-shell.mjs";
 
 // 本地设备模拟器（node packages/server/index.mjs）的 API 与事件流。
 // 它的 entry-guard 校验 Host/Origin：changeOrigin 把 Host 改写成 127.0.0.1:8640，
@@ -15,16 +15,14 @@ const emuProxy: ProxyOptions = {
 
 // /emu-shell：模拟器窗口的"桌面壳"在浏览器里的替身。vendored 窗口通过 window.busyShell
 // 调本机能力（建项目、构建、运行、文件夹对话框…），这里把它转给 busy-emulator CLI。
-// 同时给 /sgp/emulator/index.html 注入 browser-shell.js——只有存在此 middleware 的环境
-// （dev / preview）才有桥；静态部署的页面自动回落到纯浏览器模式。
+// index.html 已固定引入 browser-shell.js：本 middleware 存在时桥生效（dev/preview/生产容器），
+// 纯静态托管时 action() 自动回落 bridge_down 报错。
 const emulatorShellPlugin: Plugin = {
   name: "sgp-emulator-shell",
   configureServer(server) {
-    server.middlewares.use(emulatorHtmlInjection());
     server.middlewares.use("/emu-shell", emulatorShell);
   },
   configurePreviewServer(server) {
-    server.middlewares.use(emulatorHtmlInjection());
     server.middlewares.use("/emu-shell", emulatorShell);
   },
 };
@@ -41,6 +39,8 @@ export default defineConfig({
       "/api": emuProxy,    // 设备 HTTP API
       "/emulator": emuProxy,
       "/docs": emuProxy,   // 模拟器的 API 文档页
+      // 共享看板 presence 服务（node scripts/presence-server.mjs）；剥掉 /hub 前缀后转给它的根路由
+      "/hub": { target: "http://127.0.0.1:8643", changeOrigin: true, rewrite: (p) => p.replace(/^\/hub/, "") },
     },
   },
 });

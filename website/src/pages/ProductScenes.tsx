@@ -1,33 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BellOff, ChevronLeft, ChevronRight, Mic, MicOff, Pause, PhoneOff, RotateCcw, Play, Sunset, Video, Wifi } from "lucide-react";
-import type { ReactNode } from "react";
-
-// ===== 商品图：顶部俯视（纯 CSS，尺寸全部按容器宽度 cqw 缩放，主图与缩略图共用） =====
-const TOP_KEYS: [ReactNode, string][] = [[<Sunset />, "收工"], [<BellOff />, "勿扰"], [<ChevronLeft />, "上一个"], [<ChevronRight />, "下一个"]];
-export function TopView() {
-  return (
-    <div className="pd-top" role="img" aria-label="顶部俯视：4 枚按键与最右侧旋钮">
-      <div className="pd-top-shadow" />
-      <div className="pd-top-spill" />
-      <div className="pd-top-body">
-        <div className="pd-top-keys">
-          {TOP_KEYS.map(([icon, label]) => (
-            <div key={label} className="pd-top-key">
-              <span className="pd-top-label">{label}</span>
-              <i>{icon}</i>
-            </div>
-          ))}
-        </div>
-        <span className="pd-top-mark">收工牌</span>
-        <div className="pd-top-knob">
-          <span className="pd-top-label">旋钮 · 定时</span>
-          <i><b /></i>
-        </div>
-        <div className="pd-top-lip" />
-      </div>
-    </div>
-  );
-}
+import { BellOff, Mic, MicOff, Pause, PhoneOff, RotateCcw, Play, Video, Wifi } from "lucide-react";
 
 // ===== 72×16 全彩 LED 点阵屏：在 72×16 离屏画布上画内容，再逐像素放大成圆点（进视口才刷新） =====
 export const MW = 72, MH = 16;
@@ -85,11 +57,11 @@ export function LedMatrix({ draw, className = "" }: { draw: DrawFn; className?: 
   return <canvas ref={ref} className={`pd-led ${className}`} aria-hidden="true" />;
 }
 
-/** 与“点一点看看”同一外壳（pd-dev：顶部 4 键 + 最右旋钮 + 底部光晕），屏幕换成可编程点阵；small = 小尺寸场景（门牌等） */
+/** 与整机渲染同构的外壳（pd-dev：银色机身，顶部 模式拨盘 + Start/Pause + 编码轮 + Back，后缘背屏条，底部光晕），屏幕换成可编程点阵；small = 小尺寸场景（门牌等） */
 export function MatrixDevice({ draw, color, small, className = "" }: { draw: DrawFn; color: string; small?: boolean; className?: string }) {
   return (
     <div className={`pd-dev is-matrix ${small ? "is-tiny" : ""} ${className}`} style={{ ["--c" as string]: color }}>
-      <div className="pd-dev-keys"><i /><i /><i /><i /><b /></div>
+      <div className="pd-dev-top"><i className="pd-dev-backscr" /><i className="pd-dev-dial" /><i className="pd-dev-start" /><i className="pd-dev-back" /><i className="pd-dev-knob" /></div>
       <div className="pd-dev-body"><div className="pd-dev-screen"><LedMatrix draw={draw} /></div></div>
       <div className="pd-dev-glow" />
     </div>
@@ -126,6 +98,19 @@ function marquee(g: CanvasRenderingContext2D, s: string, t: number, color: strin
   const w = g.measureText(s).width + 24;
   const x = MW - ((t * speed) % (w + MW));
   txt(g, s, x, 8.5, color);
+}
+
+/** 主屏画面工厂（对齐渲染图：大像素字 + 右下角小读数）。word 按宽度自适应字号 */
+export function drawStatusScreen(word: string, sub: string, color: string): DrawFn {
+  return (g) => {
+    let size = 14;
+    g.font = `900 ${size}px ${CN}`;
+    const w = g.measureText(word).width;
+    if (w > 62) { size = Math.floor((size * 62) / w); g.font = `900 ${size}px ${CN}`; }
+    g.textAlign = "left"; g.textBaseline = "middle"; g.fillStyle = color;
+    g.fillText(word, Math.max(2, (MW - Math.min(w, 62)) / 2), 8);
+    if (sub) { g.font = `700 6px ${CN}`; g.textAlign = "right"; g.fillText(sub, 70, 12.5); }
+  };
 }
 
 const drawRest: DrawFn = (g, t) => {
@@ -198,7 +183,7 @@ function MuteAllArt() {
       </div>
       <div className="pd-la-watch"><BellOff /></div>
       <div className="pd-la-phone"><BellOff /></div>
-      <div className="pd-la-badge"><span className="pd-logo-mark" /><div><em>配合使用</em><b>收工牌 App</b></div></div>
+      <div className="pd-la-badge"><img className="pd-logo-mark" src={`${import.meta.env.BASE_URL}shougongpai.svg`} alt="" /><div><em>配合使用</em><b>收工牌 App</b></div></div>
     </div>
   );
 }

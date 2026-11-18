@@ -65,19 +65,20 @@
 
 ## 语音与设备 Agent
 
-- `POST /api/stt/start|stop` 起停 I2S 采音 → `aud` 事件上行 IMA-ADPCM 帧（16kHz，~68fps，帧自洽）→ 网页解码 POST 到用户配置的 ASR；`sttState` 报状态；60s 自动收尾、断连即停
+- 拾音两条链路（参考固件的"配套端拾音"模型——设备只收文本不收音频）：**浏览器麦克风**（网页 getUserMedia 采集→降采样 16k→WAV，默认，无需连设备）或 **设备麦克风**（`POST /api/stt/start|stop` 起停 I2S 采音 → `aud` 事件上行 IMA-ADPCM 帧，16kHz ~68fps 帧自洽；`sttState` 报状态；60s 自动收尾、断连即停）
+- 两条链路汇入同一出口：网页把 WAV POST 到用户配置的 ASR → 识别文本 `POST /api/stt/result{text}` 注入设备
 - `POST /api/stt/result{text}` → 设备跑 agent 循环（`agentReq` 事件带 msgs+tools → 网页代理调 LLM → `POST /api/agent/response` 回填 assistant 消息 → 设备执行 tool_calls，≤4 轮、每轮 30s）；`POST /api/agent/cancel` 中止；`agentDone/agentErr` 收尾
 
-## 共享看板：ESP-NOW 设备↔设备
+## 共享看板：mDNS 局域网发现 + 云端同步（参考固件的 MQTT 模型）
 
-- 同区域设备 ESP-NOW 局域网广播互通（STA、信道1、FF:FF:FF:FF:FF:FF）；浏览器收不到 ESP-NOW，**连接到网页的设备兼任网关**把成员表经 `peers` 事件转发
-- 广播包 `{sgp:1,i,n,z,st,t}`：MAC 尾 id/昵称/区域码/**仅当前状态**/校时戳；只共享当前状态
-- `GET /api/peers` 成员表、`PATCH /api/share` 开关/昵称/区域码（`/share.json` 持久，en 默认 false 不广播）；成员 10min 未听到剔除
-- ESP-NOW 明文广播，只作同房间信标
+- 成员同步与参考固件同模型：局域网 mDNS 发现彼此，状态发布到云端同步服务（MQTT broker 语义），同区成员订阅互见
+- 云端同步走 presence hub（`POST /hub/pub` 发布/心跳、`GET /hub/peers` 拉取同区成员）；网页 presence 客户端（`device/presence.ts`）在连接后订阅、开「分享」后发布，90s 心跳 TTL 过期即离线
+- 局域网侧：设备发现的成员经 `peers` 事件转发给网页（`via:"gateway"`），与云端成员（`via:"cloud"`）按 via 槽位合并共存
+- 负载只含 `{zone,id,name,st,until}`：昵称/区域码/**仅当前状态**/可选持续到时刻；`PATCH /api/share` 开关/昵称/区域码（`/share.json` 持久，en 默认 false 不发布）
 
 ## 接入约束
 
 - Web Bluetooth 需 HTTPS 或 localhost、Chrome/Edge、用户手势触发；iOS Safari 不可用；Web Serial 同限制
 - 新增通道只需实现 `ByteLink`（`http/link.ts`），页面不感知
-- **网页无法直接收 ESP-NOW**：同区域设备互见需指定网关设备转发
+- **网页直连云端 presence 服务**：设备不在线时云端成员仍可互见；局域网发现的成员仍需设备转发
 - 网页做不到、App 才能做的：手机静音联动、iOS 后台 BLE、系统日历访问、关页后的可靠提醒

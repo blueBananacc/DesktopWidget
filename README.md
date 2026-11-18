@@ -39,34 +39,43 @@
 
 ```mermaid
 flowchart TB
-  subgraph APP[应用层]
-    JS[JS 应用<br/>JerryScript 沙箱]
-    MOB[收工牌 App<br/>手机 / 电脑 / 手表]
-    EXT[脚本 · Agent · 智能家居]
+  subgraph APP["应用层"]
+    JS["JS 应用<br/>JerryScript 沙箱"]
+    MOB["收工牌 App<br/>手机 / 电脑 / 手表"]
+    EXT["脚本 · Agent · 智能家居"]
   end
-  subgraph IF[对外接口]
-    HTTP[HTTP API<br/>web_server + api_tokens]
-    BLE[蓝牙<br/>ble]
-    MAT[Matter<br/>matter]
-    MQ[MQTT · TLS<br/>mqtt]
+  subgraph IF["对外接口"]
+    HTTP["HTTP API<br/>web_server + api_tokens"]
+    BLE["蓝牙<br/>ble"]
+    MAT["Matter<br/>matter"]
+    MQ["MQTT · TLS<br/>mqtt"]
   end
-  subgraph SRV[设备端服务]
-    BUSY[状态与计时<br/>busy · busy_timer]
-    DISP[显示<br/>front_display · back_display · gui]
-    LED[状态灯<br/>status_lights · brightness_control · light_sensor]
-    PWR[电源<br/>power · low_power]
-    NET[网络<br/>wifi · usb_network · discovery · intercom]
-    UPD[升级与恢复<br/>updater · startup_dfu_hook · recovery]
-    STO[存储与配置<br/>storage · setting_provider]
+  subgraph SRV["设备端服务"]
+    ST["状态与计时<br/>busy · busy_timer"]
+    DISP["显示<br/>front_display · back_display · gui"]
+    LED["状态灯<br/>status_lights · brightness_control · light_sensor"]
+    PWR["电源<br/>power · low_power"]
+    NET["网络<br/>wifi · usb_network · discovery · intercom"]
+    UPD["升级与恢复<br/>updater · startup_dfu_hook · recovery"]
+    STO["存储与配置<br/>storage · setting_provider"]
   end
-  JS -- loopback fetch --> HTTP
-  MOB --> BLE & MQ
-  EXT --> HTTP & MAT
-  HTTP & BLE & MAT & MQ --> BUSY
-  BUSY --> DISP & LED
-  BUSY -. FuriState / PubSub .-> MAT & MQ
-  NET --- HTTP & MQ
-  UPD --> STO & PWR
+  JS -- "loopback fetch" --> HTTP
+  MOB --> BLE
+  MOB --> MQ
+  EXT --> HTTP
+  EXT --> MAT
+  HTTP --> ST
+  BLE --> ST
+  MAT --> ST
+  MQ --> ST
+  ST --> DISP
+  ST --> LED
+  ST -. "FuriState / PubSub" .-> MAT
+  ST -. "FuriState / PubSub" .-> MQ
+  NET --- HTTP
+  NET --- MQ
+  UPD --> STO
+  UPD --> PWR
 ```
 
 ### 服务间通信约定

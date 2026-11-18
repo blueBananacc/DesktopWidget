@@ -75,7 +75,7 @@ export function AppShell() {
   return (
     <div className="app app-full">
       <aside className="side">
-        <div className="logo"><span className="logo-mark" />收工牌</div>
+        <div className="logo"><img className="logo-mark" src={`${import.meta.env.BASE_URL}shougongpai.svg`} alt="" />收工牌</div>
         {GROUPS.map((g, gi) => (
           <div key={gi}>
             {g.label && <div className="nav-group">{g.label}</div>}

@@ -14,7 +14,7 @@ html:has(.pd) { scroll-behavior: smooth; scroll-padding-top: 72px; }
 .pd-nav { position: sticky; top: 0; z-index: 20; background: rgba(255,255,255,.82); backdrop-filter: saturate(1.6) blur(14px); border-bottom: 1px solid var(--line); }
 .pd-nav-in { display: flex; align-items: center; height: 64px; gap: 32px; }
 .pd-logo { display: inline-flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; color: var(--ink); }
-.pd-logo-mark { width: 26px; height: 18px; border-radius: 6px; background: #1C1F24; box-shadow: inset 0 0 0 3px #1C1F24, inset 0 0 0 5px #FF4D57; position: relative; }
+.pd-logo-mark { width: 24px; height: 24px; display: block; }
 .pd-nav-links { display: flex; gap: 26px; flex: 1; }
 .pd-nav-links a { color: var(--ink-2); font-weight: 500; font-size: 14px; }
 .pd-nav-links a:hover { color: var(--ink); }
@@ -55,7 +55,7 @@ html:has(.pd) { scroll-behavior: smooth; scroll-padding-top: 72px; }
 
 /* 图位 */
 .pd-shot { position: relative; overflow: hidden; border-radius: var(--r-md); background: var(--canvas); width: 100%; }
-.pd-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pd-shot img, .pd-shot video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .pd-shot.is-missing { background: repeating-linear-gradient(135deg, #F3F4F7 0 12px, #EDEFF3 12px 24px); border: 1.5px dashed var(--line-2); }
 .pd-shot-ph { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center; padding: 16px; color: var(--ink-2); font-size: 13px; }
 .pd-shot-ph b { color: var(--ink); font-size: 15px; }
@@ -77,18 +77,27 @@ html:has(.pd) { scroll-behavior: smooth; scroll-padding-top: 72px; }
 .pd-appshot-bar span { margin-left: 8px; font-size: 11.5px; color: var(--ink-3); }
 .pd-appshot img { width: 100%; display: block; }
 
-/* 点阵屏设备 */
-.pd-dev { --c: #3BE08F; position: relative; width: min(520px, 100%); padding-top: 22px; margin: 0 auto; }
-.pd-dev-keys { position: absolute; top: 0; left: 9%; right: 6%; height: 30px; display: flex; align-items: flex-end; gap: 4.5%; }
-.pd-dev-keys i { width: 9%; height: 13px; border-radius: 8px 8px 3px 3px; background: linear-gradient(180deg, #4A4E55, #2A2D32); box-shadow: inset 0 1px 0 rgba(255,255,255,.15); }
-.pd-dev-keys b { margin-left: auto; width: 13%; height: 30px; border-radius: 10px 10px 4px 4px; background: repeating-linear-gradient(90deg, #3B3F45 0 2px, #2C2F34 2px 4px); box-shadow: inset 0 2px 0 rgba(255,255,255,.18); }
-.pd-dev-body { position: relative; padding: 14px; border-radius: 28px; background: linear-gradient(180deg, #3A3D43, #24262A 60%, #1C1E21); box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 30px 60px -24px rgba(0,0,0,.55); }
-.pd-dev-screen { position: relative; aspect-ratio: 3.4 / 1; border-radius: 16px; background: #08090A; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; animation: pd-swap .35s ease-out; }
-.pd-dev-screen::after { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at center, transparent 0 1.6px, rgba(8,9,10,.92) 2.1px) 0 0 / 4px 4px; pointer-events: none; }
-.pd-dev-big { color: var(--c); font-weight: 900; font-size: clamp(30px, 7.5vw, 62px); line-height: 1.05; letter-spacing: .06em; text-shadow: 0 0 2px var(--c), 0 0 22px var(--c); }
-.pd-dev-sub { color: var(--c); opacity: .85; font-weight: 700; font-size: clamp(13px, 2.4vw, 20px); letter-spacing: .1em; margin-top: 4px; }
+/* 点阵屏设备（与整机渲染图同形：银白机身，顶部 模式拨盘 / Start·Pause / 编码轮+Back，后缘背屏条） */
+.pd-dev { --c: #3BE08F; position: relative; width: min(540px, 100%); padding-top: 30px; margin: 0 auto; }
+.pd-dev-top { position: absolute; top: 0; left: 0; right: 0; height: 34px; }
+/* 背屏条：横跨中部、略低于编码轮，银色框 + 深色玻璃 + 顶部橙色棱线 */
+.pd-dev-backscr { position: absolute; left: 27%; right: 34%; top: 1px; height: 17px; border-radius: 5px 5px 3px 3px; background: linear-gradient(180deg, #EDEEF2, #C9CCD4 70%, #B2B7C0); box-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 2px 4px rgba(0,0,0,.3); }
+.pd-dev-backscr::before { content: ""; position: absolute; left: 10%; right: 10%; top: 1.5px; height: 2px; border-radius: 1px; background: linear-gradient(90deg, #FF8A50, #E8541F); box-shadow: 0 0 5px rgba(255,106,61,.5); }
+.pd-dev-backscr::after { content: ""; position: absolute; left: 5%; right: 5%; top: 5px; bottom: 4px; border-radius: 3px; background: linear-gradient(180deg, #14161A, #1E2227); box-shadow: inset 0 1px 3px rgba(0,0,0,.7); }
+/* 模式拨盘：左端低矮枪灰圆柱，顶部一颗橙色中点 */
+.pd-dev-dial { position: absolute; left: 9%; top: 15px; width: 8.5%; height: 12px; border-radius: 5px 5px 3px 3px; background: linear-gradient(180deg, #6E747E, #4A4E56 60%, #33363C); box-shadow: inset 0 1.5px 0 rgba(255,255,255,.3), 0 2px 4px rgba(0,0,0,.4); }
+.pd-dev-dial::after { content: ""; position: absolute; left: 50%; top: 1.5px; width: 3px; height: 3px; margin-left: -1.5px; border-radius: 50%; background: #FF6A3D; box-shadow: 0 0 3px rgba(255,106,61,.7); }
+/* Start/Pause：中右银色方形大键 */
+.pd-dev-start { position: absolute; right: 23%; top: 11px; width: 13%; height: 13px; border-radius: 4px 4px 3px 3px; background: linear-gradient(180deg, #F4F5F8, #D5D8DE 60%, #BCC1C9); box-shadow: inset 0 1.5px 0 rgba(255,255,255,.9), inset 0 -2px 3px rgba(0,0,0,.18), 0 2px 4px rgba(0,0,0,.3); }
+/* Back：编码轮左侧的橙色小圆键，正面只露出半颗 */
+.pd-dev-back { position: absolute; right: 18.5%; top: 16px; width: 3%; height: 8px; border-radius: 4px 4px 2px 2px; background: linear-gradient(180deg, #FF8A50, #E8541F); box-shadow: inset 0 1px 0 rgba(255,255,255,.4), 0 1px 3px rgba(0,0,0,.35); }
+/* 编码轮：右端最高的控件，银色滚花柱体 + 根部橙色环 */
+.pd-dev-knob { position: absolute; right: 4%; top: 2px; width: 13%; height: 27px; border-radius: 7px 7px 4px 4px; background: linear-gradient(180deg, #E9EBF0, #C5C9D1 45%, #9CA1AA); box-shadow: inset 0 2px 0 rgba(255,255,255,.75), inset 0 -3px 4px rgba(0,0,0,.28), 0 3px 6px rgba(0,0,0,.4); }
+.pd-dev-knob::before { content: ""; position: absolute; left: 8%; right: 8%; bottom: 4px; height: 4px; border-radius: 2px; background: linear-gradient(180deg, #FF9A5C, #E8541F); box-shadow: 0 0 7px rgba(255,106,61,.6); }
+.pd-dev-knob::after { content: ""; position: absolute; inset: 3px 10%; border-radius: 5px 5px 3px 3px; background: repeating-linear-gradient(90deg, rgba(40,44,52,.3) 0 2.5px, transparent 2.5px 6px); box-shadow: inset 0 1px 1px rgba(255,255,255,.4); }
+.pd-dev-body { position: relative; padding: 13px; border-radius: 22px; background: linear-gradient(180deg, #F4F5F8, #DDE0E6 55%, #C7CBD3); box-shadow: inset 0 1px 0 rgba(255,255,255,.9), inset 0 -2px 4px rgba(0,0,0,.08), 0 30px 60px -24px rgba(0,0,0,.5); }
+.pd-dev-screen { position: relative; aspect-ratio: 72 / 16; border-radius: 12px; background: #08090A; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; animation: pd-swap .35s ease-out; }
 .pd-dev-glow { position: absolute; left: 12%; right: 12%; bottom: -26px; height: 40px; background: var(--c); filter: blur(28px); opacity: .45; border-radius: 50%; z-index: -1; transition: background .3s; }
-.pd-dev.is-small { width: min(380px, 100%); }
 @keyframes pd-swap { from { opacity: .2; } to { opacity: 1; } }
 
 /* 状态演示 */
@@ -239,37 +248,23 @@ html:has(.pd) { scroll-behavior: smooth; scroll-padding-top: 72px; }
 .pd-foot-in > span { display: inline-flex; align-items: center; gap: 6px; }
 .pd-foot svg { width: 14px; height: 14px; }
 
-/* 商品图：顶部俯视（全部按容器宽度 cqw 缩放） */
-.pd-top { position: absolute; inset: 0; container-type: inline-size; overflow: hidden; background: radial-gradient(120% 90% at 50% 30%, #F5F6F8 0%, #E6E8EC 55%, #D5D8DE 100%); }
-.pd-top-shadow { position: absolute; left: 14cqw; right: 14cqw; top: 41cqw; height: 6cqw; border-radius: 50%; background: rgba(20,22,28,.45); filter: blur(3.2cqw); }
-.pd-top-spill { position: absolute; left: 20cqw; right: 20cqw; top: 44.5cqw; height: 5cqw; border-radius: 50%; background: #FF4D57; opacity: .32; filter: blur(3cqw); }
-.pd-top-body { position: absolute; left: 11cqw; right: 11cqw; top: 22.5cqw; height: 20cqw; border-radius: 4.6cqw; background: radial-gradient(90% 140% at 30% 0%, #575B63 0%, #383B41 38%, #26282C 80%), #2B2E33; box-shadow: inset 0 .22cqw 0 rgba(255,255,255,.16), inset 0 -.5cqw .6cqw rgba(0,0,0,.45), 0 .3cqw .5cqw rgba(0,0,0,.25); }
-.pd-top-keys { position: absolute; left: 6.5cqw; top: 50%; transform: translateY(-50%); display: flex; gap: 3.4cqw; }
-.pd-top-key, .pd-top-knob { position: relative; }
-.pd-top-key i { display: flex; align-items: center; justify-content: center; width: 6cqw; height: 6cqw; border-radius: 50%; color: #7D838D; background: radial-gradient(circle at 38% 30%, #5E636B 0%, #3B3E44 55%, #2A2D31 100%); box-shadow: 0 0 0 .32cqw #1A1C1F, 0 0 0 .42cqw rgba(255,255,255,.06), 0 .6cqw .9cqw rgba(0,0,0,.55), inset 0 .18cqw 0 rgba(255,255,255,.2); }
-.pd-top-key i svg { width: 2.4cqw; height: 2.4cqw; stroke-width: 2.2; }
-.pd-top-key:first-child i { color: #FF8A5C; }
-.pd-top-mark { position: absolute; left: 65%; top: 50%; transform: translate(-50%, -50%); padding-left: .5em; font-size: 1.9cqw; font-weight: 800; letter-spacing: .5em; color: #2E3135; text-shadow: 0 .1cqw 0 rgba(255,255,255,.09); }
-.pd-top-knob { position: absolute; right: 5cqw; top: 50%; transform: translateY(-50%); }
-.pd-top-knob i { position: relative; display: block; width: 12.5cqw; height: 12.5cqw; border-radius: 50%; background: repeating-conic-gradient(#43474E 0 3deg, #24272B 3deg 6deg); box-shadow: 0 0 0 .35cqw #1A1C1F, 0 1cqw 1.6cqw rgba(0,0,0,.6); }
-.pd-top-knob i::before { content: ""; position: absolute; inset: 1.1cqw; border-radius: 50%; background: repeating-radial-gradient(circle at 50% 50%, rgba(255,255,255,.035) 0 .18cqw, rgba(0,0,0,.05) .18cqw .36cqw), radial-gradient(circle at 36% 30%, #7A7F88 0%, #4A4E55 40%, #2C2F33 85%); box-shadow: inset 0 .2cqw .2cqw rgba(255,255,255,.22), inset 0 -.4cqw .6cqw rgba(0,0,0,.5); }
-.pd-top-knob b { position: absolute; left: 50%; top: 2.2cqw; width: .8cqw; height: .8cqw; margin-left: -.4cqw; border-radius: 50%; background: #F1F2F4; box-shadow: 0 0 .5cqw rgba(255,255,255,.6); z-index: 1; }
-.pd-top-lip { position: absolute; left: 3.5cqw; right: 3.5cqw; bottom: -.5cqw; height: 1cqw; border-radius: 0 0 1cqw 1cqw; background: linear-gradient(180deg, #0E0F11, #050506); box-shadow: 0 .5cqw 1.4cqw rgba(255,77,87,.55); }
-.pd-top-lip::after { content: ""; position: absolute; left: 4%; right: 4%; bottom: .15cqw; height: .18cqw; border-radius: .1cqw; background: #FF4D57; box-shadow: 0 0 .8cqw #FF4D57; opacity: .85; }
-.pd-top-label { --gap: 10.5cqw; position: absolute; left: 50%; bottom: calc(100% + var(--gap)); transform: translateX(-50%); white-space: nowrap; font-size: 1.6cqw; font-weight: 600; color: #4E5460; }
-.pd-top-label::after { content: ""; position: absolute; left: 50%; top: calc(100% + .7cqw); height: calc(var(--gap) - 1.6cqw); border-left: 1px solid rgba(120,128,140,.55); }
-.pd-top-knob .pd-top-label { --gap: 7cqw; }
-.pd-thumbs .pd-top-label { display: none; }
-
 /* LED 点阵设备（72×16，canvas 绘制） */
 .pd-led { display: block; width: 100%; max-width: 100%; min-width: 0; height: auto; aspect-ratio: 72 / 16; border-radius: 10px; background: #0B0C0E; }
 .pd-dev.is-matrix .pd-dev-screen { display: block; aspect-ratio: auto; padding: 4% 3%; animation: none; }
 .pd-dev.is-matrix .pd-dev-screen::after { display: none; }
 .pd-dev.is-matrix .pd-led { background: transparent; border-radius: 0; }
-.pd-dev.is-tiny { padding-top: 11px; }
-.pd-dev.is-tiny .pd-dev-keys { height: 15px; }
-.pd-dev.is-tiny .pd-dev-keys i { height: 7px; border-radius: 4px 4px 2px 2px; }
-.pd-dev.is-tiny .pd-dev-keys b { height: 15px; border-radius: 5px 5px 2px 2px; }
+.pd-dev.is-tiny { padding-top: 15px; }
+.pd-dev.is-tiny .pd-dev-top { height: 17px; }
+.pd-dev.is-tiny .pd-dev-backscr { top: 0; height: 9px; border-radius: 3px 3px 2px 2px; }
+.pd-dev.is-tiny .pd-dev-backscr::before { top: 1px; height: 1px; }
+.pd-dev.is-tiny .pd-dev-backscr::after { top: 3px; bottom: 2px; }
+.pd-dev.is-tiny .pd-dev-dial { top: 7px; height: 6px; border-radius: 3px 3px 1px 1px; }
+.pd-dev.is-tiny .pd-dev-dial::after { top: 1px; width: 1.5px; height: 1.5px; margin-left: -.75px; }
+.pd-dev.is-tiny .pd-dev-start { top: 5px; height: 7px; border-radius: 2px; }
+.pd-dev.is-tiny .pd-dev-back { top: 8px; height: 4px; border-radius: 2px 2px 1px 1px; }
+.pd-dev.is-tiny .pd-dev-knob { top: 1px; height: 14px; border-radius: 4px 4px 2px 2px; }
+.pd-dev.is-tiny .pd-dev-knob::before { bottom: 2px; height: 2px; }
+.pd-dev.is-tiny .pd-dev-knob::after { inset: 2px 8%; }
 .pd-dev.is-tiny .pd-dev-body { padding: 6px; border-radius: 13px; }
 .pd-dev.is-tiny .pd-dev-screen { border-radius: 8px; }
 .pd-dev.is-tiny .pd-dev-glow { bottom: -14px; height: 22px; filter: blur(16px); }

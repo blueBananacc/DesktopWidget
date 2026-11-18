@@ -1,18 +1,18 @@
 # JavaScript Applications
 
-JavaScript Applications (JS Apps for short) are the intended way of building BUSY Bar applications by third-party developers.
+JavaScript Applications (JS Apps for short) are the intended way of building 收工牌 applications by third-party developers.
 
 ## Principle of operation
 
 JS Apps are plain JavaScript files with additional metadata, packaged into a `tar.gz` archive for distribution. The scripts are interpreted using
 the on-device [JerryScript](https://jerryscript.net/)-based engine, and the interaction with the firmware is done via loopback `fetch` requests
-using the [HTTP API](https://docs.busy.app/bar/dev/http-api). Input events are handled separately, using a built-in `listen` function.
+using the [HTTP API](../../doc/http-api/). Input events are handled separately, using a built-in `listen` function.
 
-For more information, refer to the [online documentation](https://developer.dev.busy.app/javascript-applications.html) or build and view it locally by running `./fbt doxy`.
+For more information, refer to the [online documentation](../documentation/JavaScript%20Applications.dox.md) or build and view it locally by running `./fbt doxy`.
 
 ## Creating a new application
 
-[BUSY Tools](https://github.com/busy-app/busy-tools) contains the necessary tooling for bootstrapping a BUSY Bar application.
+[busy-tools](https://github.com/busy-app/busy-tools) contains the necessary tooling for bootstrapping a 收工牌 application.
 
 Alternatively, see [JS App Example](app.busy.js_example) for an example of a manually-written, plain JS app.
 

@@ -6,16 +6,18 @@ import type {
 import { allStatusIds, cacheStatusNames, loadStatusNameCache, setCustomStatusDefs, statusMeta, statusNameCache } from "../domain/statuses";
 import { atToday, dateKey, hhmm, startOfDay, uid } from "../domain/time";
 import { lastDays, totalsForSegments } from "../domain/review";
-import { defaultSettings, seedMembers, seedReminders } from "./seed";
+import { defaultSettings, seedMembers, seedPast, seedReminders } from "./seed";
 import type { AgentMessage, DevSched, DevStdef, DeviceEvent, DeviceTodo } from "../device/protocol";
 import type { ByteLink } from "../device/http/link";
 import { TunnelClient } from "../device/http/client";
 import { DeviceApi, type StateWrite } from "../device/api";
 import { MockLink } from "../device/http/mockLink";
+import { syncCustomStatusApps, syncStatusToEmulator } from "../device/emulator";
 import { BleLink } from "../device/http/bleLink";
 import { SerialLink } from "../device/http/serialLink";
 import { u8ToB64, hashBytes, pendingClears, setDeployedHash, setPendingClears } from "../device/app";
 import { callLlm, loadLlmCfg, llmErrText } from "../device/llm";
+import { presence } from "../device/presence";
 
 const STORAGE_KEY = "shougongpai.v1";
 /** 本机保留的历史天数（含今天），超出的在跨天时清理 */
@@ -116,6 +118,8 @@ export interface AppState {
   /** "昨天遗留"演示数据是否已注入；持久化标记，删除后不再注入 */
   seededLeftover?: boolean;
   seededLeftover2?: boolean;
+  /** 演示历史（seedPast 29 天）是否已注入归档；持久化标记，删除后不再注入 */
+  seededPast?: boolean;
   members: Member[];
   /** 收到过真实 peers 快照后置真：看板不再显示演示成员 */
   membersLive?: boolean;
@@ -142,11 +146,13 @@ export interface AppState {
 type Snapshot = Pick<AppState, "current" | "segments" | "offworkToday" | "timer">;
 
 const createInitial = (now: number): AppState => {
+  const past = seedPast(now); // 演示历史：回顾页开箱有约一个月的分量（用户删除后不再注入）
   return {
     current: { id: "work", source: "manual", since: now, until: undefined },
     segments: [], // 今天的区间是设备事实：连接后由 seg 推送填充，网页不虚构记录
-    history: {},
-    historySegments: {},
+    history: past.history,
+    historySegments: past.segments,
+    seededPast: true,
     schedules: [],
     activeScheduleId: "",
     day: dateKey(now),
@@ -183,6 +189,8 @@ const load = (now: number): AppState => {
       // 名字缓存灌注册表：已删状态的历史仍能显示原名；自定义状态注册表只在连接后由设备 stdefs 快照填充
       loadStatusNameCache(saved.statusNameCache ?? {});
       setCustomStatusDefs([]);
+      // 演示历史一次性注入（seededPast 标记持久化）：键级合并，存档里已有的日期以存档为准
+      const seedHist = saved.seededPast ? undefined : seedPast(now);
       return {
         ...createInitial(now), ...saved, breakSyncedAt: 0, settings: { ...defaultSettings, ...saved.settings, keys,
           // 旧布局取值（large/withTime/minimal）固件从未实现：统一迁回固件真实支持的"完整"
@@ -209,6 +217,9 @@ const load = (now: number): AppState => {
         activeScheduleId: "",
         pausedToday: false,
         customStatuses: [],
+        history: seedHist ? { ...seedHist.history, ...saved.history } : saved.history,
+        historySegments: seedHist ? { ...seedHist.segments, ...saved.historySegments } : saved.historySegments,
+        seededPast: true,
       };
     }
   } catch {
@@ -464,7 +475,7 @@ const makeActions = (set: (fn: (s: AppState) => AppState) => void, get: () => Ap
         // 旋钮定时配置：事实源在设备 /knob.json，设备回 timerCfg 快照后镜像校准
         if (patch.knobStep !== undefined || patch.knobMax !== undefined)
           apiCall((a) => a.patchTimerConfig({ step: next.knobStep, max: next.knobMax }));
-        // 分享开关：事实源在设备 /share.json（ESP-NOW 广播由设备执行）
+        // 分享开关：事实源在设备 /share.json；开启后网页 presence 客户端把当前状态发布到云端同步服务（与固件的 MQTT 发布同模型）
         if (patch.shareEnabled !== undefined) apiCall((a) => a.patchShare({ en: next.shareEnabled }));
       } else {
         next.keys = s.settings.keys;                 // 断连时设备真值不可写，本地镜像回滚
@@ -565,6 +576,28 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }
     sendSnapshot().catch(() => setDevice((d) => ({ ...d, pending: d.pending + 1 })));
   }, [s.current, s.settings.led, s.settings.ledBrightness, s.settings.screenLayout, s.settings.keys]);
+
+  // 状态即应用：任何路径切了状态，模拟器里就启动对应应用（没开模拟器则静默跳过）
+  useEffect(() => {
+    syncStatusToEmulator(s.current.id);
+  }, [s.current.id]);
+
+  // 云端同步（对应固件的 MQTT 上行/订阅）：连接后订阅同区成员；开启「分享」后把当前状态发布到 presence hub
+  useEffect(() => {
+    presence.configure({
+      watch: device.state === "connected",
+      share: s.settings.shareEnabled,
+      zone: s.user.zone,
+      name: s.user.name,
+      status: { st: s.current.id, until: s.current.until ? hhmm(s.current.until) : undefined },
+      // hub 成员只替换 via:"cloud" 槽位：设备转发的局域网成员（peers 事件）与云端成员共存
+      onMembers: (cloud) => set((prev) => ({
+        ...prev,
+        membersLive: true,
+        members: [...prev.members.filter((m) => m.via !== "cloud"), ...cloud],
+      })),
+    });
+  }, [device.state, s.settings.shareEnabled, s.user.zone, s.user.name, s.current.id, s.current.until]);
 
   const tapsRef = useRef(new Set<(m: DeviceEvent) => void>());
   const onDeviceMessage = useCallback((cb: (m: DeviceEvent) => void) => {
@@ -752,6 +785,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           const customStatuses = m.list.map(stdefToMirror);
           setCustomStatusDefs(customStatuses);
           cacheStatusNames(customStatuses);
+          syncCustomStatusApps(stateRef.current.customStatuses.map((d) => d.id), m.list); // 模拟器：状态即应用
           set((s) => ({ ...s, customStatuses, statusNameCache: statusNameCache() }));
           break;
         }
@@ -764,15 +798,18 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           set((s) => ({ ...s, settings: { ...s.settings, led: m.map, ledBrightness: m.br, ledNightOff: m.night } }));
           break;
         case "share":
-          // 事实源在设备 /share.json：广播开关 + 共享昵称 + 区域码
+          // 事实源在设备 /share.json：分享开关 + 共享昵称 + 区域码
           set((s) => ({ ...s, settings: { ...s.settings, shareEnabled: m.en }, user: { ...s.user, name: m.name || s.user.name, zone: m.zone || s.user.zone } }));
           break;
         case "peers":
-          // 事实源在网关设备：成员表整表替换（设备只转发 ESP-NOW 听到的广播）
+          // 事实源在网关设备：设备转发的局域网成员表（替换非云端槽位，云端成员由 presence hub 单独维护）
           set((s) => ({
             ...s,
             membersLive: true,
-            members: m.list.map((p) => ({ id: p.i, name: p.n || `设备 ${p.i}`, status: p.st as StatusId, via: "espnow" as const, updatedAt: p.at ?? Date.now() })),
+            members: [
+              ...s.members.filter((old) => old.via === "cloud"),
+              ...m.list.map((p) => ({ id: p.i, name: p.n || `设备 ${p.i}`, status: p.st as StatusId, via: "gateway" as const, updatedAt: p.at ?? Date.now() })),
+            ],
           }));
           break;
         case "stdefErr":
@@ -791,8 +828,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const seq = ++connectSeqRef.current;
       setDevice((d) => ({ ...d, kind, state: "connecting", apps: undefined, appErr: undefined })); // 安装清单以新连接的设备上报为准
       try {
-        // 真机：等设备推送区间并采纳后才恢复下发 state（模拟设备无此流程，立即下发）
-        awaitAdoptionRef.current = kind !== "mock";
+        // 等设备推送区间并采纳后才恢复下发 state：设备是当前状态的权威（模拟设备同路径，保真）
+        awaitAdoptionRef.current = true;
         const name = grantedOnly && link.openGranted ? await link.openGranted() : await link.open();
         if (connectSeqRef.current !== seq) { // 握手期间被断开：孤立连接自行拆掉，不写状态不记通道
           await link.close().catch(() => {});
@@ -864,6 +901,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     autoReconnectDone.current = true;
     const last = localStorage.getItem("sgp-last-transport");
     if (last === "ble" || last === "serial" || last === "mock") connect(last, true).catch(() => {});
+    else connect("mock").catch(() => {}); // 从未连过：默认接模拟设备，开箱即有数据
   }, [connect]);
 
   const disconnect = useCallback(async () => {

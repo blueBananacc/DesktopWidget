@@ -1,6 +1,6 @@
 # File Formats {#file_formats}
 
-The BUSY Bar uses a number of custom file formats. This page describes them in
+The 收工牌 uses a number of custom file formats. This page describes them in
 detail, as well as provides rationale for inventing these formats as opposed to
 using already established ones.
 
@@ -19,7 +19,7 @@ using already established ones.
 ### Why invent this?
 None of the preexisting public bitmap animation formats support what we call
 "sections", i.e. named ranges of frame numbers. They are used all over the
-place in the BUSY Bar, mostly in animated menus. Ever seen the "START / SETUP"
+place in the 收工牌, mostly in animated menus. Ever seen the "START / SETUP"
 one in BUSY, CUSTOM and APPS modes? Those are actually animations with 4
 sections:
   - two for when each of the options is resting while selected (`item-0`, `item-1`);

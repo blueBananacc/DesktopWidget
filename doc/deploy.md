@@ -17,11 +17,17 @@ ssh -i C:\Users\666\.ssh\sgp_deploy -o StrictHostKeyChecking=no root@120.55.125.
 - 注意：同目录的 `hronfire_deploy` 私钥**有密码**，别用错；PowerShell 里 `ssh-keygen -N '""'` 生成的是字面引号密码，要空密码用 `-N ''`
 - 服务器上添加新公钥：阿里云控制台 → ECS 实例 → 远程连接 Workbench → `echo '<pub>' >> /root/.ssh/authorized_keys`，再 `chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys`（sshd StrictModes 会拒绝权限过宽的 key 文件）
 
-## 本站部署形态（2026-11-04 起）
+## 本站部署形态（2026-11-18 起：网站 + 云端模拟器）
 
 ```
 https://120.55.125.13 ──443──► sgp-web 容器（nginx:1.27-alpine → /opt/sgp-web/site/sgp）
-                               裸域 / → 302 到 /sgp/；应用 base=/sgp/
+                               ├─ 裸域 / → 302 到 /sgp/；应用 base=/sgp/
+                               ├─ /_emu、/api、/docs、/emulator、stage3d → sgp-emu:8642（TCP 转发口）
+                               └─ /emu-shell → sgp-emu:8641（浏览器工具桥，NDJSON 流）
+                              sgp-emu 容器（node:20-alpine，不发布端口）：
+                               ├─ packages/server/index.mjs —— 模拟器本体，只绑 127.0.0.1:8640
+                               ├─ run.mjs 里的 TCP 转发 0.0.0.0:8642 → 127.0.0.1:8640（跨容器入口）
+                               └─ shell/emu-shell-server.mjs —— /call、/ping → sgp-emulator CLI
 http://120.55.125.13  ──80───► free-hire-frontend（原有系统，零改动；/main 入口是它的可选重定向）
 ```
 
@@ -31,12 +37,24 @@ URL 约定：**本站入口固定 `https://120.55.125.13/sgp/`**——用路径�
 
 | 文件 | 作用 |
 |---|---|
-| `docker-compose.yml` | 独立 compose 项目：nginx:1.27-alpine，只发布 `443:443`，`restart: unless-stopped` |
-| `nginx.conf` | TLS + `/`→302 `/sgp/` + `location /sgp/` SPA fallback（`try_files $uri $uri/ /sgp/index.html`，React Router 必需） |
+| `docker-compose.yml` | 独立 compose 项目：web（nginx:1.27-alpine，`443:443`）+ emu（构建自 ./emu-image），`restart: unless-stopped` |
+| `nginx.conf` | TLS + `/`→302 `/sgp/` + SPA fallback + 模拟器反代（Host/Origin 改写回环，等价 vite `changeOrigin`；`/_emu` SSE 关缓冲长超时；`/emu-shell` 转发到 8641） |
+| `emu-image/` | 模拟器构建上下文：`emulator/`（packages/server 全量 + engine 顶层 .mjs + firmware.json + build/{1.3.1,apps-assets}）、`shell/`（emulator-shell.mjs + emu-shell-server.mjs）、`Dockerfile`、`run.mjs` |
 | `tls/cert.pem` `key.pem` | 自签证书，`CN=SAN=120.55.125.13`，3650 天，2036 年到期 |
 | `site/sgp/` | 网站静态文件（构建产物直接铺这里，容器只读挂载） |
 
+模拟器数据持久在两个 compose 卷：`emu-data`（/data：应用、信任表、server key）、`emu-projects`（/projects：网页创建的应用项目）。**所有访客共享同一台云端模拟设备**——谁装的应用、按的按键大家都能看到。
+
 证书是**自签**的——浏览器首次访问要点「高级 → 继续访问」，例外会被记住。要消掉警告需要域名 + 真证书（Let's Encrypt），目前没有域名。
+
+## 部署云端模拟器
+
+```powershell
+cd C:\Users\666\Desktop\shangxiabanbaijian\code\website
+powershell -File scripts\deploy-emulator.ps1   # -EmulatorRepo <path> 可换源码检出
+```
+
+脚本做的事：把模拟器源码裁剪成构建上下文（`deploy/emu-image/`，已 gitignore）→ tar+scp 上传 → 服务器 `docker compose up -d --build emu` → 换新 `docker-compose.yml`/`nginx.conf` 并 `nginx -s reload` → 容器内 `/_emu/status` 健康检查。镜像内 `apk add git` + npm 源指向 npmmirror（create app 要联网装模板依赖）。
 
 ## 更新网站
 
@@ -45,7 +63,7 @@ cd C:\Users\666\Desktop\shangxiabanbaijian\code\website
 powershell -File scripts\deploy.ps1
 ```
 
-脚本做的事：`npm run build` → `scp -r dist\* root@…:/opt/sgp-web/site/sgp/` → `chmod -R a+rX`（**必需**：scp 可能落下 700 目录，容器内 nginx 非 root 读不到文件时会被 SPA fallback 顶包成 index.html——症状是白屏、js 请求返回 ~453B HTML）→ `curl -k https://127.0.0.1/sgp/` 健康检查。**纯静态替换，容器不用重启**。
+脚本做的事：`npm run build` → `scp -r dist\* root@…:/opt/sgp-web/site/sgp/` → `chmod -R a+rX`（**必需**：scp 可能落下 700 目录，容器内 nginx 非 root 读不到文件时会被 SPA fallback 顶包成 index.html——症状是白屏、js 请求返回 ~453B HTML）→ `curl -k https://127.0.0.1/sgp/` 健康检查。**纯静态替换，容器不用重启**。注意改了 `deploy/nginx.conf` 或 compose 时不要走 deploy.ps1（它只发 dist），走 deploy-emulator.ps1。
 
 ## 设备连接原理（为什么 HTTPS 是必须的）
 

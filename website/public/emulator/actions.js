@@ -101,7 +101,7 @@
        * name, version, running, message, file }, { ok: false, code: "declined" } after Cancel, or why not; null when
        * no file was chosen.
        */
-      installPackage: () => call("projects.package.install"),
+      installPackage: (options) => call("projects.package.install", options && { data: options.data, name: options.name }),
     }),
     /**
      * Delete in the Apps list: the app leaves the emulator (stopped, off the bar, its projects forgotten); with

@@ -1178,14 +1178,6 @@ function quietJob(folder) {
 function settingsFoot() {
   const foot = make("div", "ac-settings-foot");
   foot.append(make("span", "", "The app reads its settings when it starts."));
-  const link = make("a", "btn small ac-local-web");
-  link.id = "app-settings-local-web";
-  link.href = appSettingsLink.href;
-  link.target = "_blank";
-  link.rel = "noopener";
-  link.innerHTML = icon("open-in-new");
-  link.append(make("span", "", "Open in Local Web"));
-  foot.append(link);
   return foot;
 }
 
@@ -4280,5 +4272,33 @@ if (RECORD_BUTTON && inShell()) {
   }
 }
 renderCapture();
+
+// ---------------------------------------------------------------- the BUSY Bar's name
+// The name on the card: double-click it to rename. Kept in localStorage, "收工牌" when never set or cleared.
+const NAME_KEY = "busy-emulator.device-name";
+const deviceName = $("#device-name");
+if (deviceName) {
+  const saved = localStorage.getItem(NAME_KEY);
+  if (saved?.trim()) deviceName.textContent = saved;
+  const commit = (input) => {
+    const name = input.value.trim().slice(0, 32) || "收工牌";
+    localStorage.setItem(NAME_KEY, name);
+    input.replaceWith(deviceName);
+    deviceName.textContent = name;
+  };
+  deviceName.addEventListener("dblclick", () => {
+    const input = make("input", "device-name-edit");
+    input.value = deviceName.textContent ?? "";
+    input.maxLength = 32;
+    deviceName.replaceWith(input);
+    input.focus();
+    input.select();
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") commit(input);
+      else if (event.key === "Escape") input.replaceWith(deviceName);
+    });
+    input.addEventListener("blur", () => commit(input));
+  });
+}
 
 connect();

@@ -874,7 +874,8 @@ select.ov-input { appearance: none; padding-right: 32px; cursor: pointer; }
 .oled { display: block; width: 160px; height: 80px; image-rendering: pixelated; background: #000; }
 .device-about { display: flex; flex-direction: column; gap: var(--s-1); min-width: 0; }
 .device-head { display: flex; align-items: center; gap: var(--s-3); min-width: 0; }
-.device-name { font-size: 18px; line-height: 24px; font-weight: 500; }
+.device-name { font-size: 18px; line-height: 24px; font-weight: 500; cursor: text; }
+.device-name-edit { width: 8em; font: 500 18px/24px inherit; color: var(--ink); background: var(--surface-2, #fff); border: 1px solid var(--line-2, #d6d9e0); border-radius: 6px; padding: 0 6px; }
 .link { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--dimmed); font-size: 12px; line-height: 16px; font-weight: 500; white-space: nowrap; }
 .link::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dimmed); }
 .link.live { color: var(--muted); }
@@ -988,7 +989,7 @@ select.ov-input { appearance: none; padding-right: 32px; cursor: pointer; }
 /* ---------------------------------------------------------------- layout-v2: smaller windows
 
    Down to the shell's smallest window (880×600): the top bar's quiet words go first, then the account's name. */
-@media (max-width: 1180px) { #report-bug span, .top-doc span, .account-name, .account .caret { display: none; } #report-bug { padding: 0 7px; } }
+@media (max-width: 1180px) { #report-bug span, .account-name, .account .caret { display: none; } #report-bug { padding: 0 7px; } }
 @media (max-width: 1000px) { .topbar { gap: var(--s-3); } .stage { padding: var(--s-2) var(--s-4) var(--s-3); } }
 @media (max-height: 720px) { .app-actions { margin-top: var(--s-4); } .tabs { margin-top: var(--s-4); } }
 @media (max-height: 640px) { .stage { gap: var(--s-2); padding-bottom: var(--s-2); } .device-card { padding: var(--s-2); } }
@@ -1714,6 +1715,7 @@ body.creating-app { overflow: hidden; }
 .create-app-head { display: flex; align-items: center; justify-content: center; min-height: 64px; padding: 20px 56px 4px; }
 .create-app-head h2 { margin: 0; color: var(--text-strong); font-size: 20px; line-height: 28px; font-weight: 500; }
 .create-app-close { position: absolute; top: 16px; right: 16px; }
+.create-app-doc { position: absolute; top: 16px; left: 16px; height: 36px; padding: 0 10px; font-size: 13px; }
 
 /* The ways: one segmented row in the middle. */
 .create-app-rail { flex: none; display: flex; align-self: center; gap: 4px; max-width: calc(100% - 48px); margin: 12px 24px 4px; padding: 4px; border-radius: 999px; background: rgb(16 24 40 / 0.04); box-shadow: var(--glass); overflow-x: auto; scrollbar-width: none; }
@@ -1890,6 +1892,7 @@ body.creating-app { overflow: hidden; }
 @media (max-height: 720px) {
   .create-app-head { min-height: 52px; padding-top: 14px; }
   .create-app-close { top: 10px; }
+  .create-app-doc { top: 10px; height: 32px; }
   .create-app-rail { margin-top: 8px; }
   .create-app-pane { gap: 20px; padding-top: 16px; }
   .create-app-foot { padding: 12px 24px; }
@@ -1897,6 +1900,8 @@ body.creating-app { overflow: hidden; }
 @media (max-width: 760px), (max-height: 560px) {
   .create-app-scrim { padding: 12px; }
   .create-app-way { padding: 0 12px; }
+  .create-app-doc span { display: none; }
+  .create-app-doc { padding: 0 8px; }
 }
 
 /* ---------------------------------------------------------------- the row's menu and Delete (apps-delete)
@@ -2580,8 +2585,8 @@ ul.update-popup-notes li::before { content: ""; position: absolute; left: 2px; t
   .has-title-bar .device-card .device-links .btn { height: 28px; }
   .has-title-bar .device-card .set { min-height: 36px; }
 }
-/* With the account button the top bar needs about 1260: below 1300 the two documentation links show their icons alone
-   (their names are in the descriptor), as they do below 1180 without it. */
+/* With the account button the top bar needs about 1260: below 1300 the documentation link tightens its padding but
+   keeps its label. */
 @media (max-width: 1300px) {
-  .topbar:has(#account:not([hidden])) .top-doc span { display: none; }
+  .topbar:has(#account:not([hidden])) .top-doc { padding: 0 8px; }
 }

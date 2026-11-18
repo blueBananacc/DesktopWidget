@@ -6,5 +6,5 @@
 - [ ] 用 nRF Connect 把手机模拟成 GATT 服务器，提前真机验证 BLE 链路
 - [x] 固件骨架 v0.1：`code/firmware/shougongpai`（仓库外）——BLE 服务、OLED 状态显示、板载 RGB 亮度/呼吸、K1–K4 事件上报
 - [ ] 到货联调：OLED 引脚丝印、按键模块定义、BLE 首连、亮度调节、触摸区改电容电极
-- [ ] 服务端：Wi-Fi/MQTT 共享看板后端（网页目前是纯前端 + 模拟数据）
-- [ ] ESP-NOW 同区域互见 + 网关转发设计
+- [x] 服务端：云端 presence 看板后端（`/hub/*`：发布/订阅/90s TTL，与固件 MQTT 同模型；网页 presence 客户端已接）
+- [ ] 局域网 mDNS 成员发现（设备侧；`peers` 事件转发已留位）

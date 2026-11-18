@@ -1,11 +1,31 @@
 import { useCallback, useEffect, useState } from "react";
 import { ExternalLink, RefreshCw, Unplug } from "lucide-react";
 import { Card, PageHeader } from "../ui/Primitives";
+import { QuickApp } from "./QuickApp";
 
 // 模拟器窗口文件 vendored 在 public/emulator/（源自 BUSY Bar Emulator 的 device window，
 // 已换为收工牌设计规范）；其 API 与事件流由 vite 代理转给本机模拟器服务（127.0.0.1:8640）。
 const EMU_URL = `${import.meta.env.BASE_URL}emulator/index.html`;
 const EMU_ORIGIN = "http://127.0.0.1:8640";
+
+export function EmulatorEmbed({ height = 560 }: { height?: number }) {
+  const [alive, setAlive] = useState<boolean | null>(null);
+  useEffect(() => {
+    let on = true;
+    fetch("/_emu/status", { cache: "no-store" })
+      .then((r) => on && setAlive(r.ok))
+      .catch(() => on && setAlive(false));
+    return () => { on = false; };
+  }, []);
+  if (!alive) {
+    return (
+      <div className="hint" style={{ padding: "40px 24px", textAlign: "center" }}>
+        {alive === null ? "正在检测本地模拟器…" : "本地模拟器未运行，启动后此处显示屏幕内容。"}
+      </div>
+    );
+  }
+  return <iframe src={EMU_URL} title="设备模拟器" style={{ display: "block", width: "100%", height, minHeight: 320, border: 0 }} />;
+}
 
 export function Emulator() {
   const [alive, setAlive] = useState<boolean | null>(null);
@@ -54,6 +74,7 @@ export function Emulator() {
           )}
         </Card>
       )}
+      <QuickApp alive={alive} />
     </>
   );
 }

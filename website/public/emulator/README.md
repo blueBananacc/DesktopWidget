@@ -14,7 +14,7 @@ not through `window.emulatorActions`, and does nothing on macOS or in a plain br
 A global, provided by `actions.js` (loaded by `index.html` before `window.js`). It has no elements and no styling: the
 page decides where a button is and what it shows.
 
-The work is done by the app's main process, which runs the same code as the command line `busy-emulator`
+The work is done by the app's main process, which runs the same code as the command line `sgp-emulator`
 (`packages/app/src/actions.mjs`). The page reaches it through the shell's bridge, which the app gives to its main
 window only. In a plain browser there is no bridge.
 
@@ -26,16 +26,16 @@ window only. In a plain browser there is no bridge.
   `installed`, `missing` (never installed: a clone), `installing`, `failed` and `interrupted` (an install was cut off);
   for the last two `reason` says why in a few words ("no network", "no answer from the npm registry") and `retry`
   whether it is the network's, which `retryDependencies()` tries again.
-  `installed` and `running`: its app is on the emulated BUSY Bar, and runs now. `job`: the kind of the job that runs on
-  it now, or `null`. An app on the BUSY Bar whose id is in no project was installed from an archive: it has no project.
+  `installed` and `running`: its app is on the emulated 收工牌, and runs now. `job`: the kind of the job that runs on
+  it now, or `null`. An app on the 收工牌 whose id is in no project was installed from an archive: it has no project.
 - `projects.examples()` → `Promise<[{ name, summary, title, icon, front }]>`. The example apps a new project can start
   from; `icon` (8×8) and `front` (a frame of its front display, 72×16) are PNGs as `data:` addresses, or `null`.
 - `projects.create({ example })` → opens the system's folder dialog, where the person chooses or makes an empty folder
-  anywhere on the disk; the project is created in that folder (the same code as `busy-emulator create`), from the
+  anywhere on the disk; the project is created in that folder (the same code as `sgp-emulator create`), from the
   example named or from the official template when `example` is `null`. Resolves to the project (an entry as in
   `list()`), or `null` when the person closed the dialog. Takes a while: it goes to the npm registry.
 - `projects.create({ example, place: { parent, folder }, name?, id?, texts?, icon? })` → Create app's form: no dialog;
-  the project is made in `parent/folder`, where `parent` is the default place (`~/BUSY Bar projects`) or one the
+  the project is made in `parent/folder`, where `parent` is the default place (`~/收工牌 projects`) or one the
   person chose with `choosePlace`, never another, and `folder` a plain name (Latin letters, digits, spaces, `.`, `_`,
   `-`; the next free `folder-2` when it is taken). `name` and `id` go to `create --name --id`; `texts`
   (`{ category, short_description }`) to `catalog-texts set`, the short description to the manifest's description
@@ -59,7 +59,7 @@ window only. In a plain browser there is no bridge.
   project, or `null` when the person closed the dialog or chose "Don't Trust".
 - `projects.find({ pick })` → Create app's Open existing: the system's dialog for the app's folder or any file in it
   (`pick` `"any"`; macOS takes a folder or a file in one dialog, elsewhere `"any"` is a folder and the page offers
-  `"folder"` and `"file"` as two buttons). The desktop app walks up from the choice to the nearest project of BUSY's
+  `"folder"` and `"file"` as two buttons). The desktop app walks up from the choice to the nearest project of 收工牌's
   tools (a `package.json` that names `@busy-app/cli`), never to the home folder or above it, never into
   `node_modules`, and refuses a `package.json` or manifest that is a link out of its folder. Opens nothing: resolves
   to `{ found: true, folder, shownFolder, id, name, listed, trusted, chosen, shownChosen }`, or `{ found: false,
@@ -68,10 +68,10 @@ window only. In a plain browser there is no bridge.
   the emulator does not trust yet, then the list; then one Refresh (build, install, start), its answer in
   `refreshed`. `null` after "Don't Trust".
 - `projects.refresh(folder)` → `Promise<{ ok, code?, message?, hint? }>`. The one action after the person changed the
-  project's files: build, install, start again (one round of `busy-emulator dev --once`). When the build fails,
-  `ok` is false, `message` is the build's error, and the version on the BUSY Bar goes on running.
+  project's files: build, install, start again (one round of `sgp-emulator dev --once`). When the build fails,
+  `ok` is false, `message` is the build's error, and the version on the 收工牌 goes on running.
 - `projects.dependencies(folder)` → `Promise<{ ok, code?, message?, hint? }>`. Retry for a project created without the
-  network: its dependencies installed when they are needed (`busy-emulator build --dependencies-only`). When a Refresh
+  network: its dependencies installed when they are needed (`sgp-emulator build --dependencies-only`). When a Refresh
   had stopped at them, that Refresh follows (build, install, start); a project only created is not started.
 - `projects.retryDependencies()` → `Promise<{ started: [folders] }>`. The same (the Refresh that followed included), by itself and without a click, for every
   project whose install failed for the network or was cut off, each no more often than every 20 s: the window calls it
@@ -88,12 +88,12 @@ window only. In a plain browser there is no bridge.
 - `projects.submit(folder)` → `Promise<{ ok, folder?, message?, code?, hint? }>`. Checks, then writes `submission/`
   into the project (`folder` is that folder). It pushes nothing and sends nothing.
 - `apps.delete({ id, withFiles })` → `Promise<{ ok, id, trashed, kept, message } | { ok: false, code, message, hint? }>`.
-  Delete in the Apps list's menu: the app is stopped, taken off the emulated BUSY Bar and its projects leave the list
-  (`busy-emulator uninstall <id>`); the folders stay (`kept`). With `withFiles: true` the app's one project folder goes
+  Delete in the Apps list's menu: the app is stopped, taken off the emulated 收工牌 and its projects leave the list
+  (`sgp-emulator uninstall <id>`); the folders stay (`kept`). With `withFiles: true` the app's one project folder goes
   to the Trash (the Recycle Bin on Windows) by the system's own call (`trashed`): only a folder of the emulator's list,
   by its real path, never a link to another place, the home folder, the root of a disk or the data folder.
 - `publish.status(folder)` → `Promise<{ ok, steps, name, id, version, check, texts, screenshots, readme, license, files, package, by_hand, catalog }>`.
-  Where each step of publishing (stage 1) stands for the project: `busy-emulator publish status --json`. It only
+  Where each step of publishing (stage 1) stands for the project: `sgp-emulator publish status --json`. It only
   reads, so it needs no click.
 - `publish.check(folder)` → the catalog's checks grouped for stage 1 (`publish check`): `passed`, `built`, `fails`,
   `warnings` (each `{ id, title, found, step, todo }`: `step` names the step of the flow that puts it right), `stage2`
@@ -102,7 +102,7 @@ window only. In a plain browser there is no bridge.
   into catalog.json (`catalog-texts set`) and answers `{ ok, name, name_problem, texts, taken, problems, warnings,
   rules }`.
 - `publish.screenshots({ folder, take?: "front"|"back", upload?: true, order?: { front, back }, remove?: path })` →
-  takes one from the BUSY Bar (with an enlarged copy for the README), brings in PNGs the person chooses in the system's
+  takes one from the 收工牌 (with an enlarged copy for the README), brings in PNGs the person chooses in the system's
   dialog (`upload`: 72×16 or 160×80, or an exact enlargement, made small again; `uploaded`, and `refused` with why;
   null when they chose none), writes the order into catalog.json, or moves one into `.busy/removed/`; answers the
   lists with each picture as a `data:` address and what the catalog says of it.
@@ -133,7 +133,7 @@ window only. In a plain browser there is no bridge.
   (`unknown_project`).
 - `capture.record.start({ folder, name, layout })` → `Promise<{ ok, layout, startedAt, maxSeconds, code?, message? }>`.
   The choice in the Record button's menu: `layout` is `window` (the app's window as the person sees it, at most
-  1920×1080), `post` (1080×1920, the BUSY Bar and its back display) or `front` (the front display, 1080×240), as `busy-emulator
+  1920×1080), `post` (1080×1920, the 收工牌 and its back display) or `front` (the front display, 1080×240), as `sgp-emulator
   record --layout` records them (H.264 MP4 with a silent AAC track), at most `maxSeconds` (120); then it stops by
   itself. Resolves once the take has begun. One recording at a time (`busy`); another layout is `bad_layout`.
 - `capture.record.stop()` → `Promise<{ ok, file, name?, seconds, limit? }>`. The second press: stops, and the system's
@@ -146,15 +146,15 @@ window only. In a plain browser there is no bridge.
   `reason: "limit"` when it stopped at its longest.
 - `terminalInfo()` → `Promise<{ available, name, label, why }>`. Whether the console can be opened in the system's
   terminal: `name` is `"Terminal"` on macOS and `"cmd"` on Windows, `label` the button's words ("Open in Terminal",
-  "Open in cmd"); `available` is false, with `why`, when the app has no `busy-emulator` launcher (a run from the
+  "Open in cmd"); `available` is false, with `why`, when the app has no `sgp-emulator` launcher (a run from the
   source folder, a test variant without one). Reads only: no click needed.
 - `openTerminal({ app, folder, kinds, since })` → `Promise<{ opened }>`. Opens the system's terminal (Terminal.app;
-  a new `cmd.exe` window) running `busy-emulator logs --follow` with the console's state: `app` an app's id or `null`
+  a new `cmd.exe` window) running `sgp-emulator logs --follow` with the console's state: `app` an app's id or `null`
   for every app's lines (`--app`/`--all`), `kinds` some of `"console"`, `"lifecycle"`, `"build"`, `"system"`
   (`--kind`), `since` the moment of the last Clear in Unix ms or `null` (`--since`), and `folder` the chosen project's
   folder to start in, or `null` for the home. Its first line says whose lines, which kinds and from when; after
-  Ctrl+C the terminal stays there, with `busy-emulator` on its PATH. Refused (it rejects) with `unknown_app` (an id
-  that is neither a project's nor on the BUSY Bar), `unknown_project`, `folder_unavailable`, `bad_request` (a kind not of
+  Ctrl+C the terminal stays there, with `sgp-emulator` on its PATH. Refused (it rejects) with `unknown_app` (an id
+  that is neither a project's nor on the 收工牌), `unknown_project`, `folder_unavailable`, `bad_request` (a kind not of
   the four, a `since` that is not a whole number, a key it does not know) or `no_cli`. The command is built by the
   app from these checked parts and its own launcher's full path; nothing the page sends is written into a shell as
   text (`packages/app/src/terminal.mjs`).
@@ -173,7 +173,7 @@ window only. In a plain browser there is no bridge.
   8000 elsewhere); the text then says the whole log is in the diagnostics archive. `fits` false: what the person wrote
   is `over` characters too long.
 - `report.open(fields)` → `Promise<{ opened, url, screenshot, lines }>`. Opens that text in GitHub's new issue form
-  of `busy-app/busybar-emulator` in the browser; the person sends it there. With `screenshot` and `image` (the BUSY Bar's
+  of `busy-app/busybar-emulator` in the browser; the person sends it there. With `screenshot` and `image` (the 收工牌's
   screenshot as a PNG `data:` address) the picture is put on the clipboard, to paste. Rejects with `too_long`.
 - `report.save(fields)` → `Promise<{ saved, file, shown, files }>`. Save diagnostics: the system's Save dialog, then a
   .zip with `report.md`, `about.json`, the logs and the run state of the data folder, and `screenshot.png` when ticked,
@@ -214,7 +214,7 @@ never used.
 
 "Publish" (top right) and Publish… (in the opened app's More) open the publishing flow, `publish.js`: a dialog of steps
 over the window, for the chosen project, gone through in order. Prepare: Catalog texts (the name too), Screenshots
-(taken from the BUSY Bar or uploaded), README, License, Repository files, Pre-flight check, Build and package; Publish:
+(taken from the 收工牌 or uploaded), README, License, Repository files, Pre-flight check, Build and package; Publish:
 Publish to GitHub, Send to catalog. Pre-flight check builds the app and checks its types before the catalog's checks
 (`publish check`); it and Build and package record a fingerprint of the files that get published or built
 (`publish/fingerprint.mjs`). Next from the check on, opening a later step, coming back to the window, Publish to
@@ -225,9 +225,9 @@ the step that no longer holds, which says "Changed since the check" (or the pack
 Record's first press opens the menu of what to record (Window, Post, Front display; the record-menu section of
 window.js, positioned under the button); `RECORD_BUTTON` turns it off in one place.
 
-The controls are flat vectors of the BUSY Bar's top from the owner's drawing (Figma `H5dJXvQa1JVhjRHXi9VLEW`, node
+The controls are flat vectors of the 收工牌's top from the owner's drawing (Figma `H5dJXvQa1JVhjRHXi9VLEW`, node
 `6904:623`): the shapes are files of `controls/`, used as CSS masks so that their grays are the style sheet's. The
-mode switch is a key-shaped knob (`#lever`) whose tip points at the position the BUSY Bar is at, the five named on an arc
+mode switch is a key-shaped knob (`#lever`) whose tip points at the position the 收工牌 is at, the five named on an arc
 round its pivot, 20° apart (a click on a name, a drag round the knob, the arrows); Start / Pause is a trapezoid with
 the two RGB LEDs (`#led-left`, `#led-right`) along its slanted sides; Back a small round key; the wheel a large
 circle with a dot that turns a detent a click and small ticks round it, OK in its middle.
@@ -249,18 +249,18 @@ it yet: its firmware build takes the status lights' calls and only logs their co
   key in the window just before (`no_gesture`). A script alone builds nothing, runs nothing and puts nothing on the
   clipboard.
 - The app in the emulator is its project folder. When the folder is deleted or moved away, the project leaves the
-  list. Its app is stopped and removed from the BUSY Bar only when this project installed it and the BUSY Bar still holds what
+  list. Its app is stopped and removed from the 收工牌 only when this project installed it and the 收工牌 still holds what
   the project put there (a later install from an archive or another project under the same id stays); the app looks at the folders when the page lists them, when
   the emulator starts and every few seconds. When the folder's disk is not there (an external disk unplugged, a share
   offline), nothing is removed: the project stays with `exists: false, unavailable: true`, its actions are refused
   with `folder_unavailable`, and it works again when the disk is back. Nothing inside a project folder is deleted.
 
-The command line has the list too: `busy-emulator projects [--json]` (`packages/server/cli/README.md`).
+The command line has the list too: `sgp-emulator projects [--json]` (`packages/server/cli/README.md`).
 
 ## The first run's greeting (`welcome.js`)
 
 With no project yet and the greeting never answered (`welcome.get()`), the window asks "How will you make your app?"
-in a card over the window, which waits behind it (inert, and no key reaches the BUSY Bar; Escape closes the card).
+in a card over the window, which waits behind it (inert, and no key reaches the 收工牌; Escape closes the card).
 
 - "I'll write the code" is the window's own Create app (`emulatorWindow.createApp`, from `window.js`): the examples,
   then the system's folder dialog. The app it creates gets three steps at the top of its section (edit `src/main.ts`,
@@ -276,11 +276,11 @@ in a card over the window, which waits behind it (inert, and no key reaches the 
 
 Answered or closed, the greeting is written down (`welcome.seen()`) with the way chosen, and does not come by itself
 again; "Getting started" at the foot of the Apps section opens it on that way: the text for the agent, or "Write the
-code yourself" (where the code is, what the BUSY Bar can do, Refresh; and Create app). Back leads to the question. In a plain browser there is neither.
+code yourself" (where the code is, what the 收工牌 can do, Refresh; and Create app). Back leads to the question. In a plain browser there is neither.
 
 ## The update's pop-up (`update-popup.js`)
 
-When the app offers a newer version (`update.state()` is `available`), a dialog over the window says "BUSY Bar
+When the app offers a newer version (`update.state()` is `available`), a dialog over the window says "收工牌
 Emulator <version> is available", which version the person is on, and two or three lines of the release's notes
 (`packages/app/src/update-check.mjs` `releaseSummary`, plain text). Update now is the top bar's Update to <version>:
 the progress shows in the dialog, then Restart to update; Later or Esc closes it, and the top bar's notice stays.

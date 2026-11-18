@@ -1,0 +1,52 @@
+{
+  "apps": [
+    {
+      "id": "app.sgp.work",
+      "status": "work",
+      "name": "工作中",
+      "file": "app.sgp.work.tgz"
+    },
+    {
+      "id": "app.sgp.busy",
+      "status": "busy",
+      "name": "勿扰",
+      "file": "app.sgp.busy.tgz"
+    },
+    {
+      "id": "app.sgp.focus",
+      "status": "focus",
+      "name": "专注中",
+      "file": "app.sgp.focus.tgz"
+    },
+    {
+      "id": "app.sgp.meet",
+      "status": "meet",
+      "name": "会议中",
+      "file": "app.sgp.meet.tgz"
+    },
+    {
+      "id": "app.sgp.rest",
+      "status": "rest",
+      "name": "休息中",
+      "file": "app.sgp.rest.tgz"
+    },
+    {
+      "id": "app.sgp.off",
+      "status": "off",
+      "name": "已下班",
+      "file": "app.sgp.off.tgz"
+    },
+    {
+      "id": "app.sgp.docs",
+      "status": "c1",
+      "name": "写文档",
+      "file": "app.sgp.docs.tgz"
+    },
+    {
+      "id": "app.sgp.sync",
+      "status": "c2",
+      "name": "联调中",
+      "file": "app.sgp.sync.tgz"
+    }
+  ]
+}

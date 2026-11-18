@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { AudioLines, Bluetooth, Bot, CheckCircle2, ClipboardCopy, KeySquare, Mic, Play, Radio, Sparkles, Square, Usb, UserRound, Wrench } from "lucide-react";
+import { AudioLines, Bluetooth, Bot, CheckCircle2, ClipboardCopy, KeySquare, Mic, Play, Radio, Sparkles, Square, UserRound, Wrench } from "lucide-react";
 import { useStore } from "../store/AppStore";
 import { useToast } from "../ui/Toast";
 import { Banner, Card, CardHeader, PageHeader, SettingRow, Tile, Toggle } from "../ui/Primitives";
 import { adpcmFrameToPcm, b64ToU8, pcmToWav } from "../device/audio";
+import { startMicCapture, type MicCapture } from "../device/mic";
 import { LLM_PROVIDERS, LLM_KEY_URLS, loadLlmCfg, saveLlmCfg, callLlm, llmPresetOf, llmEndpointOf, llmModelOf, llmErrText, type LlmCfg } from "../device/llm";
 
 /** OpenAI 兼容的 /audio/transcriptions 端点；key 仅存浏览器 localStorage，不进仓库 */
@@ -33,6 +34,8 @@ const loadCfg = (): AsrCfg => {
 };
 
 type Phase = "idle" | "recording" | "transcribing" | "done" | "error";
+/** 拾音来源：browser=网页自己采集（固件模型——配套端拾音、设备只收文本）；device=真机麦克风经隧道上行 */
+type Source = "browser" | "device";
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** 生成 ~0.8s 的 440Hz 测试音（16kHz WAV），给"测试连接"走真实转写链路用 */
@@ -109,6 +112,7 @@ export function SttPage() {
   const [llmTest, setLlmTest] = useState<{ st: "idle" | "testing" | "ok" | "fail"; msg: string }>({ st: "idle", msg: "" });
   const [llmOut, setLlmOut] = useState<{ st: "idle" | "running" | "ok" | "fail"; text: string }>({ st: "idle", text: "" });
   const [phase, setPhase] = useState<Phase>("idle");
+  const [source, setSource] = useState<Source>(() => (localStorage.getItem("stt-source") === "device" ? "device" : "browser"));
   const [err, setErr] = useState("");
   const [text, setText] = useState("");
   const [test, setTest] = useState<{ st: "idle" | "testing" | "ok" | "fail"; msg: string }>({ st: "idle", msg: "" });
@@ -120,6 +124,7 @@ export function SttPage() {
   const lostRef = useRef(0);
   const rateRef = useRef(16000);
   const recordingRef = useRef(false);
+  const micRef = useRef<MicCapture | undefined>(undefined);
   const timerRef = useRef<number>(0);
   const startAtRef = useRef(0);
   const phaseRef = useRef<Phase>("idle");
@@ -219,19 +224,31 @@ export function SttPage() {
 
   useEffect(() => () => {
     window.clearInterval(timerRef.current);
+    micRef.current?.cancel();
     if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
   }, []);
 
   const start = async () => {
-    if (!api || !connected) { toast({ message: "先连接设备", seconds: 4 }); return; }
     partsRef.current = []; seqRef.current = -1; lostRef.current = 0;
     setStats({ frames: 0, lost: 0, ms: 0 });
     setErr(""); setText(""); setAudioUrl("");
-    try {
-      await api.sttStart();
-    } catch (e) {
-      toast({ message: `发送失败：${e instanceof Error ? e.message : e}`, seconds: 5 });
-      return;
+    if (source === "device") {
+      // 真机路径：设备 I2S 采集 → aud 事件上行 ADPCM 帧
+      if (!api || !connected) { toast({ message: "设备麦克风需要先连接设备", seconds: 4 }); return; }
+      try {
+        await api.sttStart();
+      } catch (e) {
+        toast({ message: `发送失败：${e instanceof Error ? e.message : e}`, seconds: 5 });
+        return;
+      }
+    } else {
+      // 配套端路径（固件模型）：网页自己拾音，设备只在识别完成后接收文本
+      try {
+        micRef.current = await startMicCapture();
+      } catch (e) {
+        toast({ message: `麦克风不可用：${e instanceof Error ? e.message : e}`, seconds: 5 });
+        return;
+      }
     }
     recordingRef.current = true;
     startAtRef.current = Date.now();
@@ -240,21 +257,15 @@ export function SttPage() {
     timerRef.current = window.setInterval(() => setStats((s) => ({ ...s, ms: Date.now() - startAtRef.current })), 200);
   };
 
-  const stop = async () => {
-    recordingRef.current = false;
-    window.clearInterval(timerRef.current);
-    try { await api?.sttStop(); } catch { /* 断开也能本地收尾 */ }
-    await delay(350);                          // 等在途的音频帧
-    const parts = partsRef.current;
-    partsRef.current = [];
+  /** 两条拾音链路的公共出口：WAV → ASR → 文本；开启 handoff 时把文本注入设备（配套端→设备的边界就是文本） */
+  const finish = async (parts: Int16Array[], rate: number) => {
     const samples = parts.reduce((n, p) => n + p.length, 0);
-    setStats((s) => ({ ...s, frames: parts.length }));
-    if (samples < rateRef.current / 4) {       // 不足 0.25s 基本是空录
+    if (samples < rate / 4) {       // 不足 0.25s 基本是空录
       setPhase("error");
-      setErr(`只收到 ${samples} 个采样，没录到声音。检查设备麦克风接线（INMP441：SCK47/WS21/SD10）。`);
+      setErr(`只录到 ${samples} 个采样，没拾到声音。${source === "device" ? "检查设备麦克风接线（INMP441：SCK47/WS21/SD10）。" : "检查浏览器麦克风权限与输入设备。"}`);
       return;
     }
-    const wav = pcmToWav(parts, rateRef.current);
+    const wav = pcmToWav(parts, rate);
     setAudioUrl((u) => { if (u) URL.revokeObjectURL(u); const nu = URL.createObjectURL(wav); audioUrlRef.current = nu; return nu; });
     if (!endpoint || !cfg.key) {
       setPhase("done");
@@ -268,7 +279,7 @@ export function SttPage() {
       const t = typeof j.text === "string" ? j.text.trim() : JSON.stringify(j);
       setText(t);
       setPhase("done");
-      // 识别文字回传设备 → 设备上的 agent 循环接管（经本页代理调 LLM，可建设备待办）
+      // 识别文字注入设备 → 设备上的 agent 循环接管（经本页代理调 LLM，可建设备待办）
       if (t && handoff && api && connected) api.sttResult(t).catch(() => {});
     } catch (e) {
       setPhase("error");
@@ -276,24 +287,55 @@ export function SttPage() {
     }
   };
 
+  const stop = async () => {
+    recordingRef.current = false;
+    window.clearInterval(timerRef.current);
+    let parts: Int16Array[];
+    let rate = rateRef.current;
+    if (source === "device") {
+      try { await api?.sttStop(); } catch { /* 断开也能本地收尾 */ }
+      await delay(350);                          // 等在途的音频帧
+      parts = partsRef.current;
+      partsRef.current = [];
+    } else {
+      const mic = micRef.current;
+      micRef.current = undefined;
+      parts = mic ? mic.stop() : [];
+      rate = mic?.rate ?? rate;
+    }
+    setStats((s) => ({ ...s, frames: parts.length }));
+    await finish(parts, rate);
+  };
+
   const fmtMs = (ms: number) => `${String(Math.floor(ms / 60000)).padStart(2, "0")}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
 
   return (
     <>
-      <PageHeader title="语音转文字" desc="按住牌面说话：设备麦克风录音，经蓝牙/串口上行，再由你选的 ASR 服务商转成文字。" />
+      <PageHeader title="语音转文字" desc="配套端拾音模型（同参考固件）：网页负责录音并送 ASR，识别文本注入设备——设备只收文字，不收音频。" />
       <div className="cols">
         <div className="stack">
           <Card>
             <CardHeader icon={<Tile color="pink" size={30}><Mic /></Tile>} title="录音识别" extra={connected ? <span className="hint">{device.kind === "ble" ? "蓝牙已连接" : device.kind === "serial" ? "串口已连接" : "已连接"}</span> : undefined} />
             <div className="card-b form">
-              {!connected && (
+              <SettingRow title="拾音来源" desc={source === "browser" ? "用本机麦克风，无需连接设备；识别后的文本才会发给设备" : "用牌面麦克风，音频经蓝牙/串口上行到本页再识别"}>
+                <select
+                  className="input input-sm"
+                  value={source}
+                  onChange={(e) => { const v = e.target.value as Source; setSource(v); localStorage.setItem("stt-source", v); }}
+                  disabled={phase === "recording" || phase === "transcribing"}
+                >
+                  <option value="browser">浏览器麦克风（推荐）</option>
+                  <option value="device">设备麦克风</option>
+                </select>
+              </SettingRow>
+              {source === "device" && !connected && (
                 <Banner tone="warn" icon={<Bluetooth />}>
-                  还没连接设备——先到 <Link to="/device">我的设备</Link> 用蓝牙或串口连上收工牌。
+                  设备麦克风需要先连接设备——到 <Link to="/device">我的设备</Link> 连上收工牌，或改用「浏览器麦克风」。
                 </Banner>
               )}
               <div className="row" style={{ justifyContent: "center", padding: "12px 0" }}>
                 {phase !== "recording" ? (
-                  <button className="btn btn-primary" disabled={!connected || phase === "transcribing"} onClick={start} style={{ minWidth: 160 }}>
+                  <button className="btn btn-primary" disabled={(source === "device" && !connected) || phase === "transcribing"} onClick={start} style={{ minWidth: 160 }}>
                     <Mic />开始说话
                   </button>
                 ) : (
@@ -302,13 +344,13 @@ export function SttPage() {
                   </button>
                 )}
               </div>
-              <SettingRow title="识别后交给设备 Agent" desc="文字回传设备，由设备上最小的 agent 循环接管：经本页代理调 LLM，可创建/管理设备待办（需配 LLM Key）">
+              <SettingRow title="识别后交给设备 Agent" desc="识别文本注入设备（需连接）：设备上的 agent 循环接管，经本页代理调 LLM，可创建/管理设备待办（需配 LLM Key）">
                 <Toggle checked={handoff} onChange={(v) => { setHandoff(v); localStorage.setItem("stt-agent-handoff", v ? "1" : "0"); }} />
               </SettingRow>
               {s.deviceAgent.busy && <Banner tone="info" icon={<Sparkles />}>设备 Agent 思考中——正通过本页代理调用 LLM…</Banner>}
               {phase === "recording" && (
                 <Banner tone="rest" icon={<AudioLines />}>
-                  <b>录音中 {fmtMs(stats.ms)}</b> · 已收 {stats.frames} 帧{stats.lost > 0 ? ` · 丢 ${stats.lost} 帧（蓝牙拥塞，影响很小）` : ""}
+                  <b>录音中 {fmtMs(stats.ms)}</b>{source === "device" ? <> · 已收 {stats.frames} 帧{stats.lost > 0 ? ` · 丢 ${stats.lost} 帧（蓝牙拥塞，影响很小）` : ""}</> : " · 本机麦克风"}
                 </Banner>
               )}
               {phase === "transcribing" && <Banner tone="info" icon={<Radio />}>已录 {fmtMs(stats.ms)}，正在送给 ASR 识别…</Banner>}
@@ -328,7 +370,7 @@ export function SttPage() {
                       <audio controls src={audioUrl} style={{ height: 32, flex: 1 }} />
                     </div>
                   )}
-                  <div className="hint">{stats.frames} 帧 · {fmtMs(stats.ms)}{stats.lost ? ` · 丢 ${stats.lost} 帧` : ""} · {rateRef.current / 1000}kHz ADPCM</div>
+                  <div className="hint">{fmtMs(stats.ms)} · {source === "device" ? `${stats.frames} 帧 · ${rateRef.current / 1000}kHz ADPCM${stats.lost ? ` · 丢 ${stats.lost} 帧` : ""}` : "本机麦克风 16kHz PCM"}</div>
                   {text && (
                     <div className="row" style={{ justifyContent: "flex-end" }}>
                       <button className="btn btn-ghost btn-sm" disabled={llmOut.st === "running"} onClick={runLlm}>
@@ -440,9 +482,6 @@ export function SttPage() {
               )}
             </div>
           </Card>
-          <Banner tone="info" icon={<Usb />}>
-            <b>隐私说明</b>录音从设备经蓝牙/串口到本页，只在点击停止后发给上面选的服务商一次；本页不保存原始录音。要完全离线转文字，得等 ESP-SR 本地口令方案（见路线图）。
-          </Banner>
         </div>
       </div>
     </>

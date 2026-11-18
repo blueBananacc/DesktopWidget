@@ -9,6 +9,7 @@ import { execFile, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
+import { gunzipSync } from "node:zlib";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -17,19 +18,47 @@ const CLI = path.join(EMU_ROOT, "packages", "server", "cli", "busy-emulator.mjs"
 
 // The data folder the command line resolves for itself (cli/context.mjs): %LOCALAPPDATA%\<AppName>
 // on Windows, ~/Library/Application Support/<AppName> on macOS — a development run takes the home of
-// the environment, exactly what os.homedir() gives here.
+// the environment, exactly what os.homedir() gives here. BUSY_EMULATOR_DATA names it outright (the
+// emulator server honours the same variable, so the container shares one volume).
 const APP_NAME = "BUSY Bar Emulator";
 const DATA_DIR =
-  process.platform === "win32"
+  process.env.BUSY_EMULATOR_DATA ??
+  (process.platform === "win32"
     ? path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"), APP_NAME)
-    : path.join(os.homedir(), "Library", "Application Support", APP_NAME);
+    : path.join(os.homedir(), "Library", "Application Support", APP_NAME)); // 与 cli/context.mjs 一致：非 Windows 都走这里
 
 /** Where Create app puts new projects; mirrors the desktop app's "~/BUSY Bar projects". */
-const PROJECTS_ROOT = path.join(os.homedir(), "sgp-emulator-projects");
+const PROJECTS_ROOT = process.env.SGP_PROJECTS_ROOT ?? path.join(os.homedir(), "sgp-emulator-projects");
 const CAPTURE_DIR = path.join(PROJECTS_ROOT, "screenshots");
 const TMP_DIR = path.join(os.tmpdir(), "sgp-emu-shell");
 
 const IS_WIN = process.platform === "win32";
+
+/** The emulated bar's own HTTP API: same container/localhost as the server process. */
+const EMU_API = process.env.SGP_EMU_API ?? "http://127.0.0.1:8640";
+
+/**
+ * Reads appmeta/manifest.json out of a .tgz buffer: gunzip, then walk ustar headers
+ * (name@0, size@124 octal, 512-byte blocks). Returns the parsed manifest or null.
+ */
+function readPackageManifest(raw) {
+  try {
+    const tar = gunzipSync(raw);
+    for (let off = 0; off + 512 <= tar.length;) {
+      const name = tar.subarray(off, off + 100).toString("utf8").replace(/\0.*$/, "");
+      const size = parseInt(tar.subarray(off + 124, off + 136).toString("utf8").trim() || "0", 8);
+      if (!name || !Number.isFinite(size)) break;
+      const dataStart = off + 512;
+      if (name.endsWith("appmeta/manifest.json")) {
+        return JSON.parse(tar.subarray(dataStart, dataStart + size).toString("utf8"));
+      }
+      off = dataStart + Math.ceil(size / 512) * 512;
+    }
+  } catch {
+    // not gzip / not tar / not json: all mean "not a package"
+  }
+  return null;
+}
 
 // ----------------------------------------------------------------------------- small utilities
 
@@ -231,26 +260,30 @@ function projectInfo(dir) {
 // ----------------------------------------------------------------------------- OS gestures
 
 function reveal(target) {
+  if (!IS_WIN && process.platform !== "darwin") return false; // 容器/Linux 里没有文件管理器
   const file = existsSync(target) && statSync(target).isFile();
   const what = IS_WIN ? (file ? `/select,"${target}"` : `"${target}"`) : target;
   const tool = IS_WIN ? "explorer" : "open";
   const child = spawn(tool, [what], { detached: true, stdio: "ignore", windowsHide: true });
+  child.on("error", () => {});
   child.unref();
   return true;
 }
 
 function openPath(target) {
+  if (!IS_WIN && process.platform !== "darwin") return false; // 容器里无可打开的本机对象
   const child = IS_WIN
     ? spawn("cmd", ["/c", "start", "", `"${target}"`], { detached: true, stdio: "ignore", windowsHide: true })
     : spawn("open", [target], { detached: true, stdio: "ignore" });
+  child.on("error", () => {});
   child.unref();
   return true;
 }
 
 function copyText(text) {
   return new Promise((resolve) => {
-    const tool = IS_WIN ? "clip" : "pbcopy";
-    const child = spawn(tool, [], { stdio: ["pipe", "ignore", "ignore"], windowsHide: true });
+    const tool = IS_WIN ? "clip" : process.platform === "darwin" ? "pbcopy" : "xclip";
+    const child = spawn(tool, IS_WIN || process.platform === "darwin" ? [] : ["-selection", "clipboard"], { stdio: ["pipe", "ignore", "ignore"], windowsHide: true });
     child.on("error", () => resolve(false));
     child.on("close", (code) => resolve(code === 0));
     child.stdin.end(String(text), "utf8");
@@ -516,8 +549,31 @@ const HANDLERS = {
     return { ok: true, value: { stopped: true } };
   },
 
-  async "projects.package.install"() {
-    return NO_BROWSER("安装 .tgz 应用包");
+  async "projects.package.install"(arg) {
+    // 浏览器没有系统文件对话框：页面把选好的 .tgz 以 data: 地址传来，走固件的 stage→install→launch
+    const match = /^data:[^;]*;base64,(.+)$/s.exec(String(arg?.data ?? ""));
+    const raw = match ? Buffer.from(match[1], "base64") : null;
+    if (!raw?.length) return { ok: false, error: { code: "no_package", message: "没有收到应用包数据。", hint: null } };
+    const manifest = readPackageManifest(raw);
+    if (!manifest?.id) return { ok: false, error: { code: "invalid_package", message: "这不是一个有效的应用包：里面读不到 appmeta/manifest.json。", hint: null } };
+    const base = EMU_API;
+    try {
+      const staged = await fetch(`${base}/api/apps/stage`, { method: "POST", body: raw }).then((r) => r.json());
+      if (!staged?.install_key) return { ok: false, error: { code: "stage_failed", message: staged?.error?.message ?? staged?.message ?? "设备拒绝了应用包。", hint: null } };
+      const res = await fetch(`${base}/api/apps/install?install_key=${encodeURIComponent(staged.install_key)}`, { method: "POST" });
+      if (!res.ok) return { ok: false, error: { code: "install_failed", message: `安装失败（HTTP ${res.status}）。`, hint: null } };
+      const launched = await fetch(`${base}/api/apps/launch?app_id=${encodeURIComponent(manifest.id)}`, { method: "POST" });
+      return {
+        ok: true,
+        value: {
+          ok: true, id: manifest.id, name: manifest.name ?? manifest.id, version: manifest.version ?? null,
+          running: launched.ok, file: arg?.name ?? null,
+          message: `已安装 ${manifest.name ?? manifest.id}${launched.ok ? " 并启动" : ""}。`,
+        },
+      };
+    } catch (error) {
+      return { ok: false, error: { code: "bridge_down", message: `连不上模拟器设备 API（${base}）：${error?.message ?? error}`, hint: null } };
+    }
   },
 
   // -------------------------------------------------- apps
@@ -752,18 +808,4 @@ export async function emulatorShell(req, res, next) {
   res.end();
 }
 
-/** Injects the browser bridge into the emulator window's HTML, only where this middleware lives. */
-export function emulatorHtmlInjection() {
-  const file = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..", "public", "emulator", "index.html");
-  return (req, res, next) => {
-    const url = (req.url ?? "").split("?")[0];
-    if (!/^\/sgp\/emulator\/(index\.html)?$/.test(url)) return next();
-    try {
-      const html = readFileSync(file, "utf8").replace('<script src="/sgp/emulator/actions.js"></script>', '<script src="/sgp/emulator/browser-shell.js"></script>\n  <script src="/sgp/emulator/actions.js"></script>');
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
-      res.end(html);
-    } catch {
-      next();
-    }
-  };
-}
+// index.html 固定引入 browser-shell.js：不需要注入中间件。桥不在时 action() 回落 bridge_down。

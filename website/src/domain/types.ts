@@ -66,9 +66,14 @@ export interface Member {
   name: string;
   status?: StatusId;
   until?: string;
-  via: "espnow" | "gateway" | "self";
+  /** 来源通道：cloud=云端同步（presence hub，对应固件的 MQTT），gateway=连接的设备转发的局域网成员，self=本机 */
+  via: "espnow" | "gateway" | "cloud" | "self";
   updatedAt: number;
 }
+
+/** 成员来源通道的显示名（espnow 为历史遗留类型，统一按局域网广播展示） */
+export const memberViaLabel = (via: Member["via"]): string =>
+  ({ cloud: "云端同步", gateway: "网关转发", espnow: "局域网广播", self: "本机" })[via];
 
 export type ConnectionKind = "none" | "mock" | "ble" | "serial";
 export type ConnectionState = "disconnected" | "connecting" | "connected" | "reconnecting";

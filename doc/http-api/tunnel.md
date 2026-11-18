@@ -58,7 +58,7 @@ HTTP 在这里只是**报文格式与语义规范**，不依赖 TCP/IP、Wi-Fi �
 
 成功写操作返回 `200` + `{"result":"OK"}`（创建类附带新 `id`）；读操作返回资源 JSON，资源对象含 `type` 判别字段，取值与对应事件名一致。
 
-失败**必须**返回如下 JSON（与 BUSY Bar 等开放设备 API 的约定一致）：
+失败**必须**返回如下 JSON（与开放设备 API 的通行约定一致）：
 
 ```json
 { "error": "人类可读的说明", "error_code": "machine_readable_code" }

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Instructions for coding agents working on the BUSY Bar firmware.
+Instructions for coding agents working on the 收工牌 firmware.
 
 ## Important: Custom applications
 - There are 2 types of applications: JavaScript apps and Native (or built-in) apps.

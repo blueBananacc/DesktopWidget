@@ -70,7 +70,12 @@ export class TunnelClient {
       for (const ev of parseSse(m.body)) {
         let data: unknown = ev.data;
         try { data = JSON.parse(ev.data); } catch { /* 非 JSON 事件原样交出 */ }
-        stream(ev.event, data);
+        try {
+          stream(ev.event, data);
+        } catch (e) {
+          // 消费方异常不阻断事件流：单个 handler 抛错时后续事件照常分发
+          console.error(`[tunnel] event ${ev.event} handler threw`, e);
+        }
       }
       return;
     }

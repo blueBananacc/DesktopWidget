@@ -12,7 +12,7 @@ const statusIdOk = (s: string) => STATUS_IDS.includes(s) || /^c[a-z0-9]{1,6}$/.t
 /**
  * 模拟设备本体：在字节层实现 doc/http-api 的全部路由（与固件同一套规范）。
  * 只做协议模拟——收到 HTTP 请求帧 → 跑与固件对齐的状态机 → 回响应帧；
- * 自治行为（计划表/待办/定时/ESP-NOW 同伴）以事件帧推到已订阅的事件流。
+ * 自治行为（计划表/待办/定时/局域网同伴）以事件帧推到已订阅的事件流。
  */
 export class MockDevice {
   private parser = new MessageParser("request", (m) => this.route(m));
@@ -83,16 +83,72 @@ export class MockDevice {
   get lastState() { return { type: "state", ...this.cur }; }
 
   start() {
-    const load = <T,>(key: string, f: (j: T) => void) => { try { const j = JSON.parse(localStorage.getItem(key) || "null"); if (j) f(j as T); } catch { /* 空 */ } };
-    load<DeviceTodo[]>("sgp-mock-todos", (j) => { this.todos = j; });
-    load<Json>("sgp-mock-scheds", (j) => { this.scheds = (j.list as DevSched[]) ?? []; this.schedAct = (j.act as string) ?? ""; this.schedMode = (j.mode as "next" | "today") ?? "next"; this.schedPausedDay = (j.pday as string) ?? ""; this.schedNextId = (j.nextId as number) ?? 1; });
-    load<Json>("sgp-mock-stdefs", (j) => { this.stdefs = (j.list as DevStdef[]) ?? []; this.stdefNextId = (j.nextId as number) ?? 1; });
+    const load = <T,>(key: string, f: (j: T) => void): boolean => { try { const j = JSON.parse(localStorage.getItem(key) || "null"); if (j) { f(j as T); return true; } } catch { /* 空 */ } return false; };
+    const now = Date.now();
+    // 无存档即注入演示数据：让各页面开箱有内容（用户对模拟设备的改动持久化在 sgp-mock-*，不会被覆盖）
+    if (!load<DeviceTodo[]>("sgp-mock-todos", (j) => { this.todos = j; }) || !this.todos.some((t) => !t.done)) {
+      // 无存档或全是已完成：补未完成演示项（sd* id 不与 t<N> 序列冲突），让"待处理"列表开箱有内容
+      this.todos = [
+        ...this.todos,
+        { id: "sd1", at: now + 40 * 60_000, text: "把联调分支推给后端联测", show: true, src: "web", created: now - 3600_000, done: false },
+        { id: "sd2", at: now + 3 * 3600_000, text: "17:30 前更新周报文档", show: true, src: "web", created: now - 7200_000, done: false },
+        { id: "sd3", trig: "offwork", text: "打卡、写日报再撤", show: true, src: "voice", created: now - 5400_000, done: false },
+        { id: "sd4", text: "给设计稿补两张标注图", show: false, src: "web", created: now - 2600_000, done: false },
+      ];
+    }
+    // nextId 对齐现存 id：存档里可能已有 t1..tN，新建待办不能再发重号
+    this.nextId = Math.max(1, ...this.todos.filter((t) => /^t\d+$/.test(t.id)).map((t) => +t.id.slice(1) + 1));
+    if (!load<Json>("sgp-mock-scheds", (j) => { this.scheds = (j.list as DevSched[]) ?? []; this.schedAct = (j.act as string) ?? ""; this.schedMode = (j.mode as "next" | "today") ?? "next"; this.schedPausedDay = (j.pday as string) ?? ""; this.schedNextId = (j.nextId as number) ?? 1; }) || !this.scheds.length) {
+      // 无存档或存档已清空：重新播种（演示设备回到"开箱有数据"，nextId 保留防发重号）
+      this.scheds = [
+        { id: "s1", name: "标准工作日", kind: "repeat", wd: [1, 2, 3, 4, 5], ns: [
+          { t: "09:00", st: "work" }, { t: "10:30", st: "meet", n: "周会" }, { t: "11:30", st: "work" },
+          { t: "12:00", st: "rest", n: "午休" }, { t: "13:30", st: "focus", n: "深度工作" },
+          { t: "15:00", st: "work" }, { t: "18:00", st: "off" }] },
+        { id: "s2", name: "居家办公", kind: "repeat", wd: [1, 2, 3, 4, 5], ns: [
+          { t: "09:30", st: "work" }, { t: "12:00", st: "rest" }, { t: "13:00", st: "focus", n: "深度工作" }, { t: "18:30", st: "off" }] },
+        { id: "s3", name: "周五短工作日", kind: "repeat", wd: [5], ns: [{ t: "09:00", st: "work" }, { t: "16:00", st: "off" }] },
+      ];
+      this.schedAct = "s1";
+      this.schedNextId = Math.max(4, this.schedNextId);
+    }
+    if (!load<Json>("sgp-mock-stdefs", (j) => { this.stdefs = (j.list as DevStdef[]) ?? []; this.stdefNextId = (j.nextId as number) ?? 1; }) || !this.stdefs.length) {
+      this.stdefs = [
+        { id: "c1", zh: "写文档", hint: "整理中，轻扰", c: 0x5b8ff9, work: true },
+        { id: "c2", zh: "联调中", hint: "别拉我走", c: 0xf6bd16, work: true },
+      ];
+      this.stdefNextId = Math.max(3, this.stdefNextId);
+    }
     load<Json>("sgp-mock-keys", (j) => { this.keyActs = [(j.k1 as string) ?? "offwork", (j.k2 as string) ?? "busy", (j.k3 as string) ?? "cycleL", (j.k4 as string) ?? "cycleR", (j.t as string) ?? "rest"]; });
-    load<Json>("sgp-mock-led", (j) => { this.ledMap = (j.map as Record<string, "solid" | "breath" | "off">) ?? {}; this.ledBr = (j.br as number) ?? 40; this.ledNight = !!j.night; });
+    if (!this.keyActs.slice(0, 4).includes("offwork")) this.keyActs = ["offwork", "busy", "cycleL", "cycleR", this.keyActs[4]];
+    const ledLoaded = load<Json>("sgp-mock-led", (j) => { this.ledMap = (j.map as Record<string, "solid" | "breath" | "off">) ?? {}; this.ledBr = (j.br as number) ?? 40; this.ledNight = !!j.night; });
+    if (!ledLoaded) { this.ledBr = 40; this.ledNight = true; }
+    if (!Object.keys(this.ledMap).length) this.ledMap = { work: "solid", busy: "breath", focus: "breath", meet: "solid", rest: "solid", off: "off", c1: "solid", c2: "breath" };
     load<Json>("sgp-mock-knob", (j) => { this.knobStep = (j.step as number) ?? 5; this.knobMax = (j.max as number) ?? 180; });
-    load<Json>("sgp-mock-share", (j) => { this.shareEn = !!j.en; this.shareName = (j.name as string) ?? ""; this.shareZone = (j.zone as string) ?? "default"; });
-    this.segs = [{ status: "work", start: Date.now() }];
-    this.breakLastMs = Date.now();
+    if (!load<Json>("sgp-mock-share", (j) => { this.shareEn = !!j.en; this.shareName = (j.name as string) ?? ""; this.shareZone = (j.zone as string) ?? "default"; }) || (!this.shareEn && !this.shareName)) {
+      // en=false 且从未起名 = 未配置过的空档，按演示默认重开；用户显式关过共享（留着名字）则尊重
+      this.shareEn = true;
+      this.shareName = "阿杰";
+      this.shareZone = "3F设计";
+    }
+    // "default"/空区域码是占位符：归一化成演示区域，看板页不显示 "default ·" 字样
+    if (!this.shareZone || this.shareZone === "default") this.shareZone = "3F设计";
+    // 今日区间种子：一条像样的一日轨迹（真实时间点是活的，只取已过去的节点）
+    const at = (hm: string) => { const d = new Date(); const [h, mi] = hm.split(":"); d.setHours(+h, +mi, 0, 0); return d.getTime(); };
+    const track: [string, string][] = [
+      ["08:58", "work"], ["10:30", "meet"], ["11:30", "work"], ["12:02", "rest"],
+      ["13:32", "focus"], ["15:00", "work"], ["15:47", "busy"],
+    ];
+    const past = track.filter(([hm]) => at(hm) < now);
+    this.segs = past.length
+      ? past.map(([hm, st], i) => ({ status: st, start: at(hm), end: past[i + 1] ? at(past[i + 1][0]) : undefined }))
+      : [{ status: "work", start: now }];
+    const lastSeg = this.segs[this.segs.length - 1];
+    this.cur = { ...this.cur, status: lastSeg.status, screen: this.statusZh(lastSeg.status) };
+    if (lastSeg.status === "off") this.offDay = this.dayKey();
+    this.breakAccumMs = 18 * 60_000;   // 休息提醒进度条开箱有内容
+    this.knobStart(25);                // 旋钮倒计时跑起来（事件流订阅后 timerSnap 携带 run 态）
+    this.breakLastMs = now;
     this.pollTimer = setInterval(() => this.poll(), 1000);
     this.beatTimer = setInterval(() => this.beat(), 10000);    // breakState 心跳 + wantTime + peers 兜底
     this.peerTimer = setInterval(() => this.peerTick(), 8000);
@@ -355,7 +411,14 @@ export class MockDevice {
   private knobSnap = () => ({ type: "timerCfg", step: this.knobStep, max: this.knobMax });
   private timerSnap = () => this.timerUntil ? { type: "timer", st: "run", minutes: this.timerMinutes, remain: this.timerUntil - Date.now() } : { type: "timer", st: "idle" };
   private shareSnap = () => ({ type: "share", en: this.shareEn, name: this.shareName, zone: this.shareZone });
-  private peersSnap = () => ({ type: "peers", list: this.shareEn ? [{ i: "34:B7", n: "工位旁的小王", st: ["work", "focus", "meet", "busy", "rest"][this.peerStIdx], at: Date.now() }] : [] });
+  private peersSnap = () => ({
+    type: "peers",
+    list: this.shareEn
+      ? [["34:B7", "工位旁的小王"], ["7A:C1", "对面的小林"], ["9F:02", "会议室门牌"]].map(([i, n], k) => ({
+          i, n, st: ["work", "focus", "meet", "busy", "rest"][(this.peerStIdx + k * 2) % 5], at: Date.now(),
+        }))
+      : [],
+  });
   private appsSnap = () => ({ type: "apps", list: [...this.apps].map(([status, b]) => ({ status, size: b.length })) });
 
   private reportTodos() { localStorage.setItem("sgp-mock-todos", JSON.stringify(this.todos)); this.emit(this.todoSnap()); }

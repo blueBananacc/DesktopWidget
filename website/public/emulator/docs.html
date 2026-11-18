@@ -70,11 +70,8 @@
 "use strict";
 const DOCS = [
   { file: "first-app.md",            title: "你的第一个应用",   sub: "从零写出一个能在模拟器上运行的 App" },
-  { file: "from-zero-to-catalog.md", title: "从零到上架",       sub: "开发、校验、打包、发布的完整流程" },
   { file: "agents.md",               title: "AGENTS.md 规范",   sub: "项目文件夹里给 AI 助手读的开发说明" },
-  { file: "network-and-disk.md",     title: "网络与存储",       sub: "应用可用的网络请求与文件存储 API" },
-  { file: "differences.md",          title: "模拟器与真机差异", sub: "哪些行为在真机上不一样" },
-  { file: "mcp.md",                  title: "MCP 接入",         sub: "把模拟器作为 MCP 服务接入 AI 助手" },
+
   { file: "troubleshooting.md",      title: "常见问题",         sub: "安装、运行、构建出问题时看这里" },
   { file: "README.md",               title: "文档总览",         sub: "官方文档目录与说明" },
 ];
@@ -177,7 +174,10 @@ async function open(file, anchorFor = null) {
   try {
     const res = await fetch(`docs/${file}`);
     if (!res.ok) throw new Error(String(res.status));
-    page.innerHTML = md(await res.text());
+    const text = await res.text();
+    // 文件不存在时 dev server 会兜底返回 index.html：把它当作「文档已移除」而不是当 Markdown 渲染
+    if (/^\s*<!doctype html/i.test(text) || /^\s*<html[\s>]/i.test(text)) throw new Error("这篇文档已被移除");
+    page.innerHTML = md(text);
     // 相对路径的图补 docs/ 前缀
     for (const img of page.querySelectorAll("img")) {
       const src = img.getAttribute("src") ?? "";

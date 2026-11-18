@@ -1,28 +1,20 @@
 import { Link } from "react-router-dom";
 import {
-  Bell, Search, CircleHelp, Monitor, CalendarDays, Mic, Coffee, Plus, Sunset, RotateCcw, Lock, ShieldCheck, Timer, AlarmClock,
+  Bell, Search, CircleHelp, CalendarDays, Mic, Coffee, Sunset, RotateCcw, Lock, ShieldCheck, Timer, AlarmClock,
   CodeXml,
 } from "lucide-react";
 import { useStore } from "../store/AppStore";
-import { SOURCE_LABEL, customStatusDefs, statusMeta } from "../domain/statuses";
-import type { StatusId } from "../domain/types";
+import { statusMeta } from "../domain/statuses";
+import { memberViaLabel } from "../domain/types";
 import { atToday, clock, dateKey, duration, greeting, hhmm, weekday, ago, startOfDay } from "../domain/time";
-import { nextNode, scheduleForDay, sortedNodes } from "../domain/schedule";
-import { Card, CardHeader, ConnBadge, RowItem, StatusChip, Tile, UnknownChip, Banner } from "../ui/Primitives";
-import { DeviceMirror } from "../ui/DeviceMirror";
+import { scheduleForDay, sortedNodes } from "../domain/schedule";
+import { Card, CardHeader, RowItem, StatusChip, Tile, UnknownChip, Banner } from "../ui/Primitives";
+import { EmulatorEmbed } from "./Emulator";
 import { HoldButton } from "../ui/HoldButton";
 import { useToast } from "../ui/Toast";
 import { useOffwork } from "../hooks/useOffwork";
 import { WeekBars } from "../ui/WeekBars";
 import { MinuteChips } from "../ui/MinuteChips";
-
-const PRESETS: { id: StatusId; label?: string; timer?: number }[] = [
-  { id: "work" },
-  { id: "busy" },
-  { id: "meet" },
-  { id: "focus", label: "专注 25′", timer: 25 },
-  { id: "rest" },
-];
 
 export function Overview() {
   const { s, now, device, actions } = useStore();
@@ -33,12 +25,6 @@ export function Overview() {
   const sched = scheduleForDay(s.schedules, s.activeScheduleId, now);
   const offNode = sched ? sortedNodes(sched).find((n) => n.status === "off" && atToday(n.time, now) > now) : undefined;
   const upcoming = sched ? sortedNodes(sched).filter((n) => atToday(n.time, now) > now).slice(0, 3) : [];
-  const nn = nextNode(sched, now);
-  const remaining = s.current.until ? s.current.until - now : undefined;
-  const sub = s.timer ? `剩余 ${clock(s.timer.endsAt - now, false)}`
-    : connected && s.knobTimer?.mode === "run" ? `倒计时 ${clock(Math.max(0, (s.knobTimer.endsAt ?? now) - now), false)}`
-    : connected && s.knobTimer?.mode === "select" ? `设定 ${s.knobTimer.minutes} 分钟`
-    : s.current.until ? `${hhmm(s.current.since)} – ${hhmm(s.current.until)}` : meta.hint;
   const statusExpired = connected && !s.timer && s.current.until && s.current.source !== "schedule" && now > s.current.until;
   const openReminders = s.deviceTodos.filter((t) => !t.done);
   const breakTotal = s.settings.breakMinutes * 60_000;
@@ -48,19 +34,6 @@ export function Overview() {
   const breakOn = s.settings.breakEnabled && !s.breakOffToday;
   const stale = (t: number) => now - t > s.settings.staleMinutes * 60_000;
   const todayTotal = s.segments.filter((x) => x.status !== "off").reduce((a, x) => a + ((x.end ?? now) - x.start), 0);
-
-  const pick = (p: (typeof PRESETS)[number]) => {
-    if (p.timer) actions.startTimer(p.timer, p.id);
-    else actions.setStatus(p.id, "manual");
-    if (s.offworkToday && p.id !== "off") toast({ message: "已开启新的状态区间" });
-  };
-
-  const sourceText = (() => {
-    if (s.current.source === "schedule") return `来自计划表“${sched?.name ?? ""}”${nn ? ` · ${nn.time} 自动切换为${statusMeta(nn.status).label}` : ""}`;
-    if (s.current.source === "timer") return "来自专注倒计时 · 结束后不会自动切换状态";
-    const tail = s.pausedToday ? " · 今日计划已暂停" : nn && !s.offworkToday ? ` · ${nn.time} 起恢复计划表` : "";
-    return `来自${SOURCE_LABEL[s.current.source]}${tail}`;
-  })();
 
   return (
     <>
@@ -128,62 +101,8 @@ export function Overview() {
 
       <div className="cols">
         <div className="stack">
-          <Card>
-            <CardHeader
-              icon={<Tile color="violet" size={30}><Monitor /></Tile>}
-              title={s.settings.deviceName || device.name || "我的收工牌"}
-              extra={<ConnBadge device={device} now={now} />}
-              to="/device"
-              toLabel={device.kind === "none" ? "连接设备" : "设备设置"}
-            />
-            <div className="card-b device">
-              <DeviceMirror
-                status={s.current.id}
-                sub={sub}
-                ledOn={s.settings.led[s.current.id] !== "off"}
-                flashKey={`${s.current.id}-${s.current.since}`}
-                unknown={!connected}
-                caption={[connected ? "实时镜像" : "未连接", connected ? `已同步 · ${device.lastSyncAt ? ago(device.lastSyncAt, now) : "刚刚"}` : "连接后同步设备状态"]}
-              />
-              <div>
-                <div className="now-label">当前状态</div>
-                <div className="now-status">
-                  <b>{connected ? meta.label : "未连接"}</b>
-                  {connected && remaining !== undefined && remaining > 0 && <StatusChip id={s.current.id} dot={false}>还剩 {duration(remaining)}</StatusChip>}
-                </div>
-                <div className="now-src"><CalendarDays className="i" style={{ width: 14, height: 14 }} />{connected ? sourceText : "设备离线，网页不知道设备当前状态"}</div>
-                <div className="presets">
-                  {PRESETS.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      className={`preset ${connected && s.current.id === p.id ? "on" : ""}`}
-                      style={{ ["--c" as string]: statusMeta(p.id).color }}
-                      disabled={!connected}
-                      onClick={() => pick(p)}
-                    >
-                      <span className="d" style={{ background: statusMeta(p.id).color }} />
-                      {p.label ?? statusMeta(p.id).label}
-                    </button>
-                  ))}
-                  {customStatusDefs().map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      className={`preset ${connected && s.current.id === c.id ? "on" : ""}`}
-                      style={{ ["--c" as string]: c.color }}
-                      disabled={!connected}
-                      onClick={() => pick({ id: c.id })}
-                      title={c.hint}
-                    >
-                      <span className="d" style={{ background: c.color }} />
-                      {c.name}
-                    </button>
-                  ))}
-                  <Link to="/screen" className="preset add"><Plus className="i" style={{ width: 14, height: 14 }} />自定义</Link>
-                </div>
-              </div>
-            </div>
+          <Card style={{ padding: 0, overflow: "hidden" }}>
+            <EmulatorEmbed height={620} />
           </Card>
 
           <Card>
@@ -261,7 +180,7 @@ export function Overview() {
                   className={isStale ? "stale" : ""}
                   lead={<span className={`avatar ${m.id === "lin" ? "av2" : m.id === "zhou" ? "av3" : "av4"}`}>{m.name.slice(-1)}{!isStale && m.status && <span className="pres" style={{ background: statusMeta(m.status).color }} />}</span>}
                   title={m.name}
-                  desc={isStale ? `最后更新 ${hhmm(m.updatedAt)} · 可能已过期` : `${m.via === "espnow" ? "ESP-NOW" : "网关转发"} · ${ago(m.updatedAt, now)}`}
+                  desc={isStale ? `最后更新 ${hhmm(m.updatedAt)} · 可能已过期` : `${memberViaLabel(m.via)} · ${ago(m.updatedAt, now)}`}
                   meta={isStale || !m.status ? <UnknownChip /> : <StatusChip id={m.status}>{statusMeta(m.status).label}{m.until ? ` · 至 ${m.until}` : ""}</StatusChip>}
                 />
               );

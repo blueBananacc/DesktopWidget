@@ -2,12 +2,12 @@
 
 # Introduction
 
-JavaScript applications are a locally-run form of [HTTP API](https://docs.busy.app/bar/dev/http-api) applications.
+JavaScript applications are a locally-run form of [HTTP API](../../doc/http-api/) applications.
 To achieve this, the @ref firmware includes a JavaScript [interpreter](https://jerryscript.net/) to run user scripts
 and a set of standard and custom interfaces to be used by these scripts.
 
 Additionally, the firmware is able to enumerate and list currently installed applications and display them
-in the [APPS menu](https://docs.busy.app/bar/apps-and-integrations) for easy access.
+in the `APPS` menu for easy access.
 
 # Quick start
 
@@ -135,7 +135,7 @@ See @subpage javascript-applications-settings-schema for the complete file forma
 
 ## HTTP Requests
 
-Requests to the [HTTP API](https://docs.busy.app/bar/dev/http-api) are performed via the built-in `fetch` function.
+Requests to the [HTTP API](../../doc/http-api/) are performed via the built-in `fetch` function.
 
 It supports the same syntax as its regular counterpart from browsers with several limitations.
 See [MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/fetch) for more info on the usage.

@@ -1,15 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowRight, BatteryCharging, Bluetooth, CalendarClock, Check, ChevronDown, Cloud, Coffee, Cpu, Eye, Hand,
+  ArrowRight, BatteryCharging, Bluetooth, CalendarClock, Check, ChevronDown, Cloud, Cpu, Eye,
   House, Keyboard, KeyRound, LayoutDashboard, Lightbulb, Lock, Mic, Moon, Palette, Radio, Repeat,
   RotateCcw, ShieldCheck, Smartphone, Sparkles, Sun, Sunset, Truck, Usb, Users, Volume2, Wifi, X,
 } from "lucide-react";
 import { STATUSES } from "../domain/statuses";
 import type { StatusId } from "../domain/types";
 import { HoldButton } from "../ui/HoldButton";
-import { DevPlayground, Highlights, TopView } from "./ProductScenes";
+import { DevPlayground, Highlights, MatrixDevice, drawStatusScreen } from "./ProductScenes";
 import "../styles/product.css";
 
 // ===== 可直接改的商品信息（价格/配色为占位，正式开售前替换） =====
@@ -57,44 +57,7 @@ function AppShot({ name, alt }: { name: string; alt: string }) {
   );
 }
 
-/** 视频图位：public/product/<name>.mp4，进视口自动静音循环播放、出视口暂停，文件缺失时显示占位框；children 为叠加在视频上的介绍文字 */
-function VideoShot({ name, alt, ratio = "16 / 9", className = "", children }: { name: string; alt: string; ratio?: string; className?: string; children?: ReactNode }) {
-  const ref = useRef<HTMLVideoElement>(null);
-  const [missing, setMissing] = useState(false);
-  const [on, setOn] = useState(false);
-  const [ar, setAr] = useState(ratio);
-  useEffect(() => {
-    const v = ref.current;
-    if (!v) return;
-    const io = new IntersectionObserver(([e]) => {
-      if (e.isIntersecting) v.play().catch(() => {});
-      else v.pause();
-    }, { threshold: 0.2 });
-    io.observe(v);
-    return () => io.disconnect();
-  }, [missing]);
-  return (
-    <div className={`pd-shot pd-vshot ${missing ? "is-missing" : ""} ${className}`} style={{ aspectRatio: ar }}>
-      {missing ? (
-        <div className="pd-shot-ph">
-          <span className="pd-shot-tag">待补视频</span>
-          <b>{alt}</b>
-          <code>public/product/{name}.mp4</code>
-        </div>
-      ) : (
-        <>
-          <video ref={ref} src={`${BASE}product/${name}.mp4`} muted loop playsInline preload="metadata" aria-label={alt} className={on ? "is-on" : ""}
-            onError={() => setMissing(true)}
-            onPlaying={() => setOn(true)}
-            onLoadedMetadata={(e) => { const v = e.currentTarget; if (v.videoWidth) setAr(`${v.videoWidth} / ${v.videoHeight}`); }} />
-          {children && <div className="pd-vshot-txt">{children}</div>}
-        </>
-      )}
-    </div>
-  );
-}
-
-// ===== 点阵屏设备（CSS 绘制，与产品渲染图同形：横条机身 + 顶部 4 键 + 最右旋钮） =====
+// ===== 点阵屏设备（CSS/Canvas 绘制，与产品渲染图同形：银白机身 + 顶部 拨盘/启停键/编码轮，后缘背屏条） =====
 const LED: Record<string, { color: string; sub: string }> = {
   work: { color: "#3BE08F", sub: "可以找我" },
   busy: { color: "#FF4D57", sub: "非紧急请稍后" },
@@ -104,21 +67,12 @@ const LED: Record<string, { color: string; sub: string }> = {
   off: { color: "#F3E6CF", sub: "明天见" },
 };
 const DEMO_ORDER: StatusId[] = ["work", "busy", "focus", "meet", "rest", "off"];
+/** 主屏右下角小读数（渲染图同位的小图标/数字角标） */
+const MATRIX_SUB: Record<StatusId, string> = { work: "OK", busy: "勿扰", focus: "24:59", meet: "15:30", rest: "Zzz", off: "18:00" };
 
 function DotDevice({ status, small }: { status: StatusId; small?: boolean }) {
   const led = LED[status];
-  return (
-    <div className={`pd-dev ${small ? "is-small" : ""}`} style={{ ["--c" as string]: led.color }}>
-      <div className="pd-dev-keys"><i /><i /><i /><i /><b /></div>
-      <div className="pd-dev-body">
-        <div className="pd-dev-screen" key={status}>
-          <span className="pd-dev-big">{STATUSES[status].screen}</span>
-          <span className="pd-dev-sub">{led.sub}</span>
-        </div>
-      </div>
-      <div className="pd-dev-glow" />
-    </div>
-  );
+  return <MatrixDevice draw={drawStatusScreen(STATUSES[status].screen, MATRIX_SUB[status], led.color)} color={led.color} small={small} />;
 }
 
 function Section({ id, eyebrow, title, desc, children, className = "" }: { id?: string; eyebrow?: string; title: ReactNode; desc?: ReactNode; children: ReactNode; className?: string }) {
@@ -256,8 +210,8 @@ export function ProductPage() {
   const gallery: { name: string; alt: string; hint: string; render?: ReactNode }[] = [
     { name: color === "mist" ? "g-white" : "hero", alt: color === "mist" ? "云雾白配色 3/4 视角" : "收工牌 3/4 视角", hint: "与主图同角度的浅色版本" },
     { name: "g-front", alt: "正面平视", hint: "展示点阵屏与机身比例" },
-    { name: "g-top", alt: "顶部俯视", hint: "4 枚按键 + 最右侧旋钮", render: <TopView /> },
-    { name: "g-side", alt: "侧面与接口", hint: "USB-C 接口、静音开关" },
+    { name: "g-top", alt: "顶部俯视", hint: "模式拨盘 + Start/Pause + 编码轮 + 背屏" },
+    { name: "g-side", alt: "侧面与接口", hint: "扬声器、USB-C 接口" },
     { name: "scene-desk", alt: "桌面场景", hint: "放在显示器下方的工位" },
   ];
 
@@ -265,7 +219,7 @@ export function ProductPage() {
     <div className="pd">
       <nav className="pd-nav">
         <div className="pd-wrap pd-nav-in">
-          <a href="#top" className="pd-logo"><span className="pd-logo-mark" />收工牌</a>
+          <a href="#top" className="pd-logo"><img className="pd-logo-mark" src={`${BASE}shougongpai.svg`} alt="" />收工牌</a>
           <div className="pd-nav-links">
             <a href="#highlights">功能</a><a href="#app">配套软件</a><a href="#dev">开发者</a><a href="#specs">规格</a><a href="#faq">常见问题</a>
           </div>
@@ -355,37 +309,38 @@ export function ProductPage() {
         </div>
       </section>
 
-      {/* ===== 痛点 ===== */}
-      <Section eyebrow="为什么需要它" title="被打断一次，要花二十分钟才能找回状态" desc="戴耳机、贴便利贴、改聊天软件签名……这些办法要么没人注意，要么你自己也忘了改回来。">
+      {/* ===== 一键收工 ===== */}
+      <Section eyebrow="一键收工" title="给每一天一个明确的结束" desc="把模式拨盘拨到 OFF 再按 Start/Pause 确认，或在手机上按住 1.5 秒——桌牌切换为“已收工”，今天的状态记录到此为止。">
         <div className="pd-pains">
-          <div className="pd-pain"><Hand /><b>“方便问个事吗？”</b><span>同事不知道你在专注，只能当面打断你确认。</span></div>
-          <div className="pd-pain"><Coffee /><b>“你还没下班？”</b><span>工作和生活没有边界，人走了，脑子还在工位。</span></div>
-          <div className="pd-pain"><Users /><b>“他在开会吗？”</b><span>开放办公区里，谁在忙、谁有空，全靠猜。</span></div>
+          <div className="pd-pain"><Sunset /><b>拨一下，就下班</b><span>设备上拨到 OFF 按 Start/Pause，手机上按住 1.5 秒，不用打开任何 App。</span></div>
+          <div className="pd-pain"><RotateCcw /><b>误触可撤销</b><span>收工后 10 秒内可以撤销，状态记录接着走，不会断档。</span></div>
+          <div className="pd-pain"><Wifi /><b>没连手机也能收</b><span>牌上直接操作；下次重连时自动同步，手机上的记录不断。</span></div>
         </div>
         <div className="pd-vs pd-vs-inline">
           <div className="pd-vs-col">
-            <h3>便利贴 / 耳机 / 聊天软件签名</h3>
+            <h3>合上电脑就走</h3>
             <ul>
-              <li><X />状态写上去就忘了改</li>
-              <li><X />同事看不见，或者看见了也不确定</li>
-              <li><X />下班没有仪式，工作一直拖着</li>
-              <li><X />不知道一天的时间花在了哪里</li>
+              <li><X />工作没有句号，回家还在想进度</li>
+              <li><X />明天接手要回忆今天做到哪</li>
+              <li><X />同事路过以为你还在忙，照样敲门</li>
+              <li><X />一天的时间花在哪，全凭印象</li>
             </ul>
           </div>
           <div className="pd-vs-col is-us">
-            <h3>收工牌：便利贴会被忽略，它不会</h3>
+            <h3>收工牌：给一天画上句号</h3>
             <ul>
-              <li><Check />计划表到点自动切换，不用记</li>
-              <li><Check />大字 + 灯光，远处也一眼看懂</li>
-              <li><Check />长按收工，给一天画上句号</li>
-              <li><Check />自动生成状态回顾，只给你自己看</li>
+              <li><Check />收工后计划表不再把你切回工作状态</li>
+              <li><Check />牌面切到“已收工”，谁路过都看得见</li>
+              <li><Check />当天状态记录封存，回顾里清清楚楚</li>
+              <li><Check />“下班后提醒”留到收工才弹出</li>
             </ul>
           </div>
         </div>
-        <VideoShot name="scene-office" alt="开放办公区工位场景：同事路过，看到桌上的收工牌显示“会议中”" className="pd-wide">
-          <h3>他在忙吗？抬头看一眼</h3>
-          <p>开放工位里，同事路过时自己找答案——不用开口问，也不会真的打断你。</p>
-        </VideoShot>
+        <div className="pd-wide">
+          <div className="pd-stack"><OffworkMock /><div className="pd-shot" style={{ aspectRatio: "2048 / 1172" }}><video src={`${BASE}product/scene-offwork.mp4`} autoPlay loop muted playsInline aria-label="傍晚收工场景：夕阳下的工位，桌牌显示“已收工 明天见”" /></div></div>
+          <h3>收工不用开口宣布</h3>
+          <p>拨到 OFF，牌面替你说「明天见」——今天的努力到此封存。</p>
+        </div>
       </Section>
 
       {/* ===== 核心功能 ===== */}
@@ -401,10 +356,10 @@ export function ProductPage() {
           <Bullets items={["支持重复计划与单日计划，可建多套一键切换", "手动切换默认只覆盖到下一个节点，也可暂停今日计划", "手机离线时按设备本地时钟照常执行"]} />
         </Feature>
 
-        <Feature flip icon={<Sunset />} eyebrow="一键收工" title="给每一天一个明确的结束"
-          media={<div className="pd-stack"><OffworkMock /><VideoShot name="scene-offwork" alt="傍晚收工场景：夕阳下的工位，桌牌显示“已收工”" ratio="16 / 10" /></div>}>
-          <p>长按收工键或在手机上按住 1.5 秒，桌牌切换为“已收工”，今天的状态记录到此为止。误触了？10 秒内可以撤销。</p>
-          <Bullets items={["收工后计划表不会再把你切回工作状态", "可以设置“下班后提醒”，收工时才弹出", "手机没连上也能收工，重连后自动同步"]} />
+        <Feature flip icon={<Eye />} eyebrow="一眼看懂" title="被打断一次，要花二十分钟才能找回状态"
+          media={<Shot name="scene-office" alt="开放办公区工位场景：同事路过，看到桌上的收工牌显示“会议中”" ratio="2048 / 1172" />}>
+          <p>开放工位里，同事路过时自己找答案——不用开口问，也不会真的打断你。</p>
+          <Bullets items={["大字 + 灯光，远处也一眼看懂", "计划表到点自动切换，不用记得去改", "手写便利贴会被忽略，电子牌面不会"]} />
         </Feature>
 
         <Feature icon={<LayoutDashboard />} eyebrow="状态回顾" title="看看今天的时间去了哪里"
@@ -414,9 +369,9 @@ export function ProductPage() {
         </Feature>
 
         <Feature flip icon={<Lightbulb />} eyebrow="RGB 状态灯 · 自定义按键" title="远远看一眼，颜色就告诉你"
-          media={<div className="pd-stack"><Shot name="scene-night" alt="夜间氛围" hint="暗光桌面，状态灯带泛出柔和光晕" ratio="16 / 10" /><AppShot name="app-lighting" alt="灯效设置界面" /></div>}>
-          <p>屏幕下方的 RGB 灯带让状态在远处也能被识别。每个状态都可以单独设置灯色和模式，四枚按键也都可以重新映射。</p>
-          <Bullets items={["常亮 / 呼吸 / 渐变 / 彩虹 / 闪烁 / 通知灯效，亮度可调", "环境光传感器自动调节亮度，暗处不刺眼", "夜间自动关灯，或开启无灯光模式；也可只在工作状态亮屏", "收工键的长按确认规则不可被覆盖，防止误触"]} />
+          media={<div className="pd-stack"><Shot name="scene-night" alt="夜间氛围" hint="暗光桌面，状态灯带泛出柔和光晕" ratio="16 / 10" /><AppShot name="app-device" alt="设备管理界面" /></div>}>
+          <p>屏幕下方的 RGB 灯带让状态在远处也能被识别。每个状态都可以单独设置灯色和模式，模式拨盘、Start/Pause 与编码轮的操作也都可以在设置里自定义。</p>
+          <Bullets items={["常亮 / 呼吸 / 渐变 / 彩虹 / 闪烁 / 通知灯效，亮度可调", "环境光传感器自动调节亮度，暗处不刺眼", "夜间自动关灯，或开启无灯光模式；也可只在工作状态亮屏", "收工确认需长按 Start/Pause，这条规则不可被覆盖，防止误触"]} />
         </Feature>
 
         <Feature icon={<Users />} eyebrow="共享状态看板" title="整个团队谁有空，一屏看清"
@@ -487,7 +442,7 @@ export function ProductPage() {
       <Section id="specs" eyebrow="技术规格" title="规格参数" className="pd-alt">
         <div className="pd-specs">
           <div><h4><Eye />屏幕</h4><ul><li>正面 72×16 全彩 RGB LED 点阵屏</li><li>背面 160×80 灰阶副屏，看计时与菜单</li><li>大字状态名 + 图标 + 预计结束时间</li><li>自动调光、定时熄屏、像素位移防烧屏</li><li>环境光传感器，0–15 级自动亮度</li></ul></div>
-          <div><h4><Keyboard />操作</h4><ul><li>4 枚实体按键（收工键 + 3 枚可自定义）</li><li>金属旋钮，带按压确认，每格 5 分钟</li><li>机身电容触摸区</li></ul></div>
+          <div><h4><Keyboard />操作</h4><ul><li>五档模式拨盘：BUSY / CUSTOM / OFF / APPS / SETTINGS</li><li>Start/Pause 确认大键 + 橙色 Back 返回键</li><li>滚花编码轮带按压，定时每格 5 分钟</li></ul></div>
           <div><h4><Lightbulb />灯光</h4><ul><li>RGB 状态灯带</li><li>常亮 / 呼吸 / 闪烁，亮度可调</li><li>渐变、彩虹、通知等预设灯效</li><li>夜间关闭时段、无灯光模式</li></ul></div>
           <div><h4><Volume2 />声音</h4><ul><li>MEMS 数字麦克风</li><li>物理麦克风静音开关 + 录音指示</li><li>提示音扬声器，音量可调</li></ul></div>
           <div><h4><Cpu />处理器</h4><ul><li>低功耗主控 · 160 MHz</li><li>独立无线协处理器</li><li>屏幕程序沙箱运行</li><li>JavaScript 应用引擎</li></ul></div>
@@ -526,7 +481,7 @@ export function ProductPage() {
 
       <footer className="pd-foot">
         <div className="pd-wrap pd-foot-in">
-          <span className="pd-logo"><span className="pd-logo-mark" />收工牌</span>
+          <span className="pd-logo"><img className="pd-logo-mark" src={`${BASE}shougongpai.svg`} alt="" />收工牌</span>
           <span><Moon />由你自己掌控的桌面状态牌</span>
           <span>© 2026 收工牌</span>
         </div>

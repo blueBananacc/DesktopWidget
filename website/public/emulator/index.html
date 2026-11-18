@@ -16,7 +16,7 @@
        app), and the stage: the BUSY Bar, its controls, the BUSY Bar's card and the console. -->
   <header class="topbar" id="topbar">
     <a class="top-btn top-doc" href="/sgp/emulator/docs.html" target="_blank" rel="noopener" title="如何写出一个能在设备上运行的应用：开发规范、API 与发布流程"><svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><use href="/sgp/emulator/icons/busy-sprite.svg#bi-file-document"/></svg><span>应用开发文档</span></a>
-    <div class="top-tools">
+    <div class="top-tools" hidden>
       <!-- Screenshot: which displays, and the button (shot-float section of window.js); Record beside it. -->
       <div class="seg shot-float" id="shot-float" role="group" aria-label="Screenshot">
         <label class="shot-tick" id="shot-front-tick" title="The front display, 72×16"><input type="checkbox" id="shot-front" checked><span class="shot-box"><svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><use href="/sgp/emulator/icons/busy-sprite.svg#bi-checkmark"/></svg></span>Front</label>
@@ -142,7 +142,7 @@
            and Open in Local Web at the foot. The link to the server shows only while it is lost (window.css). -->
       <div class="device-about">
         <div class="device-head">
-          <h2 class="device-name">BUSY Bar</h2>
+          <h2 class="device-name" id="device-name" title="双击改名">收工牌</h2>
           <span class="link" id="link">Not connected</span>
           <span class="chip warn" id="speed-note" hidden>Computer speed</span>
           <!-- bar-address: the BUSY Bar's address, its API documentation and the restart (window.js, "bar-address"). -->
@@ -186,7 +186,8 @@
     </section>
   </main>
 
-  <script src="/sgp/emulator/actions.js"></script>
+  <script src="/sgp/emulator/browser-shell.js"></script>
+<script src="/sgp/emulator/actions.js"></script>
   <script src="/sgp/emulator/stage3d/mount.js"></script>
   <script src="/sgp/emulator/welcome.js"></script>
   <script src="/sgp/emulator/icon-block.js"></script>

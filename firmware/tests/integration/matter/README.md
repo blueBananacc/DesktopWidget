@@ -1,7 +1,7 @@
 # Matter integration tests
 
-BusyBar is commissioned over Matter into an **existing Home Assistant**
-instance; the "lamp" is the BUSY Bar OnOff switch asserted from both sides
+收工牌 is commissioned over Matter into an **existing Home Assistant**
+instance; the "lamp" is the 收工牌 OnOff switch asserted from both sides
 (HA switch service ↔ device `/api/smart_home/switch`).
 
 ## Topology (why HA and not a local controller)
@@ -28,7 +28,7 @@ pytest integration/matter/ -v
 
 The HA user behind the token must be admin (device removal). The HA Matter
 Server add-on must have **`enable_test_net_dcl: true`** — without it HA
-rejects devices with test/development certificates (all bench BusyBars). The fixture
+rejects devices with test/development certificates (all bench 收工牌 units). The fixture
 self-heals a leftover registration: if a device with our serial is already in
 the HA Matter registry (previous aborted run), it is removed first — only the
 device under test is ever touched.

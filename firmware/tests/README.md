@@ -1,7 +1,7 @@
 # BSB Firmware Integration Tests
 
 Automated pytest suite for the BSB CLI, HTTP API, MQTT, BLE and state-publisher
-paths. Runs against a real BusyBar device on the local network.
+paths. Runs against a real 收工牌 device on the local network.
 
 ## Quick start
 

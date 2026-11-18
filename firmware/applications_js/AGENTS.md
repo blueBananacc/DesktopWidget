@@ -1,16 +1,16 @@
 # AGENTS.md
 
-Instructions for coding agents working on the BUSY Bar JavaScript applications.
+Instructions for coding agents working on the 收工牌 JavaScript applications.
 
 ## Ground rules
 
-- **Do not modify the BUSY Bar firmware** when writing a JavaScript application. No changes to `applications/`,
+- **Do not modify the 收工牌 firmware** when writing a JavaScript application. No changes to `applications/`,
   `lib/`, `targets/`, `fbt_layers/` or any other firmware code, and no `./fbt` builds. JavaScript apps run on
   stock firmware. If a feature seems to need a firmware change, stop and tell the user instead.
 - Start from [busy-tools](https://github.com/busy-app/busy-tools). It scaffolds new apps, builds them into
-  device packages and installs, runs and stops them on a connected BUSY Bar. Read its `AGENTS.md`, README and
+  device packages and installs, runs and stops them on a connected 收工牌. Read its `AGENTS.md`, README and
   `packages/cli/README.md` before you start.
-- Apps talk to the device only through its [HTTP API](https://docs.busy.app/bar/dev/http-api), by calling
+- Apps talk to the device only through its [HTTP API](../../doc/http-api/), by calling
   `fetch` on `http://localhost/api/...` from inside the script. Only a subset of the API is available to apps
   (see [Available HTTP API](#available-http-api)).
 - The runtime, package layout, manifest and settings schemas, `fetch` limitations and input events are
@@ -31,7 +31,7 @@ app sources here unless the user asks for it.
 
 ## Development loop
 
-Requires Node 24 (see `.nvmrc` in the generated app; Node 26 is not supported) and a BUSY Bar connected over
+Requires Node 24 (see `.nvmrc` in the generated app; Node 26 is not supported) and a 收工牌 connected over
 USB, or reachable over Wi-Fi.
 
 ### 1. Scaffold
@@ -121,7 +121,7 @@ app id explicitly.
 ## Available HTTP API
 
 Apps run in isolation and can only reach these endpoints (relative to `http://localhost/api/`). Any other
-endpoint is rejected, even if it is listed in the full [HTTP API reference](https://docs.busy.app/bar/dev/http-api).
+endpoint is rejected, even if it is listed in the full [HTTP API reference](../../doc/http-api/).
 Do not design an app around an endpoint that is not on this list.
 
 | Endpoint             | Allowed method(s)           |

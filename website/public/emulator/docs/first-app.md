@@ -1,12 +1,14 @@
 # 你在模拟收工牌上的第一个应用
 
-从装好的模拟器，到在它里面的收工牌上运行你自己的应用并截一张图。这里的一切都运行在模拟器内置的
-Node 里：你自己不需要 Node，也不需要 npm。`<cli>` 是命令行的路径：
-macOS 上是 `~/.busy-emulator/bin/busy-emulator`，Windows 上是
-`%LOCALAPPDATA%\busy-emulator\bin\busy-emulator.exe`
-（安装过程会把它打印成 `cli=<path>`）。在 Windows 上要写成带正斜杠、不带引号的形式，
-`C:/Users/you/AppData/Local/busy-emulator/bin/busy-emulator.exe`，它在 PowerShell、Git Bash 和 cmd 里都一样运行；
-路径含空格时需要加引号，在 PowerShell 里引号前还要加 `&`。
+从跑起来的模拟器，到在它里面的收工牌上运行你自己的应用并截一张图。本仓库的模拟器从源码检出运行
+（`sgp-emulator` 目录下 `node packages/server/index.mjs`），窗口在 `/sgp/emulator/`。`<cli>` 是命令行，
+源码检出里它是：
+
+```text
+node <emu>/packages/server/cli/busy-emulator.mjs
+```
+
+`<emu>` 是 sgp-emulator 的检出目录。每条命令都单独一行运行；项目构建用的 Node、npm 由模拟器自带。
 
 每条命令都接受 `--json`，然后输出一行：`{"ok":true,…}` 或 `{"ok":false,"code":…,"message":…,"hint":…}`。
 hint 会指出下一步该运行哪条命令。
@@ -16,18 +18,18 @@ hint 会指出下一步该运行哪条命令。
 **Create app**（在 Apps 列表顶部，或 File → New App…）会在窗口上方打开，提供这些开始方式：
 
 - **Templates**：官方模板，或三个示例之一，每个都带一张图；然后是应用的名字和
-  Location——项目要放进去的文件夹（除非你改它，默认是 `~/BUSY Bar projects`）。
+  Location——项目要放进去的文件夹（除非你改它，默认是用户目录下的 `收工牌 projects`）。
 - **Empty app**：名字、简短描述、分类、图标（由名字生成的字母、手绘的像素
   图标，或你自己的 8×8 和 11×11 PNG）以及 Location。你输入时，各字段会按应用目录的规则即时检查。
 - **Open existing**：这台电脑上已有的应用项目；模拟器会先问你是否信任它的文件夹。
-- **Import from GitHub**：github.com 上的一个仓库，下载到新文件夹并作为项目打开。
+- **Import from GitHub**：GitHub 上的一个仓库，下载到新文件夹并作为项目打开。
   如果仓库里没有应用项目、但最新 release 里有应用的 `.tgz`，会提供 **Install the
   release package** 选项，流程同下。
 - **Install a package (.tgz)**：别人构建好的应用包（`busy-cli build` 就能做出一个）。
   模拟器读它的 manifest，并按收工牌的方式检查，然后给你看应用的名字、id、版本和
   文件来源，只有当你选择 Install 时才安装并启动它。它在 Apps 里列为从包安装，
-  没有项目文件夹。在终端里：`busy-emulator install <file.tgz> --check` 只查看
-  包；`busy-emulator install <file.tgz>` 从被你信任过的文件夹中安装一个。
+  没有项目文件夹。在终端里：`sgp-emulator install <file.tgz> --check` 只查看
+  包；`sgp-emulator install <file.tgz>` 从被你信任过的文件夹中安装一个。
 
 Create 会像 `create` 命令一样创建项目、构建它、放上收工牌并启动。然后编辑 `src/main.ts`，
 按下应用的 **Refresh**（应用停止时是 **Run**：两者都会先构建）。如果你填的名字已被占用，
@@ -45,15 +47,15 @@ Finder（Windows 上是 Show in Explorer）和 **Delete…**——它会把应�
 ## 命令流程
 
 ```text
-<cli> start                                  # the emulator, if it is not running
+node packages/server/index.mjs &             # 在检出目录启动模拟器后端（单独终端常驻）
 <cli> create my-app                          # a project from the official template, dependencies installed
 cd my-app
                                              # edit src/main.ts: what the app draws
 <cli> build                                  # dist/<app id>.tgz
 <cli> run                                    # installs what build made and starts it; says whether it runs
-<cli> logs                                   # the app's console.log output and errors, when the BUSY Bar shows nothing
+<cli> logs                                   # the app's console.log output and errors, when the 收工牌 shows nothing
 <cli> screenshot --scale 8                   # screenshots/front-1.png (72×16) and front-1@8x.png, enlarged, to look at
-<cli> record                                 # media/clip-1.mp4: 5 s of the app on the BUSY Bar, a video to post
+<cli> record                                 # media/clip-1.mp4: 5 s of the app on the 收工牌, a video to post
 <cli> press ok                               # a button: ok, start, back; up and down turn the wheel one click
 <cli> time advance 25m                       # 25 minutes pass at once: the app's timers that were due fire now
 <cli> settings set hour24=false --restart    # change a setting of the app and start it again with it
@@ -80,16 +82,16 @@ cd my-app
 并随时带出应用的控制台输出：应用用 `console.log` 打印的内容，以及运行时的错误。
 
 ```text
-12:08:00  watch    /Users/you/my-app (app.your_name.my-app) for the emulated BUSY Bar at 127.0.0.1:8640. Ctrl+C stops watching; the app stays on the BUSY Bar.
+12:08:00  watch    /Users/you/my-app (app.your_name.my-app) for the emulated 收工牌 at 127.0.0.1:8640. Ctrl+C stops watching; the app stays on the 收工牌.
 12:08:00  build    the project as it is
-12:08:01  ready    app.your_name.my-app was started on the BUSY Bar (0.56 s: build 0.24 s, install 0.20 s, start 0.12 s)
+12:08:01  ready    app.your_name.my-app was started on the 收工牌 (0.56 s: build 0.24 s, install 0.20 s, start 0.12 s)
 12:08:01  log      hello from my app
 12:08:03  build    src/main.ts changed
 12:08:03  failed   busy-cli build failed with exit code 1:
 …                  (what busy-cli says: the file, the line, the error)
-12:08:03  watch    still watching: save a file to try again. The app on the BUSY Bar is as it was.
+12:08:03  watch    still watching: save a file to try again. The app on the 收工牌 is as it was.
 12:08:09  build    src/main.ts changed
-12:08:10  ready    app.your_name.my-app was started on the BUSY Bar (0.43 s: build 0.16 s, install 0.17 s, start 0.11 s)
+12:08:10  ready    app.your_name.my-app was started on the 收工牌 (0.43 s: build 0.16 s, install 0.17 s, start 0.11 s)
 12:08:10  error    [JsRunner] Error running script: ReferenceError: draw is not defined
 12:08:10  exited   the app stopped: error running main.js: Error running script: ReferenceError: draw is not defined
 ```
@@ -97,7 +99,7 @@ cd my-app
 - 构建失败不会打断循环，收工牌上保留最后一次构建成功的版本。修好文件再保存即可。
 - 一轮进行中发生的保存会在这一轮之后再补一轮；各轮永不重叠。
 - Ctrl+C 停的是监视，不是应用。`<cli> stop` 才停应用。
-- 模拟器必须在运行（否则报 `not_running`：`<cli> start`）。模拟器退出时，`dev` 也随之结束。
+- 模拟器必须在运行（否则报 `not_running`：先在检出目录跑 `node packages/server/index.mjs`）。模拟器退出时，`dev` 也随之结束。
 - 它也接受项目文件夹参数：`<cli> dev my-app`。
 
 **写给 agent。** `<cli> dev --json` 为每个事件输出一行 JSON，每行都带 `event` 和 `time`：
@@ -127,14 +129,15 @@ cd my-app
   `<cli> build --dependencies-only` 只装依赖、不构建。registry 无响应时，
   npm 会在 45 秒后停止并报 `network_stalled`，而不是白等几分钟；没装上依赖而建成的项目
   会在列表中注明原因。在无网络的沙箱中返回 `blocked_network`。
-- **只有 `start` 启动模拟器。** `install`、`run`、`stop`、`dev`、`logs`、`screenshot`、`record`、`press`、
-  `settings`、`uninstall` 和 `trust` 在模拟器未运行时都回答 `not_running`：先运行 `<cli> start`。
+- **这些命令都要求模拟器在运行。** `install`、`run`、`stop`、`dev`、`logs`、`screenshot`、`record`、`press`、
+  `settings`、`uninstall` 和 `trust` 在模拟器未运行时都回答 `not_running`：先在检出目录跑
+  `node packages/server/index.mjs` 把后端启动起来。
 - **`run` 安装构建好的包、启动应用并观察片刻。** 在第一次 `build` 之前它回答 `not_built`。
   `"running": true` 表示应用正在运行。脚本一启动就失败的应用返回 `ok: false`、错误码 `app_crashed`、
   退出码 1，以及错误的第一行：
 
   ```json
-  {"ok":false,"command":"run","code":"app_crashed","message":"app.your_name.my-app started on the emulated BUSY Bar and stopped at once: [JsRunner] Error running script: ReferenceError: draw is not defined","hint":"Its console and the error are in <cli> logs. Fix the script, then <cli> build and <cli> run again.","running":false}
+  {"ok":false,"command":"run","code":"app_crashed","message":"app.your_name.my-app started on the emulated 收工牌 and stopped at once: [JsRunner] Error running script: ReferenceError: draw is not defined","hint":"Its console and the error are in <cli> logs. Fix the script, then <cli> build and <cli> run again.","running":false}
   ```
 
   返回结果还带 `error`、`exited`、`log` 和 busy-cli 的 `output`。脚本无错跑到结尾、
@@ -154,7 +157,7 @@ cd my-app
 
   `<cli> logs --follow` 持续打印新行，直到你停掉它。模拟器运行期间保留最新 500 行。
   同样的行、连同模拟器输出的其他一切，都在它数据文件夹的 `logs/shell.log` 里
-  （macOS `~/Library/Application Support/BUSY Bar Emulator/`，Windows `%LOCALAPPDATA%\BUSY Bar Emulator\`）。
+  （`%LOCALAPPDATA%\BUSY Bar Emulator\`）。
 
   `--kind` 像窗口 Console 的过滤器那样选行：`console`（应用打印的、警告和错误）、
   `lifecycle`（installed、launched、exited）、`build`（窗口按钮跑过的：构建、安装、启动、
@@ -166,12 +169,12 @@ cd my-app
   <cli> logs --all --kind build --lines 200          # what the window's buttons ran, for every app
   ```
 
-  在模拟器窗口里，Console 的 "Open in Terminal" 按钮（Windows 上是 "Open in cmd"）在系统终端里
+  在模拟器窗口里，Console 的 "Open in cmd" 按钮在系统终端里
   打开这份日志，目录是你的项目文件夹，沿用窗口中开着的过滤器和上次 Clear 以来的范围。
 - **`typecheck` 查类型；`build` 不查。** 它指出每个错误的文件和行（`typecheck_failed`，
   JSON 里带 `errors`）。
 - **项目的 `AGENTS.md` 有一节专给模拟器的内容。** `create` 把它写在
-  `<!-- busy-emulator:begin -->` 和 `<!-- busy-emulator:end -->` 之间：该用的命令、
+  `<!-- sgp-emulator:begin -->` 和 `<!-- sgp-emulator:end -->` 之间：该用的命令、
   `settings.json` 的格式、怎么读设置。它还会改写那里模板留下的 `npm run …` 行。
   项目的 `README.md` 是模板原文，仍在讲 `npm run …` 和通过 USB 连接的收工牌：
 
@@ -230,8 +233,8 @@ cd my-app
 - **`uninstall` 把应用从模拟器上拿掉。** `<cli> uninstall app.your_name.my-app`
   （或项目文件夹，`<cli> uninstall ./my-app`）停掉应用、把它从模拟收工牌上移除并忘掉它的项目；
   文件夹保留。`--delete-files` 还会把项目文件夹移到废纸篓（Windows 上是回收站）。
-- **紧跟 `start` 的 `quit` 什么都不留。** `start` 还在等待时到来的 `quit`，
-  会让应用一起来就被结束，那个 `start` 回答 `start_interrupted`。
+- **`quit` 可以打断启动。** 模拟器还在等收工牌就绪时到来的 `quit` 会让它提前结束，
+  等待中的启动以 `start_interrupted` 告终。
 
 ## 从示例开始
 
@@ -271,7 +274,7 @@ cd my-app
 
 要从互联网取数据展示的应用，会先撞上收工牌的限制。模拟器发请求的方式和收工牌固件一样，
 所以也会撞上它们。2026 年 11 月 12 日用六个小应用对公共 API
-（Open-Meteo、GitHub 状态页、Frankfurter、BBC 的 RSS、httpbin）和这台电脑上的一个服务实测：
+（几个公开 API、RSS 源和测试接口）和这台电脑上的一个服务实测：
 
 - **请求小端点，只取你要显示的字段。** 应用的堆默认 128 KiB。`res.json()` 大约能在其中
   解析 70 KiB 的 JSON，`res.text()` 约 120 KiB 文本；更大的响应会让应用崩溃
@@ -282,9 +285,9 @@ cd my-app
 - **大响应分块读。** `res.body.getReader()` 让响应体随到随取，一次几千字节；
   每块只留你要的，或用 `indexOf` 和 `slice` 把需要的文本切出来。没有 `TextDecoder`：
   对 ASCII，`String.fromCharCode(...bytes)` 能把一块转成文本。
-- **写最终地址。** 收工牌不跟随重定向：`http://feeds.bbci.co.uk/news/rss.xml` 回了 302，
-  应用拿到空响应体；`api.frankfurter.app` 回了 301，`res.json()` 失败。
-  写重定向指向的那个 `https://` 地址。模拟器的日志会指出它。
+- **写最终地址。** 收工牌不跟随重定向：接口回了 302，应用拿到空响应体；
+  回了 301，`res.json()` 直接失败。写重定向指向的那个 `https://` 地址。
+  模拟器的日志会指出它。
 - **5 秒无数据就结束请求**，报 `"Inactivity timeout"`，从请求发起时开始计——所以响应前
   先思考半天的服务器在收工牌上会失败。流读到一半时 reader 不抛错：
   `reader.read()` 返回 `{ done: true, value: "Inactivity timeout" }`，
@@ -299,7 +302,7 @@ cd my-app
 
 失败的请求，或收工牌不会按你预期处理的应答，都会在 `<cli> logs` 里得到模拟器的一行说明：
 地址、发生了什么、应用看到了什么。收工牌什么都不会说；见
-[日志会说什么](differences.md#日志会记录应用的哪些错误)。
+日志会说什么。
 
 ## 给帖子录一段视频
 
@@ -310,7 +313,7 @@ Post（1080×1920）或 Front display；再按一次停止，Save 对话框会�
 ```text
 <cli> record                                 # media/clip-1.mp4: 5 s of the emulator's window, as you see it
 <cli> record --seconds 10                    # longer: up to 120 s
-<cli> record --layout post                   # 1080×1920: the BUSY Bar alone, for a vertical post
+<cli> record --layout post                   # 1080×1920: the 收工牌 alone, for a vertical post
 <cli> record --gif                           # media/clip-1.gif: the front display, for places that take no video
 ```
 
@@ -332,7 +335,7 @@ Instagram、Telegram 和 Discord 都能直接用这个 MP4。GIF 是正面屏画
 
 ## 提交到应用目录
 
-BUSY 应用目录以拉取请求的形式接收应用：请求只加一个文件 `applications/<app id>/manifest.yml`。
+收工牌应用目录以拉取请求的形式接收应用：请求只加一个文件 `applications/<app id>/manifest.yml`。
 该文件指明你的公开 GitHub 仓库和某个提交；应用目录由此构建并检查应用。
 有两条命令能预先告诉你那些检查会发现什么，并写出这个文件：
 
@@ -378,7 +381,7 @@ BUSY 应用目录以拉取请求的形式接收应用：请求只加一个文件
   ```
 
 - **截图。** 跑起应用后执行 `<cli> screenshot`，或按窗口里收工牌上方的 Screenshot
-  （默认勾选 Front 和 Back；macOS 是 Cmd+Shift+S，Windows 是 Ctrl+Shift+S）：
+  （默认勾选 Front 和 Back；快捷键 Ctrl+Shift+S）：
   `screenshots/front-1.png`（72×16）就是应用在应用目录里的封面；最多收十张，按编号顺序取，
   `<cli> screenshot --back` 加背面屏截图（160×80）。想自己挑或排序，
   就在 `catalog.json` 里把文件列成 `"screenshots"` 和 `"back_screenshots"`。
@@ -490,14 +493,14 @@ BUSY 应用目录以拉取请求的形式接收应用：请求只加一个文件
 - 如果这台电脑上的 GitHub CLI 已登录，窗口会问 "Use <login>?"。**Use <login>** 直接用
   该账号发布：没有新的登录，在模拟器里退出也只是让模拟器忘掉它。
 - **Sign in with another account**，或 GitHub CLI 还没有账号时的首次登录：窗口显示一个验证码，
-  你打开 github.com/login/device、输入并授权 GitHub CLI。账号会加进这台电脑的 GitHub CLI
+  你打开 GitHub 的设备授权页、输入并授权 GitHub CLI。账号会加进这台电脑的 GitHub CLI
   并成为它当前用的那个——你的终端里也一样；原来的账号仍保持登录。你在模拟器里退出时，
   可以把 GitHub CLI 切回原账号，或勾选 **Also sign out GitHub CLI on this computer**。
 
 GitHub CLI 会请求访问你的仓库（公开和私有）、你所在组织的成员资格和你的 gists：
 它向来要这么多，比发布需要的多；模拟器只用它创建一个公开仓库和发向应用目录的请求。
 模拟器和 GitHub CLI 都看不到你的密码，模拟器也从不持有令牌：GitHub CLI 把它存在系统的
-密码存储里（macOS 的登录钥匙串，Windows 的 Credential Manager），所有对 GitHub 的调用都由它发出。
+密码存储里（Windows 的 Credential Manager），所有对 GitHub 的调用都由它发出。
 
 这次登录属于这台电脑上的 GitHub CLI：其他程序——包括 AI agent——也能用。
 模拟器的确认只罩得住它自己的命令。当 GitHub CLI 是模拟器登进去的、且之前没有任何账号时，
@@ -510,17 +513,17 @@ GitHub CLI 会请求访问你的仓库（公开和私有）、你所在组织的
 
 **Send to catalog** 打开向应用目录添加 `applications/<app id>/manifest.yml` 的拉取请求。
 它按应用目录模板原样显示作者 checklist：属实的每一项由你打勾，AI 使用情况也由你选。
-所有项都勾上之前什么都不发送——应用目录标为可选的项（如参加 BUSY JS 应用大赛）可以不勾。
+所有项都勾上之前什么都不发送——应用目录标为可选的项（如参加 收工牌 JS 应用大赛）可以不勾。
 请求的描述就是应用目录自己的模板，带上你勾的框和你选的那一行。它发自你对应用目录的 fork，
 或你有权推送时发自其中一个分支。如果项目在你发布后动过，先重新发布：应用目录构建的
 正是那个提交。同一版本再次发送会把改动并进未结请求；新版本会开新请求。
 
-Send to catalog 把请求发到 BUSY 应用目录，https://github.com/busy-app/busy-apps-catalog；
+Send to catalog 把请求发到应用目录的 GitHub 仓库；
 步骤里写着它。命令行的 `--catalog <owner/name>` 可指定别的应用目录，供开发和测试用。
 
 **Sign out** 让模拟器忘掉这次登录。GitHub CLI 原本就有的账号仍对它保持登录；
 模拟器登进去的也保留，除非你勾选 Also sign out GitHub CLI on this computer。
-GitHub 侧在你撤销前一直保留授权：到 github.com/settings/applications 的 Authorized OAuth Apps
+GitHub 侧在你撤销前一直保留授权：到 GitHub 设置里的 Authorized OAuth Apps 页
 下撤销 **GitHub CLI**。这会让该账号在所有用到 GitHub CLI 的地方退出，不只模拟器。
 
 命令行上的对应操作，需模拟器应用在运行（它持有登录，发送前会问你）：
@@ -540,12 +543,12 @@ GitHub 侧在你撤销前一直保留授权：到 github.com/settings/applicatio
 和 `submission/SUBMIT.md` 会按你的项目列出这些步骤和命令：
 
 1. 在项目文件夹里，提交所有要发布的内容：`git add -A`，然后 `git commit`。
-2. 在 github.com 上建一个新的公开仓库，不带 README、license 和 .gitignore：项目里都有了。
+2. 在 GitHub 上建一个新的公开仓库，不带 README、license 和 .gitignore：项目里都有了。
 3. 把项目接上它并推送：`git remote add origin https://github.com/<your-github-user>/<repository>.git`，
    然后 `git push -u origin main`。
 4. 再打包一次：窗口里的 Build and package，或 `<cli> publish package`。manifest 此时写上
    仓库和提交，`SUBMIT.md` 里是开拉取请求的步骤。
-5. Fork https://github.com/busy-app/busy-apps-catalog，把 `submission/applications/<app id>/manifest.yml`
+5. Fork 应用目录的 GitHub 仓库，把 `submission/applications/<app id>/manifest.yml`
    加进去，路径为 `applications/<app id>/manifest.yml`，别的什么都不改。
 6. 向它的主分支开拉取请求，正文用 `submission/PR-DESCRIPTION.md` 的文字，属实的框打勾。
 

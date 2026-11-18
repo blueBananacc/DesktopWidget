@@ -1,4 +1,4 @@
-# BUSY Bar firmware license information
+# 收工牌 firmware license information
 
 Source code in this repository is covered by one of several different licenses.
 
