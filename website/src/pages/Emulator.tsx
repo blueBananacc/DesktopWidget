@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, RefreshCw, Unplug } from "lucide-react";
+import { RefreshCw, Unplug } from "lucide-react";
 import { Card, PageHeader } from "../ui/Primitives";
 import { QuickApp } from "./QuickApp";
 
@@ -42,11 +42,6 @@ export function Emulator() {
       <PageHeader
         title="模拟器"
         desc="本机运行的设备模拟器：画面、按键与应用运行时和真机一致，可在这里开发调试屏幕程序。"
-        actions={
-          <a className="btn btn-secondary btn-sm" href={EMU_URL} target="_blank" rel="noopener noreferrer">
-            <ExternalLink className="i" style={{ width: 14, height: 14 }} />独立窗口打开
-          </a>
-        }
       />
       {alive === false ? (
         <Card>
