@@ -1,0 +1,9 @@
+{
+  "format_version": 1,
+  "id": "app.sgp.offwork-clock",
+  "name": "Offwork Clock",
+  "version": "0.1.0",
+  "api_version": "27.12.0",
+  "description": "Countdown to off-work time",
+  "author": "sgp"
+}

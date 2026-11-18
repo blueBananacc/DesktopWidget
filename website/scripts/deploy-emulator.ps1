@@ -31,6 +31,10 @@ New-Item -ItemType Directory -Force "$ctx\emulator\packages\engine\build" | Out-
 robocopy "$EmulatorRepo\packages\engine" "$ctx\emulator\packages\engine" "*.mjs" "firmware.json" | Out-Null
 robocopy "$EmulatorRepo\packages\engine\build\1.3.1" "$ctx\emulator\packages\engine\build\1.3.1" /E | Out-Null
 robocopy "$EmulatorRepo\packages\engine\build\apps-assets" "$ctx\emulator\packages\engine\build\apps-assets" /E | Out-Null
+# 示例应用：上游 examples/ + 本仓库 deploy/examples/（收工牌自己的示例）合并进 emulator/examples
+# —— EXAMPLES_DIR 就指这个目录，不带它"创建应用→模板应用"只剩官方模板
+robocopy "$EmulatorRepo\examples" "$ctx\emulator\examples" /E | Out-Null
+robocopy "$deploy\examples" "$ctx\emulator\examples" /E | Out-Null
 # shell 桥 + 共享看板 presence 服务（本仓库 scripts/ 下的三个文件）
 Copy-Item "$here\scripts\emulator-shell.mjs", "$here\scripts\emu-shell-server.mjs", "$here\scripts\presence-server.mjs" "$ctx\shell\"
 Copy-Item "$deploy\Dockerfile", "$deploy\run.mjs" $ctx
